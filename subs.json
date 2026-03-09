@@ -1,0 +1,28 @@
+{
+  "default": {
+    "name": "vless-default",
+    "url": "https://example.com/my-default-vless"
+  },
+  "subscriptions": [
+    {
+      "name": "Blanc",
+      "url": "https://example.com/blanc/sub",
+      "domains": [
+        "chatgpt.com",
+        "openai.com",
+        "oaiusercontent.com"
+      ],
+      "exclude": ["Россия", "traffic", "expire"]
+    },
+    {
+      "name": "Liberty",
+      "url": "https://example.com/liberty/sub",
+      "domains": [
+        "gemini.google.com",
+        "anthropic.com",
+        "claude.ai"
+      ],
+      "exclude": ["Россия", "Torrent"]
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "log": {
+    "level": "warn"
+  },
+  "inbounds": [
+    {
+      "type": "tun",
+      "interface_name": "tun0",
+      "domain_strategy": "ipv4_only",
+      "address": ["172.16.250.1/30"],
+      "auto_route": false,
+      "strict_route": false,
+      "sniff": true,
+      "sniff_override_destination": false
+    }
+  ],
+  "outbounds": [
+    "__DEFAULT_OUTBOUND__",
+    "__VLESS_OUTBOUNDS__",
+    "__URLTEST_OUTBOUNDS__",
+    {
+      "type": "direct",
+      "tag": "direct"
+    },
+    {
+      "type": "block",
+      "tag": "block"
+    }
+  ],
+  "route": {
+    "rules": [
+      "__ROUTE_RULES__"
+    ],
+    "final": "__DEFAULT_TAG__",
+    "auto_detect_interface": true
+  }
+}
