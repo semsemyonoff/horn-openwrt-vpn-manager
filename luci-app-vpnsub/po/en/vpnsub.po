@@ -1,0 +1,184 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "VPN Subscriptions"
+msgstr "VPN Subscriptions"
+
+msgid "Global settings"
+msgstr "Global settings"
+
+msgid "Log level"
+msgstr "Log level"
+
+msgid "Logging verbosity for sing-box"
+msgstr "Logging verbosity for sing-box"
+
+msgid "Subscriptions"
+msgstr "Subscriptions"
+
+msgid "Add subscription"
+msgstr "Add subscription"
+
+msgid "Subscription"
+msgstr "Subscription"
+
+msgid "Subscription name"
+msgstr "Subscription name"
+
+msgid "Name"
+msgstr "Name"
+
+msgid "URL"
+msgstr "URL"
+
+msgid "Default"
+msgstr "Default"
+
+msgid "Use as default outbound (fallback route)"
+msgstr "Use as default outbound (fallback route)"
+
+msgid "Exactly one subscription must be marked as default"
+msgstr "Exactly one subscription must be marked as default"
+
+msgid "Domains"
+msgstr "Domains"
+
+msgid "Traffic to these domains will be routed through this subscription"
+msgstr "Traffic to these domains will be routed through this subscription"
+
+msgid "Exclude filters"
+msgstr "Exclude filters"
+
+msgid "Servers whose names contain any of these strings will be skipped (case-insensitive)"
+msgstr "Servers whose names contain any of these strings will be skipped (case-insensitive)"
+
+msgid "Russia"
+msgstr "Russia"
+
+msgid "Remove"
+msgstr "Remove"
+
+msgid "Save"
+msgstr "Save"
+
+msgid "Run script"
+msgstr "Run script"
+
+msgid "Script output"
+msgstr "Script output"
+
+msgid "Starting…"
+msgstr "Starting…"
+
+msgid "Settings saved"
+msgstr "Settings saved"
+
+msgid "Save error: "
+msgstr "Save error: "
+
+msgid "Error: "
+msgstr "Error: "
+
+msgid "Please select a default subscription"
+msgstr "Please select a default subscription"
+
+msgid "Only one subscription can be set as default"
+msgstr "Only one subscription can be set as default"
+
+msgid "Run & Output"
+msgstr "Run & Output"
+
+msgid "Dry run"
+msgstr "Dry run"
+
+msgid "Debug (-vvv)"
+msgstr "Debug (-vvv)"
+
+msgid "Test"
+msgstr "Test"
+
+msgid "VPN connectivity test"
+msgstr "VPN connectivity test"
+
+msgid "Sends a request through tun0 and reports outgoing IP, geo-location, and which outbound handled it."
+msgstr "Sends a request through tun0 and reports outgoing IP, geo-location, and which outbound handled it."
+
+msgid "Testing… (up to 30s)"
+msgstr "Testing… (up to 30s)"
+
+msgid "VPN status"
+msgstr "VPN status"
+
+msgid "Connected"
+msgstr "Connected"
+
+msgid "Failed"
+msgstr "Failed"
+
+msgid "VPN IP"
+msgstr "VPN IP"
+
+msgid "Location"
+msgstr "Location"
+
+msgid "Outbound"
+msgstr "Outbound"
+
+msgid "Direct IP"
+msgstr "Direct IP"
+
+msgid "Routing"
+msgstr "Routing"
+
+msgid "Same IP as direct — traffic may bypass VPN"
+msgstr "Same IP as direct — traffic may bypass VPN"
+
+msgid "Different from direct IP"
+msgstr "Different from direct IP"
+
+msgid "no response from backend"
+msgstr "no response from backend"
+
+msgid "Text mode"
+msgstr "Text mode"
+
+msgid "List mode"
+msgstr "List mode"
+
+msgid "Logs"
+msgstr "Logs"
+
+msgid "sing-box system log"
+msgstr "sing-box system log"
+
+msgid "Auto-refresh (5s)"
+msgstr "Auto-refresh (5s)"
+
+msgid "Refresh"
+msgstr "Refresh"
+
+msgid "Loading…"
+msgstr "Loading…"
+
+msgid "(no sing-box entries in syslog)"
+msgstr "(no sing-box entries in syslog)"
+
+msgid "No log yet. Run the script to see output."
+msgstr "No log yet. Run the script to see output."
+
+msgid "Clear"
+msgstr "Clear"
+
+msgid "(waiting for output…)"
+msgstr "(waiting for output…)"
+
+msgid "Name is required"
+msgstr "Name is required"
+
+msgid "URL is required"
+msgstr "URL is required"
+
+msgid "Enter a valid URL (https://...)"
+msgstr "Enter a valid URL (https://...)"

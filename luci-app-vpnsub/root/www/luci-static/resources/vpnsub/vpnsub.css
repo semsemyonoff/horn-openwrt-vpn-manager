@@ -1,0 +1,249 @@
+/* ── Tabs ────────────────────────────────────────────────────────────────── */
+.vpnsub-tabbar {
+    display: flex;
+    border-bottom: 2px solid var(--border-color-low, #444);
+    margin-bottom: 1em;
+}
+
+.vpnsub-tab {
+    background: none;
+    border: none;
+    border-bottom: 3px solid transparent;
+    margin-bottom: -2px;
+    padding: 0.5em 1.25em;
+    cursor: pointer;
+    font-size: 1em;
+    color: var(--text-low, #888);
+    transition: color 0.15s, border-color 0.15s;
+}
+
+.vpnsub-tab:hover {
+    color: var(--text-high, #eee);
+}
+
+.vpnsub-tab-active {
+    color: var(--text-high, #fff) !important;
+    border-bottom-color: var(--primary-color, #509eaf);
+    font-weight: 600;
+}
+
+.vpnsub-tab-pane {
+    padding-top: 0.25em;
+}
+
+/* ── Validation ──────────────────────────────────────────────────────────── */
+.vpnsub-invalid {
+    border-color: #e44 !important;
+    outline-color: #e44 !important;
+}
+
+.vpnsub-errmsg {
+    color: #e44;
+    font-size: 0.85em;
+    margin-top: 3px;
+}
+
+/* ── Run options (checkboxes) ────────────────────────────────────────────── */
+.vpnsub-run-options {
+    display: flex;
+    gap: 1.5em;
+    align-items: center;
+    margin-bottom: 0.75em;
+}
+
+.vpnsub-run-option {
+    display: flex;
+    align-items: center;
+    gap: 0.3em;
+    cursor: pointer;
+    user-select: none;
+}
+
+/* ── Log actions bar ─────────────────────────────────────────────────────── */
+.vpnsub-log-actions {
+    margin-bottom: 0.6em;
+}
+
+/* ── Subscription card ───────────────────────────────────────────────────── */
+.vpnsub-sub-card {
+    border: 1px solid var(--border-color-low, #444);
+    border-radius: 4px;
+    margin-bottom: 1em;
+    padding: 0.75em 1em;
+}
+
+.vpnsub-sub-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.5em;
+}
+
+.vpnsub-sub-header-left {
+    display: flex;
+    align-items: center;
+    gap: 0.6em;
+}
+
+.vpnsub-sub-title {
+    font-size: 1em;
+}
+
+.vpnsub-sub-status {
+    font-size: 0.8em;
+    color: var(--primary-color, #509eaf);
+    font-family: monospace;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 28em;
+}
+
+.vpnsub-sub-remove {
+    margin-left: auto;
+}
+
+/* ── DynamicList wrapper & toolbar ──────────────────────────────────────── */
+.vpnsub-dynlist-wrap {
+    max-width: 40em;
+}
+
+.vpnsub-dynlist-toolbar {
+    margin-bottom: 4px;
+}
+
+.vpnsub-dynlist-toggle {
+    font-size: 0.8em;
+    padding: 1px 0.6em;
+    opacity: 0.7;
+}
+
+.vpnsub-dynlist-toggle:hover {
+    opacity: 1;
+}
+
+.vpnsub-dynlist-textarea {
+    width: 100%;
+    box-sizing: border-box;
+    font-family: monospace;
+    font-size: 0.9em;
+    resize: vertical;
+}
+
+/* ── DynamicList ─────────────────────────────────────────────────────────── */
+.vpnsub-dynlist {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.vpnsub-dynlist-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.vpnsub-dynlist-row input {
+    flex: 1;
+}
+
+.vpnsub-dynlist-remove {
+    flex-shrink: 0;
+    min-width: 2em;
+    padding: 0 0.4em;
+    color: #e44;
+    border-color: #e44;
+    background: transparent;
+    font-weight: bold;
+}
+
+.vpnsub-dynlist-remove:hover {
+    background: rgba(220, 50, 50, 0.15);
+}
+
+.vpnsub-dynlist-add {
+    align-self: flex-start;
+    min-width: 2em;
+    padding: 0 0.6em;
+    color: #4c4;
+    border-color: #4c4;
+    background: transparent;
+    font-weight: bold;
+}
+
+.vpnsub-dynlist-add:hover {
+    background: rgba(50, 200, 50, 0.15);
+}
+
+/* ── Test tab ────────────────────────────────────────────────────────────── */
+.vpnsub-test-row-input {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    margin-bottom: 0.5em;
+}
+
+.vpnsub-test-urlinput {
+    flex: 1;
+    max-width: 36em;
+}
+
+.vpnsub-test-spinner {
+    margin-top: 1em;
+    color: var(--text-low, #888);
+    font-style: italic;
+}
+
+.vpnsub-test-error {
+    margin-top: 0.75em;
+    color: #e44;
+}
+
+.vpnsub-test-table {
+    margin-top: 1em;
+    display: grid;
+    grid-template-columns: minmax(8em, auto) 1fr;
+    gap: 0;
+    border: 1px solid var(--border-color-low, #444);
+    border-radius: 4px;
+    overflow: hidden;
+    max-width: 42em;
+}
+
+.vpnsub-test-kv {
+    display: contents;
+}
+
+.vpnsub-test-kv:not(:last-child) .vpnsub-test-key,
+.vpnsub-test-kv:not(:last-child) .vpnsub-test-val {
+    border-bottom: 1px solid var(--border-color-low, #333);
+}
+
+.vpnsub-test-key {
+    background: var(--mid-background-color, #2a2a2a);
+    padding: 0.4em 0.75em;
+    font-weight: 600;
+    font-size: 0.88em;
+    white-space: nowrap;
+}
+
+.vpnsub-test-val {
+    padding: 0.4em 0.75em;
+    font-family: monospace;
+    font-size: 0.88em;
+    word-break: break-word;
+}
+
+/* ── Log output ──────────────────────────────────────────────────────────── */
+.vpnsub-log {
+    background: #1a1a1a;
+    color: #e0e0e0;
+    font-family: monospace;
+    font-size: 0.85em;
+    padding: 0.75em;
+    border-radius: 4px;
+    max-height: 24em;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+}

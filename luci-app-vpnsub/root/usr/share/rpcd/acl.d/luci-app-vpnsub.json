@@ -1,0 +1,15 @@
+{
+    "luci-app-vpnsub": {
+        "description": "LuCI access for vpnsub",
+        "read": {
+            "ubus": {
+                "vpnsub": [ "get_config", "get_log", "get_syslog", "get_sb_status" ]
+            }
+        },
+        "write": {
+            "ubus": {
+                "vpnsub": [ "set_config", "run_script", "test_url" ]
+            }
+        }
+    }
+}

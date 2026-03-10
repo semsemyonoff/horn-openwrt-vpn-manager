@@ -1,0 +1,12 @@
+{
+    "admin/services/vpnsub": {
+        "title": "VPN Subscriptions",
+        "action": {
+            "type": "view",
+            "path": "vpnsub/config"
+        },
+        "depends": {
+            "acl": [ "luci-app-vpnsub" ]
+        }
+    }
+}
