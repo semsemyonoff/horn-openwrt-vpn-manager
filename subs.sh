@@ -9,24 +9,49 @@
 # Requires: curl, base64, awk, sed, grep, jqы
 # ============================================================
 
-SUBS_CONF="/etc/sing-box/subs.json"
-CONFIG_TEMPLATE="/etc/sing-box/config.template.json"
-CONFIG="/etc/sing-box/config.json"
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+SUBS_CONF="${SCRIPT_DIR}/subs.json"
+CONFIG_TEMPLATE="${SCRIPT_DIR}/config.template.json"
+CONFIG="${SCRIPT_DIR}/config.json"
 TMPDIR="/tmp/sing-box-sub"
 LOG="/tmp/sing-box-sub.log"
+DRY_RUN=0
+VERBOSE=0
+
+# Parse arguments
+for arg in "$@"; do
+    case "$arg" in
+        --dry-run|-n) DRY_RUN=1 ;;
+        -vvv) VERBOSE=3 ;;
+        -vv)  VERBOSE=2 ;;
+        -v)   VERBOSE=1 ;;
+    esac
+done
 
 log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG"
-    echo "$1"
+    if [ "$DRY_RUN" -eq 1 ]; then
+        echo "[DRY-RUN] $1"
+    else
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG"
+        echo "$1"
+    fi
+}
+
+# vlog LEVEL MESSAGE — log only if VERBOSE >= LEVEL
+vlog() {
+    [ "$VERBOSE" -ge "$1" ] && log "$2"
 }
 
 # Returns 0 (true) if server name matches an exclude pattern
+# shellcheck disable=SC3043
 is_excluded() {
     local name="$1"
-    local name_lower=$(echo "$name" | tr 'A-Z' 'a-z')
+    local name_lower
+    name_lower=$(echo "$name" | tr '[:upper:]' '[:lower:]')
 
     while IFS= read -r pattern; do
-        local pattern_lower=$(echo "$pattern" | tr 'A-Z' 'a-z')
+        local pattern_lower
+        pattern_lower=$(echo "$pattern" | tr '[:upper:]' '[:lower:]')
         case "$name_lower" in
             *"$pattern_lower"*) return 0 ;;
         esac
@@ -37,6 +62,7 @@ is_excluded() {
 
 # Parse a VLESS URI and print a sing-box outbound JSON object
 # Format: vless://uuid@server:port?security=reality&sni=...&fp=...&pbk=...&sid=...&flow=...#name
+# shellcheck disable=SC3043
 parse_uri() {
     local line="$1"
     local sub_name="$2"
@@ -53,12 +79,13 @@ parse_uri() {
     local params="${rest#*\?}"
     params="${params%%#*}"
 
-    local sni=$(echo "$params" | tr '&' '\n' | grep "^sni=" | cut -d= -f2-)
-    local pbk=$(echo "$params" | tr '&' '\n' | grep "^pbk=" | cut -d= -f2-)
-    local sid=$(echo "$params" | tr '&' '\n' | grep "^sid=" | cut -d= -f2-)
-    local flow=$(echo "$params" | tr '&' '\n' | grep "^flow=" | cut -d= -f2-)
-    local fp=$(echo "$params" | tr '&' '\n' | grep "^fp=" | cut -d= -f2-)
-    local security=$(echo "$params" | tr '&' '\n' | grep "^security=" | cut -d= -f2-)
+    local sni pbk sid flow fp security
+    sni=$(echo "$params" | tr '&' '\n' | grep "^sni=" | cut -d= -f2-)
+    pbk=$(echo "$params" | tr '&' '\n' | grep "^pbk=" | cut -d= -f2-)
+    sid=$(echo "$params" | tr '&' '\n' | grep "^sid=" | cut -d= -f2-)
+    flow=$(echo "$params" | tr '&' '\n' | grep "^flow=" | cut -d= -f2-)
+    fp=$(echo "$params" | tr '&' '\n' | grep "^fp=" | cut -d= -f2-)
+    security=$(echo "$params" | tr '&' '\n' | grep "^security=" | cut -d= -f2-)
 
     local json="    {
       \"type\": \"vless\",
@@ -104,55 +131,77 @@ if [ ! -f "$SUBS_CONF" ]; then
 fi
 
 SUB_COUNT=$(jq '.subscriptions | length // 0' "$SUBS_CONF" 2>/dev/null || echo 0)
-[ "$SUB_COUNT" -gt 0 ] && log "Found $SUB_COUNT subscription(s)" || log "No subscriptions defined, default only"
+if [ "$SUB_COUNT" -eq 0 ]; then
+    log "ERROR: No subscriptions defined in $SUBS_CONF"
+    exit 1
+fi
+log "Found $SUB_COUNT subscription(s)"
 
-# ---- Fetch and parse default outbound ----
-def_name=$(jq -r '.default.name' "$SUBS_CONF")
-def_url=$(jq -r '.default.url' "$SUBS_CONF")
-
-log "Downloading default outbound (${def_name})..."
-def_line=$(curl -sL -m 15 "$def_url" | grep "^vless://")
-
-if [ -z "$def_line" ]; then
-    log "ERROR: default URL did not return a VLESS URI"
+DEF_COUNT=$(jq '[.subscriptions[] | select(.default == true)] | length' "$SUBS_CONF" 2>/dev/null || echo 0)
+if [ "$DEF_COUNT" -eq 0 ]; then
+    log "ERROR: No default subscription defined (set \"default\": true on one subscription)"
+    exit 1
+fi
+if [ "$DEF_COUNT" -gt 1 ]; then
+    log "ERROR: Multiple default subscriptions defined (only one allowed)"
     exit 1
 fi
 
-# Parse using the name as tag directly (no index suffix)
-printf '%s,\n' "$(parse_uri "$def_line" "$def_name" "" "$def_name")" > "$TMPDIR/default.tmp"
-log "  default: OK (tag: ${def_name})"
-
 # ---- Process each subscription ----
+def_name=$(jq -r '.subscriptions[] | select(.default == true) | .name' "$SUBS_CONF")
 VLESS_OUTBOUNDS=""
 URLTEST_OUTBOUNDS=""
 ROUTE_RULES=""
 TOTAL_SERVERS=0
+: > "$TMPDIR/default.tmp"
 
 i=0
 while [ "$i" -lt "$SUB_COUNT" ]; do
     sub_name=$(jq -r ".subscriptions[$i].name" "$SUBS_CONF")
     sub_url=$(jq -r ".subscriptions[$i].url" "$SUBS_CONF")
+    is_default=$(jq -r ".subscriptions[$i].default // false" "$SUBS_CONF")
+    rawfile="$TMPDIR/${sub_name}.raw"
     outfile="$TMPDIR/${sub_name}.txt"
 
-    # Extract exclude patterns for this subscription
     jq -r ".subscriptions[$i].exclude[]? | ascii_downcase" "$SUBS_CONF" > "$TMPDIR/exclude.tmp"
 
+    vlog 3 "  [dbg] rawfile=${rawfile} outfile=${outfile}"
     log "Downloading ${sub_name}..."
-    if ! curl -sL -m 15 "$sub_url" | base64 -d > "$outfile" 2>/dev/null; then
-        log "  ${sub_name}: download failed, skipping"
+    http_code=$(curl -sL -m 15 -o "$rawfile" -w "%{http_code}" "$sub_url" 2>/dev/null)
+
+    if [ "$http_code" = "000" ] || [ -z "$http_code" ]; then
+        log "  ${sub_name}: connection error, skipping"
+        i=$((i + 1))
+        continue
+    fi
+    if [ "$http_code" != "200" ]; then
+        log "  ${sub_name}: HTTP ${http_code}, skipping"
+        i=$((i + 1))
+        continue
+    fi
+    vlog 3 "  [dbg] ${sub_name}: HTTP ${http_code}, $(wc -c < "$rawfile" | tr -d ' ') bytes"
+
+    # Auto-detect encoding: raw VLESS or base64
+    if grep -q "^vless://" "$rawfile" 2>/dev/null; then
+        cp "$rawfile" "$outfile"
+        vlog 1 "  ${sub_name}: raw format"
+    elif base64 -d < "$rawfile" > "$outfile" 2>/dev/null && grep -q "^vless://" "$outfile"; then
+        vlog 1 "  ${sub_name}: base64 format"
+    else
+        log "  ${sub_name}: no VLESS URIs found, skipping"
         i=$((i + 1))
         continue
     fi
 
     lines=$(grep -c "^vless://" "$outfile" 2>/dev/null || echo 0)
-    log "  ${sub_name}: $lines servers found"
+    log "  ${sub_name}: $lines server(s) found"
 
-    # Parse VLESS URIs for this subscription
     sub_tags=""
     idx=0
     skipped=0
+    default_written=0
 
-    while IFS= read -r line; do
+    while IFS= read -r line || [ -n "$line" ]; do
         echo "$line" | grep -q "^vless://" || continue
 
         # Extract server name (after #) for filtering
@@ -162,13 +211,33 @@ while [ "$i" -lt "$SUB_COUNT" ]; do
 
         if is_excluded "$server_name"; then
             skipped=$((skipped + 1))
-            log "  SKIP: $server_name (matched filter)"
+            vlog 1 "  SKIP: $server_name (matched filter)"
             continue
+        fi
+
+        # First URI of the default subscription becomes the default outbound
+        if [ "$is_default" = "true" ] && [ "$default_written" -eq 0 ]; then
+            printf '%s,\n' "$(parse_uri "$line" "$sub_name" "" "$sub_name")" > "$TMPDIR/default.tmp"
+            default_written=1
+            log "  default outbound: OK (tag: ${sub_name})"
         fi
 
         idx=$((idx + 1))
         tag="${sub_name}-${idx}"
         outbound=$(parse_uri "$line" "$sub_name" "$idx")
+
+        vlog 2 "  KEEP: ${tag} (${server_name})"
+
+        if [ "$VERBOSE" -ge 3 ]; then
+            _rest="${line#vless://*@}"
+            _sp="${_rest%%\?*}"
+            _params="${_rest#*\?}"; _params="${_params%%#*}"
+            _sni=$(echo "$_params" | tr '&' '\n' | grep "^sni=" | cut -d= -f2-)
+            _sec=$(echo "$_params" | tr '&' '\n' | grep "^security=" | cut -d= -f2-)
+            _fp=$(echo "$_params" | tr '&' '\n' | grep "^fp=" | cut -d= -f2-)
+            _flow=$(echo "$_params" | tr '&' '\n' | grep "^flow=" | cut -d= -f2-)
+            log "    [dbg] addr=${_sp} security=${_sec} sni=${_sni} fp=${_fp} flow=${_flow}"
+        fi
 
         [ -n "$VLESS_OUTBOUNDS" ] && VLESS_OUTBOUNDS="$VLESS_OUTBOUNDS,
 "
@@ -182,8 +251,9 @@ while [ "$i" -lt "$SUB_COUNT" ]; do
 
     log "  ${sub_name}: kept $idx, skipped $skipped"
 
-    if [ -n "$sub_tags" ]; then
-        # urltest outbound — selects best server within this subscription
+    # urltest + route rules only for subscriptions with domains defined
+    domains=$(jq -c ".subscriptions[$i].domains // empty" "$SUBS_CONF")
+    if [ -n "$sub_tags" ] && [ -n "$domains" ]; then
         urltest="    {
       \"type\": \"urltest\",
       \"tag\": \"${sub_name}-best\",
@@ -196,10 +266,8 @@ while [ "$i" -lt "$SUB_COUNT" ]; do
 "
         URLTEST_OUTBOUNDS="${URLTEST_OUTBOUNDS}${urltest}"
 
-        # Route rule — domains for this subscription routed to its urltest group
-        domain_arr=$(jq -c ".subscriptions[$i].domains" "$SUBS_CONF")
         rule="      {
-        \"domain_suffix\": ${domain_arr},
+        \"domain_suffix\": ${domains},
         \"outbound\": \"${sub_name}-best\"
       }"
         [ -n "$ROUTE_RULES" ] && ROUTE_RULES="$ROUTE_RULES,
@@ -210,12 +278,19 @@ while [ "$i" -lt "$SUB_COUNT" ]; do
     i=$((i + 1))
 done
 
+if [ ! -s "$TMPDIR/default.tmp" ]; then
+    log "ERROR: default subscription (${def_name}) did not produce a valid outbound"
+    exit 1
+fi
+
 if [ "$SUB_COUNT" -gt 0 ] && [ "$TOTAL_SERVERS" -eq 0 ]; then
     log "ERROR: No valid servers parsed from any subscription"
     exit 1
 fi
 
 log "Total servers: $TOTAL_SERVERS"
+
+LOG_LEVEL=$(jq -r '.log_level // "warn"' "$SUBS_CONF")
 
 # ---- Build final config ----
 # Write non-empty blocks with trailing comma (more items follow in the outbounds array).
@@ -235,10 +310,16 @@ printf '%s\n' "$ROUTE_RULES" > "$TMPDIR/rules.tmp"
 awk \
     -v default_file="$TMPDIR/default.tmp" \
     -v default_tag="$def_name" \
+    -v log_level="$LOG_LEVEL" \
     -v vless_file="$TMPDIR/vless.tmp" \
     -v urltest_file="$TMPDIR/urltest.tmp" \
     -v rules_file="$TMPDIR/rules.tmp" \
-'/"__DEFAULT_OUTBOUND__"/ {
+'/__LOG_LEVEL__/ {
+    sub(/__LOG_LEVEL__/, log_level)
+    print
+    next
+}
+/"__DEFAULT_OUTBOUND__"/ {
     while ((getline line < default_file) > 0) print line
     next
 }
@@ -263,6 +344,14 @@ awk \
 ' "$CONFIG_TEMPLATE" > "${CONFIG}.new"
 
 # ---- Validate and apply ----
+if [ "$DRY_RUN" -eq 1 ]; then
+    log "Dry-run: generated config preview (${CONFIG}.new):"
+    cat "${CONFIG}.new"
+    log "Dry-run: skipping sing-box check, apply, and restart"
+    rm -f "${CONFIG}.new"
+    exit 0
+fi
+
 if sing-box check -c "${CONFIG}.new" 2>&1; then
     [ -f "$CONFIG" ] && cp "$CONFIG" "${CONFIG}.bak"
     mv "${CONFIG}.new" "$CONFIG"

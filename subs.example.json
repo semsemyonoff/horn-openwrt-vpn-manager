@@ -1,9 +1,11 @@
 {
-  "default": {
-    "name": "vless-default",
-    "url": "https://example.com/my-default-vless"
-  },
+  "log_level": "warn",
   "subscriptions": [
+    {
+      "name": "vless-default",
+      "url": "https://example.com/my-default-vless",
+      "default": true
+    },
     {
       "name": "Blanc",
       "url": "https://example.com/blanc/sub",
