@@ -15,6 +15,12 @@ msgstr "Log level"
 msgid "Logging verbosity for sing-box"
 msgstr "Logging verbosity for sing-box"
 
+msgid "URL test"
+msgstr "URL test"
+
+msgid "URL used by urltest groups to measure latency"
+msgstr "URL used by urltest groups to measure latency"
+
 msgid "Subscriptions"
 msgstr "Subscriptions"
 
@@ -47,6 +53,12 @@ msgstr "Domains"
 
 msgid "Traffic to these domains will be routed through this subscription"
 msgstr "Traffic to these domains will be routed through this subscription"
+
+msgid "IP / CIDR"
+msgstr "IP / CIDR"
+
+msgid "Traffic to these IP ranges will be routed through this subscription"
+msgstr "Traffic to these IP ranges will be routed through this subscription"
 
 msgid "Exclude filters"
 msgstr "Exclude filters"

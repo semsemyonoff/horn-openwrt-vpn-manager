@@ -156,6 +156,39 @@ function isValidUrl(s) {
 	return /^https?:\/\/.+/.test(s);
 }
 
+// ── Collapsible dynList row ───────────────────────────────────────────────────
+function makeCollapsible(label, widget, description) {
+	var badge  = E('span', { 'class': 'vpnsub-count-badge' });
+	var arrow  = E('span', { 'class': 'vpnsub-collapse-arrow' }, '▶');
+	var body   = E('div',  { 'class': 'vpnsub-collapse-body', 'style': 'display:none' }, [
+		widget.node
+	]);
+	if (description) {
+		body.appendChild(E('div', { 'class': 'vpnsub-collapse-description' }, description));
+	}
+
+	function updateBadge() {
+		var n = widget.getValue().length;
+		badge.textContent  = n > 0 ? String(n) : '0';
+		badge.style.opacity = n > 0 ? '1' : '0.4';
+	}
+
+	updateBadge();
+
+	var toggle = E('div', {
+		'class': 'vpnsub-collapse-toggle',
+		'click': function() {
+			var open = body.style.display !== 'none';
+			body.style.display  = open ? 'none' : '';
+			arrow.textContent   = open ? '▶' : '▼';
+			badge.style.display = open ? '' : 'none';
+			if (open) updateBadge();
+		}
+	}, [arrow, label, ' ', badge]);
+
+	return E('div', { 'class': 'cbi-value vpnsub-routing-row' }, [toggle, body]);
+}
+
 // ── Tab switcher ──────────────────────────────────────────────────────────────
 function makeTabs(tabs) {
 	// tabs = [{id, label, content}]
@@ -206,7 +239,8 @@ return view.extend({
 		        : { log_level: 'warn', subscriptions: [] };
 
 		// Proxies map from sing-box REST API (may be empty if API is down)
-		var proxies = (sbData && sbData.proxies) ? sbData.proxies : {};
+		var proxies  = (sbData && sbData.proxies)   ? sbData.proxies   : {};
+		var tagNames = (sbData && sbData.tag_names) ? sbData.tag_names : {};
 
 		self._widgets = {};
 		self._subIdx  = (cfg.subscriptions || []).length;
@@ -219,14 +253,24 @@ return view.extend({
 			logLevelSel.appendChild(o);
 		});
 
+		var testUrlSettingInput = E('input', {
+			'type': 'text',
+			'class': 'cbi-input-text',
+			'id': 'vpnsub-test-url-setting',
+			'value': cfg.test_url || 'https://www.gstatic.com/generate_204',
+			'placeholder': 'https://www.gstatic.com/generate_204'
+		});
+
 		var globalSection = E('div', { 'class': 'cbi-section' }, [
 			E('legend', {}, _('Global settings')),
-			formRow(_('Log level'), logLevelSel, _('Logging verbosity for sing-box'))
+			formRow(_('Log level'), logLevelSel, _('Logging verbosity for sing-box')),
+			formRow(_('URL test'), testUrlSettingInput,
+				_('URL used by urltest groups to measure latency'))
 		]);
 
 		var subList = E('div', { 'id': 'vpnsub-sub-list' });
 		(cfg.subscriptions || []).forEach(function(sub, i) {
-			subList.appendChild(self._makeCard(sub, i, proxies));
+			subList.appendChild(self._makeCard(sub, i, proxies, tagNames));
 		});
 
 		var addBtn = E('button', {
@@ -379,13 +423,14 @@ return view.extend({
 	},
 
 	// ── Render one subscription card ──────────────────────────────────────────
-	_makeCard: function(sub, idx, proxies) {
+	_makeCard: function(sub, idx, proxies, tagNames) {
 		var self   = this;
 		var cardId = 'vpnsub-sub-' + idx;
 
 		var domainsW = dynList(sub.domains || [], _('example.com'));
+		var ipW      = dynList(sub.ip      || [], '192.168.0.0/16');
 		var excludeW = dynList(sub.exclude || [], _('Russia'));
-		self._widgets[idx] = { domains: domainsW, exclude: excludeW };
+		self._widgets[idx] = { domains: domainsW, ip: ipW, exclude: excludeW };
 
 		var nameInput = E('input', {
 			'type': 'text',
@@ -407,7 +452,8 @@ return view.extend({
 			'type': 'radio',
 			'name': 'vpnsub-default',
 			'class': 'vpnsub-sub-default',
-			'value': String(idx)
+			'value': String(idx),
+			'change': function() { self._updateDomainVisibility(); }
 		});
 		if (sub.default === true) defInput.checked = true;
 
@@ -426,14 +472,21 @@ return view.extend({
 		var groupProxy = (proxies && groupKey) ? proxies[groupKey] : null;
 		var statusEl   = null;
 		if (groupProxy && groupProxy.now) {
-			statusEl = E('span', { 'class': 'vpnsub-sub-status' }, '● ' + groupProxy.now);
-		} else if (proxies && groupKey && Object.keys(proxies).length > 0 && !groupProxy) {
-			// API is up but group not found (subscription may not be deployed yet)
-			statusEl = null;
-		} else if (!proxies || Object.keys(proxies).length === 0) {
-			// API offline — show nothing (silent)
-			statusEl = null;
+			var nowTag  = groupProxy.now;
+			var nowName = (tagNames && tagNames[nowTag]) ? tagNames[nowTag] : null;
+			var label   = nowName ? nowTag + ' (' + nowName + ')' : nowTag;
+			statusEl = E('span', { 'class': 'vpnsub-sub-status' }, '● ' + label);
 		}
+
+		var domainsRow = makeCollapsible(
+			_('Domains'), domainsW,
+			_('Traffic to these domains will be routed through this subscription'));
+		if (sub.default === true) domainsRow.style.display = 'none';
+
+		var ipRow = makeCollapsible(
+			_('IP / CIDR'), ipW,
+			_('Traffic to these IP ranges will be routed through this subscription'));
+		if (sub.default === true) ipRow.style.display = 'none';
 
 		return E('div', {
 			'class': 'cbi-section-node vpnsub-sub-card',
@@ -453,8 +506,8 @@ return view.extend({
 				defInput,
 				'\u00a0' + _('Use as default outbound (fallback route)')
 			]), _('Exactly one subscription must be marked as default')),
-			formRow(_('Domains'), domainsW.node,
-				_('Traffic to these domains will be routed through this subscription')),
+			domainsRow,
+			ipRow,
 			formRow(_('Exclude filters'), excludeW.node,
 				_('Servers whose names contain any of these strings will be skipped'))
 		]);
@@ -462,9 +515,11 @@ return view.extend({
 
 	// ── Collect + validate ────────────────────────────────────────────────────
 	_collectConfig: function() {
-		var self  = this;
-		var level = document.getElementById('vpnsub-log-level').value;
-		var subs  = [];
+		var self    = this;
+		var level   = document.getElementById('vpnsub-log-level').value;
+		var testUrl = document.getElementById('vpnsub-test-url-setting').value.trim()
+		            || 'https://www.gstatic.com/generate_204';
+		var subs    = [];
 
 		Array.prototype.forEach.call(
 			document.querySelectorAll('.vpnsub-sub-card'),
@@ -475,17 +530,19 @@ return view.extend({
 				var url     = card.querySelector('.vpnsub-sub-url').value.trim();
 				var isDef   = card.querySelector('.vpnsub-sub-default').checked;
 				var domains = w.domains ? w.domains.getValue() : [];
+				var ip      = w.ip      ? w.ip.getValue()      : [];
 				var exclude = w.exclude ? w.exclude.getValue() : [];
 
 				var sub = { name: name, url: url };
 				if (isDef)          sub.default = true;
 				if (domains.length) sub.domains = domains;
+				if (ip.length)      sub.ip      = ip;
 				if (exclude.length) sub.exclude = exclude;
 				subs.push(sub);
 			}
 		);
 
-		return { log_level: level, subscriptions: subs };
+		return { log_level: level, test_url: testUrl, subscriptions: subs };
 	},
 
 	_validate: function() {
@@ -533,12 +590,28 @@ return view.extend({
 		return cfg;
 	},
 
+	// ── Show/hide routing rows (Domains + IP) based on which sub is default ──
+	_updateDomainVisibility: function() {
+		Array.prototype.forEach.call(
+			document.querySelectorAll('.vpnsub-sub-card'),
+			function(card) {
+				var radio     = card.querySelector('.vpnsub-sub-default');
+				var isDefault = radio && radio.checked;
+				Array.prototype.forEach.call(
+					card.querySelectorAll('.vpnsub-routing-row'),
+					function(row) { row.style.display = isDefault ? 'none' : ''; }
+				);
+			}
+		);
+	},
+
 	// ── Save ──────────────────────────────────────────────────────────────────
 	handleSave: function() {
 		var cfg = this._validate();
 		if (!cfg) return;
 
 		return callSetConfig(cfg).then(function() {
+			window.scrollTo({ top: 0, behavior: 'smooth' });
 			ui.addNotification(null, E('p', _('Settings saved')), 'info');
 		}).catch(function(err) {
 			ui.addNotification(null, E('p', _('Save error: ') + (err.message || String(err))), 'error');
@@ -564,22 +637,13 @@ return view.extend({
 				return;
 			}
 
-			var sameIp = res.vpn_ip && res.direct_ip && res.vpn_ip === res.direct_ip;
 			var rows = [
-				[_('Domain'),      res.domain    || '—'],
-				[_('VPN status'),  res.vpn_ok
+				[_('Domain'),     res.domain || '—'],
+				[_('VPN status'), res.vpn_ok
 					? '✅ ' + _('Connected') + (res.http_code ? ' (HTTP\u00a0' + res.http_code + ')' : '')
 					: '❌ ' + _('Failed')   + (res.http_code ? ' (HTTP\u00a0' + res.http_code + ')' : '')],
-				[_('VPN IP'),      res.vpn_ip    || '—'],
-				res.geo ? [_('Location'), [
-					res.geo.city, res.geo.country, res.geo.isp
-				].filter(Boolean).join(', ')] : null,
-				[_('Outbound'),    res.outbound  || '—'],
-				[_('Direct IP'),   res.direct_ip || '—'],
-				[_('Routing'),     sameIp
-					? '⚠️ ' + _('Same IP as direct — traffic may bypass VPN')
-					: '✅ ' + _('Different from direct IP')]
-			].filter(Boolean);
+				[_('Outbound'),   res.outbound  || '—']
+			];
 
 			var table = E('div', { 'class': 'vpnsub-test-table' },
 				rows.map(function(r) {

@@ -154,6 +154,7 @@ URLTEST_OUTBOUNDS=""
 ROUTE_RULES=""
 TOTAL_SERVERS=0
 : > "$TMPDIR/default.tmp"
+: > "$TMPDIR/tag-names.tsv"
 
 i=0
 while [ "$i" -lt "$SUB_COUNT" ]; do
@@ -225,6 +226,7 @@ while [ "$i" -lt "$SUB_COUNT" ]; do
         idx=$((idx + 1))
         tag="${sub_name}-${idx}"
         outbound=$(parse_uri "$line" "$sub_name" "$idx")
+        printf '%s\t%s\n' "$tag" "$server_name" >> "$TMPDIR/tag-names.tsv"
 
         vlog 2 "  KEEP: ${tag} (${server_name})"
 
@@ -251,14 +253,15 @@ while [ "$i" -lt "$SUB_COUNT" ]; do
 
     log "  ${sub_name}: kept $idx, skipped $skipped"
 
-    # urltest + route rules only for subscriptions with domains defined
+    # urltest + route rules for subscriptions with domains or ip defined
     domains=$(jq -c ".subscriptions[$i].domains // empty" "$SUBS_CONF")
-    if [ -n "$sub_tags" ] && [ -n "$domains" ]; then
+    ip_cidrs=$(jq -c ".subscriptions[$i].ip // empty" "$SUBS_CONF")
+    if [ -n "$sub_tags" ] && { [ -n "$domains" ] || [ -n "$ip_cidrs" ]; }; then
         urltest="    {
       \"type\": \"urltest\",
       \"tag\": \"${sub_name}-best\",
       \"outbounds\": [${sub_tags}],
-      \"url\": \"https://www.gstatic.com/generate_204\",
+      \"url\": \"${TEST_URL}\",
       \"interval\": \"5m\",
       \"tolerance\": 100
     }"
@@ -266,13 +269,25 @@ while [ "$i" -lt "$SUB_COUNT" ]; do
 "
         URLTEST_OUTBOUNDS="${URLTEST_OUTBOUNDS}${urltest}"
 
-        rule="      {
+        if [ -n "$domains" ]; then
+            rule="      {
         \"domain_suffix\": ${domains},
         \"outbound\": \"${sub_name}-best\"
       }"
-        [ -n "$ROUTE_RULES" ] && ROUTE_RULES="$ROUTE_RULES,
+            [ -n "$ROUTE_RULES" ] && ROUTE_RULES="$ROUTE_RULES,
 "
-        ROUTE_RULES="${ROUTE_RULES}${rule}"
+            ROUTE_RULES="${ROUTE_RULES}${rule}"
+        fi
+
+        if [ -n "$ip_cidrs" ]; then
+            ip_rule="      {
+        \"ip_cidr\": ${ip_cidrs},
+        \"outbound\": \"${sub_name}-best\"
+      }"
+            [ -n "$ROUTE_RULES" ] && ROUTE_RULES="$ROUTE_RULES,
+"
+            ROUTE_RULES="${ROUTE_RULES}${ip_rule}"
+        fi
     fi
 
     i=$((i + 1))
@@ -291,6 +306,7 @@ fi
 log "Total servers: $TOTAL_SERVERS"
 
 LOG_LEVEL=$(jq -r '.log_level // "warn"' "$SUBS_CONF")
+TEST_URL=$(jq -r '.test_url // "https://www.gstatic.com/generate_204"' "$SUBS_CONF")
 
 # ---- Build final config ----
 # Write non-empty blocks with trailing comma (more items follow in the outbounds array).
@@ -355,6 +371,11 @@ fi
 if sing-box check -c "${CONFIG}.new" 2>&1; then
     [ -f "$CONFIG" ] && cp "$CONFIG" "${CONFIG}.bak"
     mv "${CONFIG}.new" "$CONFIG"
+    # Save tag→full_name mapping for LuCI plugin display
+    if [ -s "$TMPDIR/tag-names.tsv" ]; then
+        jq -Rn '[inputs | split("\t") | {(.[0]): .[1]}] | add // {}' \
+            "$TMPDIR/tag-names.tsv" > "$(dirname "$CONFIG")/subs-tags.json"
+    fi
     log "Config OK, restarting sing-box..."
     service sing-box restart
     sleep 2

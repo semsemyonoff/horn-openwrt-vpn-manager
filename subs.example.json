@@ -1,10 +1,12 @@
 {
   "log_level": "warn",
+  "test_url": "https://www.gstatic.com/generate_204",
   "subscriptions": [
     {
       "name": "vless-default",
       "url": "https://example.com/my-default-vless",
-      "default": true
+      "default": true,
+      "exclude": ["Россия", "traffic", "expire"]
     },
     {
       "name": "Blanc",
@@ -25,6 +27,28 @@
         "claude.ai"
       ],
       "exclude": ["Россия", "Torrent"]
+    },
+    {
+      "name": "CorpNet",
+      "url": "https://example.com/corpnet/sub",
+      "ip": [
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16"
+      ],
+      "exclude": ["Россия"]
+    },
+    {
+      "name": "Mixed",
+      "url": "https://example.com/mixed/sub",
+      "domains": [
+        "work.example.com",
+        "jira.example.com"
+      ],
+      "ip": [
+        "203.0.113.0/24"
+      ],
+      "exclude": ["Россия", "traffic"]
     }
   ]
 }

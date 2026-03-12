@@ -15,6 +15,12 @@ msgstr "Уровень логирования"
 msgid "Logging verbosity for sing-box"
 msgstr "Подробность логов sing-box"
 
+msgid "URL test"
+msgstr "URL для проверки"
+
+msgid "URL used by urltest groups to measure latency"
+msgstr "URL, который urltest-группы используют для измерения задержки"
+
 msgid "Subscriptions"
 msgstr "Подписки"
 
@@ -47,6 +53,12 @@ msgstr "Домены"
 
 msgid "Traffic to these domains will be routed through this subscription"
 msgstr "Трафик к этим доменам будет направлен через данную подписку"
+
+msgid "IP / CIDR"
+msgstr "IP / CIDR"
+
+msgid "Traffic to these IP ranges will be routed through this subscription"
+msgstr "Трафик к этим IP-диапазонам будет направлен через данную подписку"
 
 msgid "Exclude filters"
 msgstr "Исключить серверы"
