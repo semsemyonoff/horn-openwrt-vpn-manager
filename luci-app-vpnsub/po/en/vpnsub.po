@@ -72,6 +72,12 @@ msgstr "Russia"
 msgid "Remove"
 msgstr "Remove"
 
+msgid "Remove subscription"
+msgstr "Remove subscription"
+
+msgid "this subscription"
+msgstr "this subscription"
+
 msgid "Save"
 msgstr "Save"
 
@@ -114,8 +120,8 @@ msgstr "Test"
 msgid "VPN connectivity test"
 msgstr "VPN connectivity test"
 
-msgid "Sends a request through tun0 and reports outgoing IP, geo-location, and which outbound handled it."
-msgstr "Sends a request through tun0 and reports outgoing IP, geo-location, and which outbound handled it."
+msgid "Sends a request through tun0 and reports which outbound handled it."
+msgstr "Sends a request through tun0 and reports which outbound handled it."
 
 msgid "Testing… (up to 30s)"
 msgstr "Testing… (up to 30s)"
@@ -129,26 +135,8 @@ msgstr "Connected"
 msgid "Failed"
 msgstr "Failed"
 
-msgid "VPN IP"
-msgstr "VPN IP"
-
-msgid "Location"
-msgstr "Location"
-
 msgid "Outbound"
 msgstr "Outbound"
-
-msgid "Direct IP"
-msgstr "Direct IP"
-
-msgid "Routing"
-msgstr "Routing"
-
-msgid "Same IP as direct — traffic may bypass VPN"
-msgstr "Same IP as direct — traffic may bypass VPN"
-
-msgid "Different from direct IP"
-msgstr "Different from direct IP"
 
 msgid "no response from backend"
 msgstr "no response from backend"
@@ -186,6 +174,24 @@ msgstr "Clear"
 msgid "(waiting for output…)"
 msgstr "(waiting for output…)"
 
+msgid "ID"
+msgstr "ID"
+
+msgid "e.g. mullvad"
+msgstr "e.g. mullvad"
+
+msgid "Stable identifier used in tag names (e.g. {id}-manual)"
+msgstr "Stable identifier used in tag names (e.g. {id}-manual)"
+
+msgid "Proxy"
+msgstr "Proxy"
+
+msgid "Auto"
+msgstr "Auto"
+
+msgid "ID is required"
+msgstr "ID is required"
+
 msgid "Name is required"
 msgstr "Name is required"
 
@@ -194,3 +200,97 @@ msgstr "URL is required"
 
 msgid "Enter a valid URL (https://...)"
 msgstr "Enter a valid URL (https://...)"
+msgid "Advanced"
+msgstr "Advanced"
+
+msgid "Interval"
+msgstr "Interval"
+
+msgid "How often urltest checks latency (e.g. 5m, 1m)"
+msgstr "How often urltest checks latency (e.g. 5m, 1m)"
+
+msgid "Tolerance"
+msgstr "Tolerance"
+
+msgid "Switch to a faster node only if it beats current by at least this many ms"
+msgstr "Switch to a faster node only if it beats current by at least this many ms"
+msgid "Code"
+msgstr "Code"
+
+msgid "Unique identifier used in tag names (e.g. {code}-manual)"
+msgstr "Unique identifier used in tag names (e.g. {code}-manual)"
+
+msgid "Retries"
+msgstr "Retries"
+
+msgid "Number of download retries per subscription on failure"
+msgstr "Number of download retries per subscription on failure"
+
+msgid "Leave empty to use the global setting"
+msgstr "Leave empty to use the global setting"
+
+msgid "Global default"
+msgstr "Global default"
+
+msgid "Manual"
+msgstr "Manual"
+
+msgid "Current"
+msgstr "Current"
+
+msgid "Test latencies"
+msgstr "Test latencies"
+
+msgid "Template"
+msgstr "Template"
+
+msgid "config.template.json"
+msgstr "config.template.json"
+
+msgid "Placeholders"
+msgstr "Placeholders"
+
+msgid "Placeholder"
+msgstr "Placeholder"
+
+msgid "Type"
+msgstr "Type"
+
+msgid "Description"
+msgstr "Description"
+
+msgid "string"
+msgstr "string"
+
+msgid "array elements"
+msgstr "array elements"
+
+msgid "Log verbosity level from global settings (e.g. warn, debug)"
+msgstr "Log verbosity level from global settings (e.g. warn, debug)"
+
+msgid "Individual VLESS proxy outbound objects, comma-separated"
+msgstr "Individual VLESS proxy outbound objects, comma-separated"
+
+msgid "urltest (auto) and selector (manual) group outbound objects"
+msgstr "urltest (auto) and selector (manual) group outbound objects"
+
+msgid "Domain and IP routing rules generated from subscription settings"
+msgstr "Domain and IP routing rules generated from subscription settings"
+
+msgid "Outbound tag of the subscription marked as default"
+msgstr "Outbound tag of the subscription marked as default"
+
+msgid "Template saved"
+msgstr "Template saved"
+
+msgid "Template reset to default"
+msgstr "Template reset to default"
+
+msgid "Reset to default"
+msgstr "Reset to default"
+
+msgid "Reset template to default?"
+msgstr "Reset template to default?"
+
+msgid "JSON error: "
+msgstr "JSON error: "

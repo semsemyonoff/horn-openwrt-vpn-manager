@@ -72,6 +72,12 @@ msgstr "Россия"
 msgid "Remove"
 msgstr "Удалить"
 
+msgid "Remove subscription"
+msgstr "Удалить подписку"
+
+msgid "this subscription"
+msgstr "эту подписку"
+
 msgid "Save"
 msgstr "Сохранить"
 
@@ -114,8 +120,8 @@ msgstr "Тест"
 msgid "VPN connectivity test"
 msgstr "Тест подключения VPN"
 
-msgid "Sends a request through tun0 and reports outgoing IP, geo-location, and which outbound handled it."
-msgstr "Отправляет запрос через tun0 и показывает исходящий IP, геолокацию и через какой outbound прошёл трафик."
+msgid "Sends a request through tun0 and reports which outbound handled it."
+msgstr "Отправляет запрос через tun0 и показывает через какой outbound прошёл трафик."
 
 msgid "Testing… (up to 30s)"
 msgstr "Тестируем… (до 30 сек)"
@@ -129,26 +135,8 @@ msgstr "Подключено"
 msgid "Failed"
 msgstr "Нет соединения"
 
-msgid "VPN IP"
-msgstr "IP через VPN"
-
-msgid "Location"
-msgstr "Геолокация"
-
 msgid "Outbound"
 msgstr "Outbound"
-
-msgid "Direct IP"
-msgstr "Прямой IP"
-
-msgid "Routing"
-msgstr "Маршрутизация"
-
-msgid "Same IP as direct — traffic may bypass VPN"
-msgstr "IP совпадает с прямым — трафик может идти в обход VPN"
-
-msgid "Different from direct IP"
-msgstr "IP отличается от прямого"
 
 msgid "no response from backend"
 msgstr "нет ответа от бэкенда"
@@ -186,6 +174,24 @@ msgstr "Очистить"
 msgid "(waiting for output…)"
 msgstr "(ожидание вывода…)"
 
+msgid "ID"
+msgstr "ID"
+
+msgid "e.g. mullvad"
+msgstr "напр. mullvad"
+
+msgid "Stable identifier used in tag names (e.g. {id}-manual)"
+msgstr "Стабильный идентификатор, используется в именах тегов (например, {id}-manual)"
+
+msgid "Proxy"
+msgstr "Прокси"
+
+msgid "Auto"
+msgstr "Авто"
+
+msgid "ID is required"
+msgstr "Обязательное поле"
+
 msgid "Name is required"
 msgstr "Обязательное поле"
 
@@ -194,3 +200,97 @@ msgstr "Обязательное поле"
 
 msgid "Enter a valid URL (https://...)"
 msgstr "Введите корректный URL (https://...)"
+msgid "Advanced"
+msgstr "Дополнительно"
+
+msgid "Interval"
+msgstr "Интервал"
+
+msgid "How often urltest checks latency (e.g. 5m, 1m)"
+msgstr "Как часто urltest проверяет задержку (напр. 5m, 1m)"
+
+msgid "Tolerance"
+msgstr "Допуск"
+
+msgid "Switch to a faster node only if it beats current by at least this many ms"
+msgstr "Переключиться на более быстрый узел только если он быстрее текущего на это значение (мс)"
+msgid "Code"
+msgstr "Код"
+
+msgid "Unique identifier used in tag names (e.g. {code}-manual)"
+msgstr "Уникальный идентификатор, используется в именах тегов (напр. {code}-manual)"
+
+msgid "Retries"
+msgstr "Повторы"
+
+msgid "Number of download retries per subscription on failure"
+msgstr "Количество повторных попыток загрузки при ошибке"
+
+msgid "Leave empty to use the global setting"
+msgstr "Оставьте пустым для использования глобального значения"
+
+msgid "Global default"
+msgstr "Глобальное"
+
+msgid "Manual"
+msgstr "Вручную"
+
+msgid "Current"
+msgstr "Текущий"
+
+msgid "Test latencies"
+msgstr "Проверить задержки"
+
+msgid "Template"
+msgstr "Шаблон"
+
+msgid "config.template.json"
+msgstr "config.template.json"
+
+msgid "Placeholders"
+msgstr "Переменные"
+
+msgid "Placeholder"
+msgstr "Переменная"
+
+msgid "Type"
+msgstr "Тип"
+
+msgid "Description"
+msgstr "Описание"
+
+msgid "string"
+msgstr "строка"
+
+msgid "array elements"
+msgstr "элементы массива"
+
+msgid "Log verbosity level from global settings (e.g. warn, debug)"
+msgstr "Уровень логирования из глобальных настроек (напр. warn, debug)"
+
+msgid "Individual VLESS proxy outbound objects, comma-separated"
+msgstr "Отдельные outbound-объекты VLESS-прокси, через запятую"
+
+msgid "urltest (auto) and selector (manual) group outbound objects"
+msgstr "Outbound-объекты групп urltest (авто) и selector (вручную)"
+
+msgid "Domain and IP routing rules generated from subscription settings"
+msgstr "Правила маршрутизации по доменам и IP из настроек подписок"
+
+msgid "Outbound tag of the subscription marked as default"
+msgstr "Тег outbound-а подписки, отмеченной как основная"
+
+msgid "Template saved"
+msgstr "Шаблон сохранён"
+
+msgid "Template reset to default"
+msgstr "Шаблон сброшен к умолчанию"
+
+msgid "Reset to default"
+msgstr "Сбросить к умолчанию"
+
+msgid "Reset template to default?"
+msgstr "Сбросить шаблон к умолчанию?"
+
+msgid "JSON error: "
+msgstr "Ошибка JSON: "

@@ -6,7 +6,13 @@
 # generates per-subscription outbound groups and route rules,
 # and updates the sing-box config.
 #
-# Requires: curl, base64, awk, sed, grep, jqы
+# Tag scheme:
+#   <id>-single      — subscription with a single proxy
+#   <id>-auto        — urltest group for multi-proxy subscription
+#   <id>-manual      — selector for manual proxy choice
+#   <id>-node-<hash> — individual proxy (stable hash of conn params)
+#
+# Requires: curl, base64, awk, sed, grep, jq, md5sum
 # ============================================================
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
@@ -17,23 +23,66 @@ TMPDIR="/tmp/sing-box-sub"
 LOG="/tmp/sing-box-sub.log"
 DRY_RUN=0
 VERBOSE=0
+COLOR=1
 
-# Parse arguments
+# ---- Argument parsing --------------------------------------------------------
+
+show_help() {
+    printf 'sing-box subscription updater\n\n'
+    printf 'Downloads VLESS URIs from subscription URLs, builds per-subscription\n'
+    printf 'outbound groups (urltest + selector), and reloads sing-box config.\n\n'
+    printf 'Usage: %s <command> [options]\n\n' "$(basename "$0")"
+    printf 'Commands:\n'
+    printf '  run        Download subscriptions and update sing-box config\n'
+    printf '  dry-run    Simulate run without writing config or restarting\n'
+    printf '  help       Show this help message\n'
+    printf '\nOptions:\n'
+    printf '  --no-color       Disable colored output\n'
+    printf '  -v / -vv / -vvv  Verbosity level\n'
+    printf '\nConfig:  %s\n' "$SUBS_CONF"
+    printf 'Log:     %s\n' "$LOG"
+}
+
+CMD=""
 for arg in "$@"; do
     case "$arg" in
-        --dry-run|-n) DRY_RUN=1 ;;
+        run|dry-run|help) [ -z "$CMD" ] && CMD="$arg" ;;
+        --no-color) COLOR=0 ;;
         -vvv) VERBOSE=3 ;;
         -vv)  VERBOSE=2 ;;
         -v)   VERBOSE=1 ;;
     esac
 done
 
+case "$CMD" in
+    run)     DRY_RUN=0 ;;
+    dry-run) DRY_RUN=1 ;;
+    help|'')
+        show_help
+        exit 0
+        ;;
+esac
+
+# Set up ANSI color codes (empty strings when disabled)
+if [ "$COLOR" -eq 1 ]; then
+    C_ERR=$(printf '\033[1;31m')
+    C_WARN=$(printf '\033[0;33m')
+    C_OK=$(printf '\033[0;32m')
+    C_INFO=$(printf '\033[0;36m')
+    C_DIM=$(printf '\033[0;90m')
+    C_BOLD=$(printf '\033[1m')
+    RST=$(printf '\033[0m')
+else
+    C_ERR='' C_WARN='' C_OK='' C_INFO='' C_DIM='' C_BOLD='' RST=''
+fi
+
 log() {
+    local msg="$1"
+    printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$msg" >> "$LOG"
     if [ "$DRY_RUN" -eq 1 ]; then
-        echo "[DRY-RUN] $1"
+        printf '%s[DRY-RUN]%s %s\n' "$C_WARN" "$RST" "$msg"
     else
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG"
-        echo "$1"
+        printf '%s\n' "$msg"
     fi
 }
 
@@ -60,15 +109,39 @@ is_excluded() {
     return 1
 }
 
-# Parse a VLESS URI and print a sing-box outbound JSON object
-# Format: vless://uuid@server:port?security=reality&sni=...&fp=...&pbk=...&sid=...&flow=...#name
+# Compute 8-char MD5 hash from stable VLESS connection parameters.
+# Inputs: type, server, port, uuid, security, sni, pbk, sid, flow, fp.
+# The hash is stable as long as the connection parameters do not change.
+# shellcheck disable=SC3043
+compute_node_hash() {
+    local line="$1"
+    local uri="${line#vless://}"
+    local uuid="${uri%%@*}"
+    local rest="${uri#*@}"
+    local sp="${rest%%\?*}"
+    local server="${sp%%:*}"
+    local port="${sp##*:}"
+    local params="${rest#*\?}"; params="${params%%#*}"
+
+    local sni pbk sid flow fp security
+    sni=$(echo "$params"      | tr '&' '\n' | grep "^sni="      | cut -d= -f2-)
+    pbk=$(echo "$params"      | tr '&' '\n' | grep "^pbk="      | cut -d= -f2-)
+    sid=$(echo "$params"      | tr '&' '\n' | grep "^sid="      | cut -d= -f2-)
+    flow=$(echo "$params"     | tr '&' '\n' | grep "^flow="     | cut -d= -f2-)
+    fp=$(echo "$params"       | tr '&' '\n' | grep "^fp="       | cut -d= -f2-)
+    security=$(echo "$params" | tr '&' '\n' | grep "^security=" | cut -d= -f2-)
+
+    printf 'vless|%s|%s|%s|%s|%s|%s|%s|%s|%s' \
+        "$server" "$port" "$uuid" "$security" "$sni" "$pbk" "$sid" "$flow" "$fp" \
+        | md5sum | cut -c1-8
+}
+
+# Parse a VLESS URI and print a sing-box outbound JSON object.
+# Usage: parse_uri <uri_line> <tag>
 # shellcheck disable=SC3043
 parse_uri() {
     local line="$1"
-    local sub_name="$2"
-    local idx="$3"
-    # Optional 4th arg overrides the generated tag (used for the default outbound)
-    local tag="${4:-${sub_name}-${idx}}"
+    local tag="$2"
 
     local uri="${line#vless://}"
     local uuid="${uri%%@*}"
@@ -126,153 +199,223 @@ mkdir -p "$TMPDIR"
 
 # ---- Validate subscriptions config ----
 if [ ! -f "$SUBS_CONF" ]; then
-    log "ERROR: $SUBS_CONF not found"
+    log "${C_ERR}ERROR: $SUBS_CONF not found${RST}"
     exit 1
 fi
 
 SUB_COUNT=$(jq '.subscriptions | length // 0' "$SUBS_CONF" 2>/dev/null || echo 0)
 if [ "$SUB_COUNT" -eq 0 ]; then
-    log "ERROR: No subscriptions defined in $SUBS_CONF"
+    log "${C_ERR}ERROR: No subscriptions defined in $SUBS_CONF${RST}"
     exit 1
 fi
-log "Found $SUB_COUNT subscription(s)"
+log "${C_INFO}Found ${C_BOLD}${SUB_COUNT}${RST}${C_INFO} subscription(s)${RST}"
 
 DEF_COUNT=$(jq '[.subscriptions[] | select(.default == true)] | length' "$SUBS_CONF" 2>/dev/null || echo 0)
 if [ "$DEF_COUNT" -eq 0 ]; then
-    log "ERROR: No default subscription defined (set \"default\": true on one subscription)"
+    log "${C_ERR}ERROR: No default subscription defined (set \"default\": true on one subscription)${RST}"
     exit 1
 fi
 if [ "$DEF_COUNT" -gt 1 ]; then
-    log "ERROR: Multiple default subscriptions defined (only one allowed)"
+    log "${C_ERR}ERROR: Multiple default subscriptions defined (only one allowed)${RST}"
     exit 1
 fi
 
+# Read global settings before the loop (TEST_URL is needed for urltest groups)
+LOG_LEVEL=$(jq -r '.log_level // "warn"' "$SUBS_CONF")
+TEST_URL=$(jq -r '.test_url // "https://www.gstatic.com/generate_204"' "$SUBS_CONF")
+GLOBAL_RETRIES=$(jq -r '.retries // 3' "$SUBS_CONF")
+
 # ---- Process each subscription ----
-def_name=$(jq -r '.subscriptions[] | select(.default == true) | .name' "$SUBS_CONF")
 VLESS_OUTBOUNDS=""
-URLTEST_OUTBOUNDS=""
+GROUP_OUTBOUNDS=""
 ROUTE_RULES=""
 TOTAL_SERVERS=0
-: > "$TMPDIR/default.tmp"
+DEF_ROUTE_TAG=""
 : > "$TMPDIR/tag-names.tsv"
 
-i=0
-while [ "$i" -lt "$SUB_COUNT" ]; do
-    sub_name=$(jq -r ".subscriptions[$i].name" "$SUBS_CONF")
-    sub_url=$(jq -r ".subscriptions[$i].url" "$SUBS_CONF")
-    is_default=$(jq -r ".subscriptions[$i].default // false" "$SUBS_CONF")
-    rawfile="$TMPDIR/${sub_name}.raw"
-    outfile="$TMPDIR/${sub_name}.txt"
+jq -r '.subscriptions | keys_unsorted[]' "$SUBS_CONF" > "$TMPDIR/sub_ids.txt"
+while IFS= read -r sub_id; do
+    sub_name=$(jq -r ".subscriptions[\"$sub_id\"].name" "$SUBS_CONF")
+    sub_url=$(jq -r ".subscriptions[\"$sub_id\"].url" "$SUBS_CONF")
+    is_default=$(jq -r ".subscriptions[\"$sub_id\"].default // false" "$SUBS_CONF")
+    sub_interval=$(jq -r ".subscriptions[\"$sub_id\"].interval // \"5m\"" "$SUBS_CONF")
+    sub_tolerance=$(jq -r ".subscriptions[\"$sub_id\"].tolerance // 100" "$SUBS_CONF")
+    rawfile="$TMPDIR/${sub_id}.raw"
+    outfile="$TMPDIR/${sub_id}.txt"
+    uri_file="$TMPDIR/${sub_id}.uris"
 
-    jq -r ".subscriptions[$i].exclude[]? | ascii_downcase" "$SUBS_CONF" > "$TMPDIR/exclude.tmp"
+    jq -r ".subscriptions[\"$sub_id\"].exclude[]? | ascii_downcase" "$SUBS_CONF" > "$TMPDIR/exclude.tmp"
 
-    vlog 3 "  [dbg] rawfile=${rawfile} outfile=${outfile}"
-    log "Downloading ${sub_name}..."
-    http_code=$(curl -sL -m 15 -o "$rawfile" -w "%{http_code}" "$sub_url" 2>/dev/null)
+    sub_retries=$(jq -r ".subscriptions[\"$sub_id\"].retries // $GLOBAL_RETRIES" "$SUBS_CONF")
+    vlog 3 "${C_DIM}  [dbg] sub_id=${sub_id} retries=${sub_retries} rawfile=${rawfile}${RST}"
+    log "${C_INFO}Downloading ${C_BOLD}${sub_name}${RST}${C_INFO}...${RST}"
 
-    if [ "$http_code" = "000" ] || [ -z "$http_code" ]; then
-        log "  ${sub_name}: connection error, skipping"
-        i=$((i + 1))
+    attempt=1
+    download_ok=0
+    while [ "$attempt" -le "$((sub_retries + 1))" ]; do
+        [ "$attempt" -gt 1 ] && log "  ${C_WARN}${sub_name}: retry $((attempt - 1))/${sub_retries}...${RST}"
+        http_code=$(curl -sS -L -m 15 -o "$rawfile" -w "%{http_code}" \
+            "$sub_url" 2>"$TMPDIR/${sub_id}.curl_err")
+        curl_rc=$?
+        if [ "$curl_rc" -ne 0 ] || [ "$http_code" = "000" ] || [ -z "$http_code" ]; then
+            log "  ${C_WARN}${sub_name}: connection failed (rc=${curl_rc})${RST}"
+            vlog 3 "${C_DIM}    $(cat "$TMPDIR/${sub_id}.curl_err" 2>/dev/null)${RST}"
+            attempt=$((attempt + 1))
+            continue
+        fi
+        if [ "$http_code" != "200" ]; then
+            log "  ${C_WARN}${sub_name}: HTTP ${http_code}${RST}"
+            attempt=$((attempt + 1))
+            continue
+        fi
+        download_ok=1
+        break
+    done
+
+    if [ "$download_ok" -eq 0 ]; then
+        log "  ${C_ERR}${sub_name}: all attempts failed, skipping${RST}"
         continue
     fi
-    if [ "$http_code" != "200" ]; then
-        log "  ${sub_name}: HTTP ${http_code}, skipping"
-        i=$((i + 1))
-        continue
-    fi
-    vlog 3 "  [dbg] ${sub_name}: HTTP ${http_code}, $(wc -c < "$rawfile" | tr -d ' ') bytes"
+    vlog 3 "${C_DIM}  [dbg] ${sub_name}: $(wc -c < "$rawfile" | tr -d ' ') bytes${RST}"
 
     # Auto-detect encoding: raw VLESS or base64
     if grep -q "^vless://" "$rawfile" 2>/dev/null; then
         cp "$rawfile" "$outfile"
-        vlog 1 "  ${sub_name}: raw format"
+        vlog 1 "${C_DIM}  ${sub_name}: raw format${RST}"
     elif base64 -d < "$rawfile" > "$outfile" 2>/dev/null && grep -q "^vless://" "$outfile"; then
-        vlog 1 "  ${sub_name}: base64 format"
+        vlog 1 "${C_DIM}  ${sub_name}: base64 format${RST}"
     else
-        log "  ${sub_name}: no VLESS URIs found, skipping"
-        i=$((i + 1))
+        log "  ${C_WARN}${sub_name}: no VLESS URIs found, skipping${RST}"
         continue
     fi
 
     lines=$(grep -c "^vless://" "$outfile" 2>/dev/null || echo 0)
-    log "  ${sub_name}: $lines server(s) found"
+    log "  ${sub_name}: ${C_BOLD}${lines}${RST} server(s) found"
 
-    sub_tags=""
-    idx=0
+    # ---- First pass: collect non-excluded URIs ----
+    : > "$uri_file"
     skipped=0
-    default_written=0
-
     while IFS= read -r line || [ -n "$line" ]; do
         echo "$line" | grep -q "^vless://" || continue
-
-        # Extract server name (after #) for filtering
         raw_name="${line##*#}"
-        # URL-decode common cases
         server_name=$(echo "$raw_name" | sed 's/%20/ /g; s/%23/#/g; s/%2F/\//g; s/+/ /g')
-
         if is_excluded "$server_name"; then
             skipped=$((skipped + 1))
-            vlog 1 "  SKIP: $server_name (matched filter)"
+            vlog 1 "  ${C_WARN}SKIP: ${server_name} (matched filter)${RST}"
             continue
         fi
+        printf '%s\n' "$line" >> "$uri_file"
+    done < "$outfile"
 
-        # First URI of the default subscription becomes the default outbound
-        if [ "$is_default" = "true" ] && [ "$default_written" -eq 0 ]; then
-            printf '%s,\n' "$(parse_uri "$line" "$sub_name" "" "$sub_name")" > "$TMPDIR/default.tmp"
-            default_written=1
-            log "  default outbound: OK (tag: ${sub_name})"
-        fi
+    node_count=$(grep -c '' "$uri_file" 2>/dev/null || echo 0)
+    if [ "$skipped" -gt 0 ]; then
+        log "  ${sub_name}: kept ${C_OK}${node_count}${RST}, skipped ${C_WARN}${skipped}${RST}"
+    else
+        log "  ${sub_name}: kept ${C_OK}${node_count}${RST}"
+    fi
 
-        idx=$((idx + 1))
-        tag="${sub_name}-${idx}"
-        outbound=$(parse_uri "$line" "$sub_name" "$idx")
-        printf '%s\t%s\n' "$tag" "$server_name" >> "$TMPDIR/tag-names.tsv"
+    if [ "$node_count" -eq 0 ]; then
+        continue
+    fi
 
-        vlog 2 "  KEEP: ${tag} (${server_name})"
+    # ---- Generate outbounds based on node count ----
+    if [ "$node_count" -eq 1 ]; then
+        # Single mode: one node, use <id>-single tag directly
+        line=$(cat "$uri_file")
+        node_tag="${sub_id}-single"
+        raw_name="${line##*#}"
+        server_name=$(echo "$raw_name" | sed 's/%20/ /g; s/%23/#/g; s/%2F/\//g; s/+/ /g')
 
-        if [ "$VERBOSE" -ge 3 ]; then
-            _rest="${line#vless://*@}"
-            _sp="${_rest%%\?*}"
-            _params="${_rest#*\?}"; _params="${_params%%#*}"
-            _sni=$(echo "$_params" | tr '&' '\n' | grep "^sni=" | cut -d= -f2-)
-            _sec=$(echo "$_params" | tr '&' '\n' | grep "^security=" | cut -d= -f2-)
-            _fp=$(echo "$_params" | tr '&' '\n' | grep "^fp=" | cut -d= -f2-)
-            _flow=$(echo "$_params" | tr '&' '\n' | grep "^flow=" | cut -d= -f2-)
-            log "    [dbg] addr=${_sp} security=${_sec} sni=${_sni} fp=${_fp} flow=${_flow}"
-        fi
-
+        outbound=$(parse_uri "$line" "$node_tag")
         [ -n "$VLESS_OUTBOUNDS" ] && VLESS_OUTBOUNDS="$VLESS_OUTBOUNDS,
 "
         VLESS_OUTBOUNDS="${VLESS_OUTBOUNDS}${outbound}"
 
-        [ -n "$sub_tags" ] && sub_tags="$sub_tags, "
-        sub_tags="${sub_tags}\"${tag}\""
+        printf '%s\t%s\n' "$node_tag" "$server_name" >> "$TMPDIR/tag-names.tsv"
+        vlog 2 "  ${C_OK}SINGLE${RST}: ${C_DIM}${node_tag}${RST} (${server_name})"
 
+        rule_tag="${sub_id}-single"
         TOTAL_SERVERS=$((TOTAL_SERVERS + 1))
-    done < "$outfile"
+    else
+        # Multi mode: hash-tagged nodes + urltest (auto) + selector (manual)
+        sub_node_tags=""
 
-    log "  ${sub_name}: kept $idx, skipped $skipped"
+        while IFS= read -r line || [ -n "$line" ]; do
+            [ -z "$line" ] && continue
 
-    # urltest + route rules for subscriptions with domains or ip defined
-    domains=$(jq -c ".subscriptions[$i].domains // empty" "$SUBS_CONF")
-    ip_cidrs=$(jq -c ".subscriptions[$i].ip // empty" "$SUBS_CONF")
-    if [ -n "$sub_tags" ] && { [ -n "$domains" ] || [ -n "$ip_cidrs" ]; }; then
+            node_hash=$(compute_node_hash "$line")
+            node_tag="${sub_id}-node-${node_hash}"
+            raw_name="${line##*#}"
+            server_name=$(echo "$raw_name" | sed 's/%20/ /g; s/%23/#/g; s/%2F/\//g; s/+/ /g')
+
+            outbound=$(parse_uri "$line" "$node_tag")
+            [ -n "$VLESS_OUTBOUNDS" ] && VLESS_OUTBOUNDS="$VLESS_OUTBOUNDS,
+"
+            VLESS_OUTBOUNDS="${VLESS_OUTBOUNDS}${outbound}"
+
+            printf '%s\t%s\n' "$node_tag" "$server_name" >> "$TMPDIR/tag-names.tsv"
+            vlog 2 "  ${C_OK}NODE${RST}: ${C_DIM}${node_tag}${RST} (${server_name})"
+
+            if [ "$VERBOSE" -ge 3 ]; then
+                _rest="${line#vless://*@}"
+                _sp="${_rest%%\?*}"
+                _params="${_rest#*\?}"; _params="${_params%%#*}"
+                _sni=$(echo "$_params" | tr '&' '\n' | grep "^sni=" | cut -d= -f2-)
+                _sec=$(echo "$_params" | tr '&' '\n' | grep "^security=" | cut -d= -f2-)
+                _fp=$(echo "$_params" | tr '&' '\n' | grep "^fp=" | cut -d= -f2-)
+                _flow=$(echo "$_params" | tr '&' '\n' | grep "^flow=" | cut -d= -f2-)
+                log "${C_DIM}    [dbg] addr=${_sp} security=${_sec} sni=${_sni} fp=${_fp} flow=${_flow}${RST}"
+            fi
+
+            [ -n "$sub_node_tags" ] && sub_node_tags="${sub_node_tags}, "
+            sub_node_tags="${sub_node_tags}\"${node_tag}\""
+
+            TOTAL_SERVERS=$((TOTAL_SERVERS + 1))
+        done < "$uri_file"
+
+        # urltest group: auto-selects best node by latency
+        auto_tag="${sub_id}-auto"
         urltest="    {
       \"type\": \"urltest\",
-      \"tag\": \"${sub_name}-best\",
-      \"outbounds\": [${sub_tags}],
+      \"tag\": \"${auto_tag}\",
+      \"outbounds\": [${sub_node_tags}],
       \"url\": \"${TEST_URL}\",
-      \"interval\": \"5m\",
-      \"tolerance\": 100
+      \"interval\": \"${sub_interval}\",
+      \"tolerance\": ${sub_tolerance}
     }"
-        [ -n "$URLTEST_OUTBOUNDS" ] && URLTEST_OUTBOUNDS="$URLTEST_OUTBOUNDS,
+        [ -n "$GROUP_OUTBOUNDS" ] && GROUP_OUTBOUNDS="$GROUP_OUTBOUNDS,
 "
-        URLTEST_OUTBOUNDS="${URLTEST_OUTBOUNDS}${urltest}"
+        GROUP_OUTBOUNDS="${GROUP_OUTBOUNDS}${urltest}"
+        printf '%s\t%s\n' "$auto_tag" "Auto" >> "$TMPDIR/tag-names.tsv"
 
+        # selector group: manual node choice, defaults to auto
+        manual_tag="${sub_id}-manual"
+        selector="    {
+      \"type\": \"selector\",
+      \"tag\": \"${manual_tag}\",
+      \"outbounds\": [\"${auto_tag}\", ${sub_node_tags}],
+      \"default\": \"${auto_tag}\"
+    }"
+        GROUP_OUTBOUNDS="$GROUP_OUTBOUNDS,
+${selector}"
+        printf '%s\t%s\n' "$manual_tag" "$sub_name" >> "$TMPDIR/tag-names.tsv"
+
+        rule_tag="${sub_id}-manual"
+    fi
+
+    if [ "$is_default" = "true" ]; then
+        DEF_ROUTE_TAG="$rule_tag"
+        log "  default outbound: ${C_OK}${DEF_ROUTE_TAG}${RST}"
+    fi
+
+    # Route rules for non-default subscriptions with domains/ip routing
+    domains=$(jq -c ".subscriptions[\"$sub_id\"].domains // empty" "$SUBS_CONF")
+    ip_cidrs=$(jq -c ".subscriptions[\"$sub_id\"].ip // empty" "$SUBS_CONF")
+    if [ "$is_default" != "true" ] && { [ -n "$domains" ] || [ -n "$ip_cidrs" ]; }; then
         if [ -n "$domains" ]; then
             rule="      {
         \"domain_suffix\": ${domains},
-        \"outbound\": \"${sub_name}-best\"
+        \"outbound\": \"${rule_tag}\"
       }"
             [ -n "$ROUTE_RULES" ] && ROUTE_RULES="$ROUTE_RULES,
 "
@@ -282,7 +425,7 @@ while [ "$i" -lt "$SUB_COUNT" ]; do
         if [ -n "$ip_cidrs" ]; then
             ip_rule="      {
         \"ip_cidr\": ${ip_cidrs},
-        \"outbound\": \"${sub_name}-best\"
+        \"outbound\": \"${rule_tag}\"
       }"
             [ -n "$ROUTE_RULES" ] && ROUTE_RULES="$ROUTE_RULES,
 "
@@ -290,57 +433,46 @@ while [ "$i" -lt "$SUB_COUNT" ]; do
         fi
     fi
 
-    i=$((i + 1))
-done
+done < "$TMPDIR/sub_ids.txt"
 
-if [ ! -s "$TMPDIR/default.tmp" ]; then
-    log "ERROR: default subscription (${def_name}) did not produce a valid outbound"
+if [ -z "$DEF_ROUTE_TAG" ]; then
+    log "${C_ERR}ERROR: default subscription did not produce a valid outbound${RST}"
     exit 1
 fi
 
-if [ "$SUB_COUNT" -gt 0 ] && [ "$TOTAL_SERVERS" -eq 0 ]; then
-    log "ERROR: No valid servers parsed from any subscription"
+if [ "$TOTAL_SERVERS" -eq 0 ]; then
+    log "${C_ERR}ERROR: No valid servers parsed from any subscription${RST}"
     exit 1
 fi
 
-log "Total servers: $TOTAL_SERVERS"
-
-LOG_LEVEL=$(jq -r '.log_level // "warn"' "$SUBS_CONF")
-TEST_URL=$(jq -r '.test_url // "https://www.gstatic.com/generate_204"' "$SUBS_CONF")
+log "Total servers: ${C_BOLD}${TOTAL_SERVERS}${RST}"
 
 # ---- Build final config ----
-# Write non-empty blocks with trailing comma (more items follow in the outbounds array).
-# Empty files → awk finds nothing to print → placeholder line is silently dropped.
 if [ -n "$VLESS_OUTBOUNDS" ]; then
-    printf '%s,\n' "$VLESS_OUTBOUNDS"   > "$TMPDIR/vless.tmp"
+    printf '%s,\n' "$VLESS_OUTBOUNDS"  > "$TMPDIR/vless.tmp"
 else
     : > "$TMPDIR/vless.tmp"
 fi
-if [ -n "$URLTEST_OUTBOUNDS" ]; then
-    printf '%s,\n' "$URLTEST_OUTBOUNDS" > "$TMPDIR/urltest.tmp"
+if [ -n "$GROUP_OUTBOUNDS" ]; then
+    printf '%s,\n' "$GROUP_OUTBOUNDS"  > "$TMPDIR/groups.tmp"
 else
-    : > "$TMPDIR/urltest.tmp"
+    : > "$TMPDIR/groups.tmp"
 fi
 printf '%s\n' "$ROUTE_RULES" > "$TMPDIR/rules.tmp"
 
 awk \
-    -v default_file="$TMPDIR/default.tmp" \
-    -v default_tag="$def_name" \
+    -v def_tag="$DEF_ROUTE_TAG" \
     -v log_level="$LOG_LEVEL" \
     -v vless_file="$TMPDIR/vless.tmp" \
-    -v urltest_file="$TMPDIR/urltest.tmp" \
+    -v groups_file="$TMPDIR/groups.tmp" \
     -v rules_file="$TMPDIR/rules.tmp" \
 '/__LOG_LEVEL__/ {
     sub(/__LOG_LEVEL__/, log_level)
     print
     next
 }
-/"__DEFAULT_OUTBOUND__"/ {
-    while ((getline line < default_file) > 0) print line
-    next
-}
 /__DEFAULT_TAG__/ {
-    sub(/__DEFAULT_TAG__/, default_tag)
+    sub(/__DEFAULT_TAG__/, def_tag)
     print
     next
 }
@@ -348,8 +480,8 @@ awk \
     while ((getline line < vless_file) > 0) print line
     next
 }
-/"__URLTEST_OUTBOUNDS__"/ {
-    while ((getline line < urltest_file) > 0) print line
+/"__GROUP_OUTBOUNDS__"/ {
+    while ((getline line < groups_file) > 0) print line
     next
 }
 /"__ROUTE_RULES__"/ {
@@ -361,31 +493,36 @@ awk \
 
 # ---- Validate and apply ----
 if [ "$DRY_RUN" -eq 1 ]; then
-    log "Dry-run: generated config preview (${CONFIG}.new):"
+    log "${C_DIM}Dry-run: generated config preview (${CONFIG}.new):${RST}"
     cat "${CONFIG}.new"
-    log "Dry-run: skipping sing-box check, apply, and restart"
+    log "${C_DIM}Dry-run: skipping sing-box check, apply, and restart${RST}"
     rm -f "${CONFIG}.new"
     exit 0
 fi
 
-if sing-box check -c "${CONFIG}.new" 2>&1; then
+check_out=$(sing-box check -c "${CONFIG}.new" 2>&1)
+check_rc=$?
+[ -n "$check_out" ] && log "${C_DIM}${check_out}${RST}"
+
+if [ "$check_rc" -eq 0 ]; then
     [ -f "$CONFIG" ] && cp "$CONFIG" "${CONFIG}.bak"
     mv "${CONFIG}.new" "$CONFIG"
-    # Save tag→full_name mapping for LuCI plugin display
+    # Save tag→name mapping for LuCI display
     if [ -s "$TMPDIR/tag-names.tsv" ]; then
         jq -Rn '[inputs | split("\t") | {(.[0]): .[1]}] | add // {}' \
             "$TMPDIR/tag-names.tsv" > "$(dirname "$CONFIG")/subs-tags.json"
     fi
-    log "Config OK, restarting sing-box..."
-    service sing-box restart
+    log "${C_OK}Config OK, restarting sing-box...${RST}"
+    restart_out=$(service sing-box restart 2>&1)
+    [ -n "$restart_out" ] && log "${C_DIM}${restart_out}${RST}"
     sleep 2
     if pidof sing-box > /dev/null; then
-        log "sing-box restarted successfully"
+        log "${C_OK}${C_BOLD}sing-box restarted successfully${RST}"
     else
-        log "WARNING: sing-box may not have started"
+        log "${C_WARN}WARNING: sing-box may not have started${RST}"
     fi
 else
-    log "ERROR: Invalid config, keeping old one"
+    log "${C_ERR}ERROR: Invalid config, keeping old one${RST}"
     rm -f "${CONFIG}.new"
     exit 1
 fi

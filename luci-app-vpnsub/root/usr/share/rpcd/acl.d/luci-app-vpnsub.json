@@ -3,12 +3,12 @@
         "description": "LuCI access for vpnsub",
         "read": {
             "ubus": {
-                "vpnsub": [ "get_config", "get_log", "get_syslog", "get_sb_status" ]
+                "vpnsub": [ "get_config", "get_log", "get_syslog", "get_sb_status", "get_template" ]
             }
         },
         "write": {
             "ubus": {
-                "vpnsub": [ "set_config", "run_script", "test_url" ]
+                "vpnsub": [ "set_config", "run_script", "test_url", "set_proxy", "test_delays", "set_template", "reset_template" ]
             }
         }
     }

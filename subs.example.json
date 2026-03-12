@@ -1,14 +1,15 @@
 {
   "log_level": "warn",
   "test_url": "https://www.gstatic.com/generate_204",
-  "subscriptions": [
-    {
+  "retries": 3,
+  "subscriptions": {
+    "default": {
       "name": "vless-default",
       "url": "https://example.com/my-default-vless",
       "default": true,
       "exclude": ["Россия", "traffic", "expire"]
     },
-    {
+    "blanc": {
       "name": "Blanc",
       "url": "https://example.com/blanc/sub",
       "domains": [
@@ -18,7 +19,7 @@
       ],
       "exclude": ["Россия", "traffic", "expire"]
     },
-    {
+    "liberty": {
       "name": "Liberty",
       "url": "https://example.com/liberty/sub",
       "domains": [
@@ -26,9 +27,11 @@
         "anthropic.com",
         "claude.ai"
       ],
-      "exclude": ["Россия", "Torrent"]
+      "exclude": ["Россия", "Torrent"],
+      "interval": "2m",
+      "tolerance": 50
     },
-    {
+    "corpnet": {
       "name": "CorpNet",
       "url": "https://example.com/corpnet/sub",
       "ip": [
@@ -38,7 +41,7 @@
       ],
       "exclude": ["Россия"]
     },
-    {
+    "mixed": {
       "name": "Mixed",
       "url": "https://example.com/mixed/sub",
       "domains": [
@@ -50,5 +53,5 @@
       ],
       "exclude": ["Россия", "traffic"]
     }
-  ]
+  }
 }

@@ -2,12 +2,14 @@
 
 SUBS_JSON="/etc/sing-box/subs.json"
 SUBS_SCRIPT="/etc/sing-box/subs.sh"
+TEMPLATE_FILE="/etc/sing-box/config.template.json"
+DEFAULT_TEMPLATE_FILE="/etc/sing-box/config.template.default.json"
 LOG_FILE="/tmp/sing-box-sub.log"
 PID_FILE="/tmp/vpnsub.pid"
 
 case "$1" in
     list)
-        echo '{"get_config":{},"set_config":{"config":"String"},"run_script":{"dry_run":"Boolean","verbose":"Number"},"get_log":{},"get_syslog":{"lines":"Number"},"test_url":{"url":"String"},"get_sb_status":{}}'
+        echo '{"get_config":{},"set_config":{"config":"String"},"run_script":{"dry_run":"Boolean","verbose":"Number"},"get_log":{},"get_syslog":{"lines":"Number"},"test_url":{"url":"String"},"get_sb_status":{},"set_proxy":{"proxy":"String","selected":"String"},"test_delays":{"tags":"Array","url":"String"},"get_template":{},"set_template":{"template":"String"},"reset_template":{}}'
         ;;
     call)
         case "$2" in
@@ -43,9 +45,9 @@ case "$1" in
                 dry_run=$(echo "$input" | jq -r '.dry_run // false')
                 verbose=$(echo "$input"  | jq -r '.verbose  // 2')
 
-                # Build argument list (default: -vv)
-                args=""
-                [ "$dry_run" = "true" ] && args="$args --dry-run"
+                # Build command + options
+                [ "$dry_run" = "true" ] && cmd="dry-run" || cmd="run"
+                args="$cmd"
                 case "$verbose" in
                     1) args="$args -v"   ;;
                     2) args="$args -vv"  ;;
@@ -138,6 +140,64 @@ case "$1" in
                 fi
                 ;;
 
+            set_proxy)
+                read -r input
+                proxy=$(echo "$input" | jq -r '.proxy // ""')
+                selected=$(echo "$input" | jq -r '.selected // ""')
+
+                if [ -z "$proxy" ] || [ -z "$selected" ]; then
+                    printf '{"error":"Missing proxy or selected"}'
+                    exit 0
+                fi
+
+                # Tags use only alphanumeric and hyphens — no URL encoding needed
+                result=$(curl -s -X PUT \
+                    -H "Content-Type: application/json" \
+                    -d "{\"name\":\"${selected}\"}" \
+                    --max-time 5 \
+                    "http://127.0.0.1:9090/proxies/${proxy}" 2>/dev/null)
+                # Clash API returns 204 No Content on success
+                printf '{"result":"ok"}'
+                ;;
+
+            test_delays)
+                read -r input
+                test_url=$(echo "$input" | jq -r '.url // "https://www.gstatic.com/generate_204"')
+                # URL-encode test_url for use as query parameter
+                enc_url=$(printf '%s' "$test_url" | sed \
+                    -e 's/%/%25/g' -e 's/ /%20/g' -e 's/:/%3A/g' \
+                    -e 's|/|%2F|g' -e 's/?/%3F/g' -e 's/&/%26/g' \
+                    -e 's/=/%3D/g' -e 's/+/%2B/g' -e 's/#/%23/g')
+                tmpd=$(mktemp -d /tmp/vpnsub-dly-XXXXXX)
+                # Run delay tests in parallel
+                while IFS= read -r tag; do
+                    [ -z "$tag" ] && continue
+                    (
+                        resp=$(curl -s --max-time 8 \
+                            "http://127.0.0.1:9090/proxies/${tag}/delay?url=${enc_url}&timeout=5000" \
+                            2>/dev/null)
+                        delay=$(echo "$resp" | jq -r '.delay // 0' 2>/dev/null || echo 0)
+                        printf '%s\t%s\n' "$tag" "${delay:-0}" > "${tmpd}/${tag}"
+                    ) &
+                done <<TAGEOF
+$(echo "$input" | jq -r '.tags[]? // empty')
+TAGEOF
+                wait
+                # Build JSON result from temp files
+                result='{'
+                sep=''
+                for f in "${tmpd}"/*; do
+                    [ -f "$f" ] || continue
+                    tag=$(cut -f1 < "$f")
+                    delay=$(cut -f2 < "$f")
+                    result="${result}${sep}\"${tag}\":${delay:-0}"
+                    sep=','
+                done
+                result="${result}}"
+                rm -rf "$tmpd"
+                printf '{"delays":%s}' "$result"
+                ;;
+
             get_syslog)
                 read -r input
                 lines=$(echo "$input" | jq -r '.lines // 200')
@@ -147,6 +207,38 @@ case "$1" in
                 esac
                 syslog=$(logread -e sing-box 2>/dev/null | tail -n "$lines")
                 printf '{"log":%s}' "$(printf '%s' "$syslog" | jq -Rs '.')"
+                ;;
+
+            get_template)
+                if [ -f "$TEMPLATE_FILE" ]; then
+                    printf '{"template":%s}' "$(jq -Rs '.' "$TEMPLATE_FILE")"
+                else
+                    printf '{"error":"Template file not found: %s"}' "$TEMPLATE_FILE"
+                fi
+                ;;
+
+            set_template)
+                read -r input
+                tmpl=$(echo "$input" | jq -r '.template // ""')
+                if [ -z "$tmpl" ]; then
+                    printf '{"error":"Empty template"}'
+                    exit 0
+                fi
+                if echo "$tmpl" | jq -e '.' > /dev/null 2>&1; then
+                    printf '%s' "$tmpl" > "$TEMPLATE_FILE"
+                    printf '{"result":"ok"}'
+                else
+                    printf '{"error":"Invalid JSON"}'
+                fi
+                ;;
+
+            reset_template)
+                if [ ! -f "$DEFAULT_TEMPLATE_FILE" ]; then
+                    printf '{"error":"Default template not found: %s"}' "$DEFAULT_TEMPLATE_FILE"
+                    exit 0
+                fi
+                cp "$DEFAULT_TEMPLATE_FILE" "$TEMPLATE_FILE"
+                printf '{"template":%s}' "$(jq -Rs '.' "$TEMPLATE_FILE")"
                 ;;
 
             *)
