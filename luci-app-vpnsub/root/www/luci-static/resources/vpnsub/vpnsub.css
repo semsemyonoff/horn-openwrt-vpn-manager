@@ -5,6 +5,10 @@
     margin-bottom: 1em;
 }
 
+.vpnsub-tabs {
+    color: inherit;
+}
+
 .vpnsub-tab {
     background: none;
     border: none;
@@ -12,19 +16,25 @@
     margin-bottom: -2px;
     padding: 0.5em 1.25em;
     cursor: pointer;
-    font-size: 1em;
-    color: var(--text-low, #888);
-    transition: color 0.15s, border-color 0.15s;
+    font: inherit;
+    color: inherit;
+    opacity: 0.7;
+    transition:
+        opacity 0.15s,
+        border-color 0.15s,
+        color 0.15s;
 }
 
 .vpnsub-tab:hover {
-    color: var(--text-high, #eee);
+    color: inherit;
+    opacity: 1;
 }
 
 .vpnsub-tab-active {
-    color: var(--text-high, #fff) !important;
-    border-bottom-color: var(--primary-color, #509eaf);
+    color: inherit !important;
+    border-bottom-color: var(--primary-color, currentColor);
     font-weight: 600;
+    opacity: 1;
 }
 
 .vpnsub-tab-pane {
@@ -269,7 +279,7 @@
 }
 
 .vpnsub-test-key {
-    background: var(--mid-background-color, #2a2a2a);
+    background: var(--mid-background-color, rgba(0, 0, 0, 0.07));
     padding: 0.4em 0.75em;
     font-weight: 600;
     font-size: 0.88em;
@@ -301,7 +311,9 @@
     cursor: pointer;
     font-size: 0.88em;
     color: var(--text-low, #aaa);
-    transition: background 0.12s, color 0.12s;
+    transition:
+        background 0.12s,
+        color 0.12s;
 }
 
 .vpnsub-mode-btn + .vpnsub-mode-btn {
@@ -309,8 +321,8 @@
 }
 
 .vpnsub-mode-btn:hover {
-    background: var(--mid-background-color, #2a2a2a);
-    color: var(--text-high, #eee);
+    background: var(--mid-background-color, rgba(0, 0, 0, 0.07));
+    color: var(--text-high, inherit);
 }
 
 .vpnsub-mode-active {
@@ -395,7 +407,9 @@
     border-radius: 3px;
     cursor: pointer;
     font-size: 0.88em;
-    transition: border-color 0.12s, color 0.12s;
+    transition:
+        border-color 0.12s,
+        color 0.12s;
 }
 
 .vpnsub-proxy-node-row:hover {
@@ -429,8 +443,12 @@
     flex-shrink: 0;
 }
 
-.vpnsub-latency-good { color: #2ecc71; }
-.vpnsub-latency-warn { color: #f39c12; }
+.vpnsub-latency-good {
+    color: #2ecc71;
+}
+.vpnsub-latency-warn {
+    color: #f39c12;
+}
 
 .vpnsub-proxy-node-name,
 .vpnsub-proxy-current-name {
@@ -438,7 +456,8 @@
     overflow: hidden;
     text-overflow: ellipsis;
     max-width: 28em;
-    font-family: 'Noto Color Emoji', 'Apple Color Emoji', 'Segoe UI Emoji', inherit;
+    font-family:
+        "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", inherit;
 }
 
 /* Single-node display */
@@ -475,7 +494,10 @@
 /* Highlight overlay — behind the textarea, not interactive */
 .vpnsub-template-highlight {
     position: absolute;
-    top: 0; left: 0; right: 0; bottom: 0;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
     margin: 0;
     overflow: hidden;
     pointer-events: none;
@@ -484,11 +506,21 @@
 }
 
 /* Syntax colors (scoped to highlight overlay) */
-.vpnsub-template-highlight .hj-ph  { color: #f1c40f; }
-.vpnsub-template-highlight .hj-key { color: #81a1c1; }
-.vpnsub-template-highlight .hj-str { color: #a3be8c; }
-.vpnsub-template-highlight .hj-kw  { color: #bf616a; }
-.vpnsub-template-highlight .hj-num { color: #d08770; }
+.vpnsub-template-highlight .hj-ph {
+    color: #f1c40f;
+}
+.vpnsub-template-highlight .hj-key {
+    color: #81a1c1;
+}
+.vpnsub-template-highlight .hj-str {
+    color: #a3be8c;
+}
+.vpnsub-template-highlight .hj-kw {
+    color: #bf616a;
+}
+.vpnsub-template-highlight .hj-num {
+    color: #d08770;
+}
 
 /* Error line highlight */
 .vpnsub-template-highlight .hj-err-line {
@@ -551,7 +583,7 @@
 }
 
 .vpnsub-tpl-ref-table thead th {
-    background: var(--mid-background-color, #2a2a2a);
+    background: var(--mid-background-color, rgba(0, 0, 0, 0.07));
     font-weight: 600;
     white-space: nowrap;
 }
@@ -565,6 +597,14 @@
 .vpnsub-tpl-ref-type {
     white-space: nowrap;
     color: var(--text-low, #888);
+}
+
+/* ── Tab description ─────────────────────────────────────────────────────── */
+.vpnsub-tab-desc {
+    font-size: 0.85em;
+    color: var(--text-low, #888);
+    margin: -0.5em 0 1em 0;
+    padding: 0 0.25em;
 }
 
 /* ── Log output ──────────────────────────────────────────────────────────── */

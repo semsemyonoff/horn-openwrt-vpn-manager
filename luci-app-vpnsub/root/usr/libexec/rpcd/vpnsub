@@ -7,9 +7,15 @@ DEFAULT_TEMPLATE_FILE="/etc/sing-box/config.template.default.json"
 LOG_FILE="/tmp/sing-box-sub.log"
 PID_FILE="/tmp/vpnsub.pid"
 
+DOMAINS_JSON="/etc/horn-vpn-manager/domains.json"
+DOMAINS_SCRIPT="/etc/horn-vpn-manager/getdomains.sh"
+DOMAINS_LOG="/tmp/getdomains.log"
+DOMAINS_PID="/tmp/getdomains.pid"
+MANUAL_IPS="/etc/horn-vpn-manager/lists/manual-ip.lst"
+
 case "$1" in
     list)
-        echo '{"get_config":{},"set_config":{"config":"String"},"run_script":{"dry_run":"Boolean","verbose":"Number"},"get_log":{},"get_syslog":{"lines":"Number"},"test_url":{"url":"String"},"get_sb_status":{},"set_proxy":{"proxy":"String","selected":"String"},"test_delays":{"tags":"Array","url":"String"},"get_template":{},"set_template":{"template":"String"},"reset_template":{}}'
+        echo '{"get_config":{},"set_config":{"config":"String"},"run_script":{"dry_run":"Boolean","verbose":"Number"},"get_log":{},"get_syslog":{"lines":"Number"},"test_url":{"url":"String"},"get_sb_status":{},"set_proxy":{"proxy":"String","selected":"String"},"test_delays":{"tags":"Array","url":"String"},"get_template":{},"set_template":{"template":"String"},"reset_template":{},"get_domains_config":{},"set_domains_config":{"config":"String"},"get_manual_ips":{},"set_manual_ips":{"ips":"String"},"run_getdomains":{"verbose":"Number"},"get_domains_log":{},"get_manual_domains":{},"set_manual_domains":{"domains":"Array"}}'
         ;;
     call)
         case "$2" in
@@ -239,6 +245,148 @@ TAGEOF
                 fi
                 cp "$DEFAULT_TEMPLATE_FILE" "$TEMPLATE_FILE"
                 printf '{"template":%s}' "$(jq -Rs '.' "$TEMPLATE_FILE")"
+                ;;
+
+            get_domains_config)
+                if [ -f "$DOMAINS_JSON" ]; then
+                    printf '{"config":%s}' "$(cat "$DOMAINS_JSON")"
+                else
+                    printf '{"config":{"domains_url":"","subnet_urls":[]}}'
+                fi
+                ;;
+
+            set_domains_config)
+                read -r input
+                if echo "$input" | jq -e '.config' > /dev/null 2>&1; then
+                    mkdir -p "$(dirname "$DOMAINS_JSON")"
+                    echo "$input" | jq '.config' > "$DOMAINS_JSON"
+                    printf '{"result":"ok"}'
+                else
+                    printf '{"error":"Invalid config JSON"}'
+                fi
+                ;;
+
+            get_manual_ips)
+                if [ -f "$MANUAL_IPS" ]; then
+                    printf '{"ips":%s}' "$(jq -Rs '.' "$MANUAL_IPS")"
+                else
+                    printf '{"ips":""}'
+                fi
+                ;;
+
+            set_manual_ips)
+                read -r input
+                ips=$(echo "$input" | jq -r '.ips // ""')
+                mkdir -p "$(dirname "$MANUAL_IPS")"
+                printf '%s' "$ips" > "$MANUAL_IPS"
+                printf '{"result":"ok"}'
+                ;;
+
+            run_getdomains)
+                if [ ! -f "$DOMAINS_SCRIPT" ]; then
+                    printf '{"error":"Script not found: %s"}' "$DOMAINS_SCRIPT"
+                    exit 0
+                fi
+                if [ ! -x "$DOMAINS_SCRIPT" ]; then
+                    chmod +x "$DOMAINS_SCRIPT"
+                fi
+                read -r input
+                verbose=$(echo "$input" | jq -r '.verbose // 2')
+                args="run"
+                case "$verbose" in
+                    1) args="$args -v"   ;;
+                    2) args="$args -vv"  ;;
+                    3) args="$args -vvv" ;;
+                esac
+                > "$DOMAINS_LOG"
+                # shellcheck disable=SC2086
+                sh "$DOMAINS_SCRIPT" $args > /dev/null 2>&1 &
+                echo $! > "$DOMAINS_PID"
+                printf '{"result":"started"}'
+                ;;
+
+            get_domains_log)
+                running=false
+                if [ -f "$DOMAINS_PID" ]; then
+                    pid=$(cat "$DOMAINS_PID")
+                    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+                        running=true
+                    fi
+                fi
+                if [ -f "$DOMAINS_LOG" ]; then
+                    log_json=$(jq -Rs '.' "$DOMAINS_LOG")
+                else
+                    log_json='""'
+                fi
+                printf '{"log":%s,"running":%s}' "$log_json" "$running"
+                ;;
+
+            get_manual_domains)
+                if [ ! -f /etc/config/dhcp ]; then
+                    printf '{"domains":[]}'
+                    exit 0
+                fi
+                domains_json=$(awk '
+                    /^config ipset/ { is_vpn=0; in_ipset=1; next }
+                    /^config /      { is_vpn=0; in_ipset=0; next }
+                    in_ipset && /list name/ && /vpn_domains/ { is_vpn=1; next }
+                    in_ipset && is_vpn && /list domain / {
+                        line=$0
+                        sub(/^[[:space:]]*list domain ./, "", line)
+                        sub(/.[[:space:]]*$/, "", line)
+                        print line
+                    }
+                ' /etc/config/dhcp | jq -Rs '[split("\n")[] | select(. != "")]')
+                printf '{"domains":%s}' "$domains_json"
+                ;;
+
+            set_manual_domains)
+                read -r input
+                if [ ! -f /etc/config/dhcp ]; then
+                    printf '{"error":"File not found: /etc/config/dhcp"}'
+                    exit 0
+                fi
+
+                # Collect old domains (sorted) to detect changes
+                old_domains=$(awk '
+                    /^config ipset/ { is_vpn=0; in_ipset=1; next }
+                    /^config /      { is_vpn=0; in_ipset=0; next }
+                    in_ipset && /list name/ && /vpn_domains/ { is_vpn=1; next }
+                    in_ipset && is_vpn && /list domain / {
+                        line=$0
+                        sub(/^[[:space:]]*list domain ./, "", line)
+                        sub(/.[[:space:]]*$/, "", line)
+                        print line
+                    }
+                ' /etc/config/dhcp | sort)
+
+                new_domains=$(echo "$input" | jq -r '.domains[]? // empty' | sort)
+
+                # Strip existing vpn_domains ipset blocks
+                stripped=$(awk '
+                    function flush() { if (!is_vpn && buf != "") printf "%s", buf }
+                    /^config ipset/ { flush(); buf=$0"\n"; is_vpn=0; in_ipset=1; next }
+                    /^config /      { flush(); buf=$0"\n"; is_vpn=0; in_ipset=0; next }
+                    in_ipset && /list name/ && /vpn_domains/ { is_vpn=1; buf=buf$0"\n"; next }
+                    { buf=buf$0"\n" }
+                    END { flush() }
+                ' /etc/config/dhcp)
+
+                # Rewrite the file: stripped content + new domain blocks
+                {
+                    printf '%s' "$stripped"
+                    echo "$input" | jq -r '.domains[]? // empty' | while IFS= read -r domain; do
+                        [ -z "$domain" ] && continue
+                        printf 'config ipset\n\tlist name '\''vpn_domains'\''\n\tlist domain '\''%s'\''\n\n' "$domain"
+                    done
+                } > /etc/config/dhcp
+
+                if [ "$new_domains" != "$old_domains" ]; then
+                    /etc/init.d/dnsmasq restart > /dev/null 2>&1
+                    printf '{"result":"ok","restarted":true}'
+                else
+                    printf '{"result":"ok","restarted":false}'
+                fi
                 ;;
 
             *)

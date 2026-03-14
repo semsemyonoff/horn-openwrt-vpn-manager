@@ -150,6 +150,12 @@ msgstr "List mode"
 msgid "Logs"
 msgstr "Logs"
 
+msgid "Sing-box logs"
+msgstr "Sing-box logs"
+
+msgid "Sing-box template config"
+msgstr "Sing-box template config"
+
 msgid "sing-box system log"
 msgstr "sing-box system log"
 
@@ -294,3 +300,24 @@ msgstr "Reset template to default?"
 
 msgid "JSON error: "
 msgstr "JSON error: "
+
+msgid "Domain list"
+msgstr "Domain list"
+
+msgid "Domains URL"
+msgstr "Domains URL"
+
+msgid "URL of dnsmasq nfset domain list (e.g. from itdoginfo/allow-domains)"
+msgstr "URL of dnsmasq nfset domain list (e.g. from itdoginfo/allow-domains)"
+
+msgid "Subnet URLs"
+msgstr "Subnet URLs"
+
+msgid "URLs of IP subnet lists to route through VPN (one per line)"
+msgstr "URLs of IP subnet lists to route through VPN (one per line)"
+
+msgid "Manual IP / CIDR"
+msgstr "Manual IP / CIDR"
+
+msgid "Static IP addresses or subnets to always route through VPN, one per line"
+msgstr "Static IP addresses or subnets to always route through VPN, one per line"

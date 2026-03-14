@@ -150,6 +150,12 @@ msgstr "Режим списка"
 msgid "Logs"
 msgstr "Логи"
 
+msgid "Sing-box logs"
+msgstr "Логи sing-box"
+
+msgid "Sing-box template config"
+msgstr "Шаблон конфига sing-box"
+
 msgid "sing-box system log"
 msgstr "Системный лог sing-box"
 
@@ -294,3 +300,27 @@ msgstr "Сбросить шаблон к умолчанию?"
 
 msgid "JSON error: "
 msgstr "Ошибка JSON: "
+
+msgid "Domains"
+msgstr "Домены"
+
+msgid "Domain list"
+msgstr "Список доменов"
+
+msgid "Domains URL"
+msgstr "URL списка доменов"
+
+msgid "URL of dnsmasq nfset domain list (e.g. from itdoginfo/allow-domains)"
+msgstr "URL списка доменов в формате dnsmasq nfset (например, из itdoginfo/allow-domains)"
+
+msgid "Subnet URLs"
+msgstr "URL подсетей"
+
+msgid "URLs of IP subnet lists to route through VPN (one per line)"
+msgstr "URL списков IP-подсетей для маршрутизации через VPN (по одному на строку)"
+
+msgid "Manual IP / CIDR"
+msgstr "Ручные IP / CIDR"
+
+msgid "Static IP addresses or subnets to always route through VPN, one per line"
+msgstr "Статические IP-адреса или подсети для постоянной маршрутизации через VPN, по одному на строку"
