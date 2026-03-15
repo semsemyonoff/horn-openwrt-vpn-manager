@@ -1,0 +1,565 @@
+.vpnsub-tab-pane {
+    padding-top: 0.25em;
+}
+
+/* ── Validation ──────────────────────────────────────────────────────────── */
+.vpnsub-invalid {
+    border-color: #e44 !important;
+    outline-color: #e44 !important;
+}
+
+.vpnsub-errmsg {
+    color: #e44;
+    font-size: 0.85em;
+    margin-top: 3px;
+}
+
+/* ── Run options (checkboxes) ────────────────────────────────────────────── */
+.vpnsub-run-options {
+    display: flex;
+    gap: 1.5em;
+    align-items: center;
+    margin-bottom: 0.75em;
+}
+
+.vpnsub-run-option {
+    display: flex;
+    align-items: center;
+    gap: 0.3em;
+    cursor: pointer;
+    user-select: none;
+}
+
+/* ── Log actions bar ─────────────────────────────────────────────────────── */
+.vpnsub-log-actions {
+    margin-bottom: 0.6em;
+}
+
+/* ── Subscription card ───────────────────────────────────────────────────── */
+.vpnsub-sub-card {
+    border: 1px solid var(--border-color-low, #444);
+    border-radius: 4px;
+    margin-bottom: 1em;
+    padding: 0.75em 1em;
+}
+
+.vpnsub-sub-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.5em;
+}
+
+.vpnsub-sub-header-left {
+    display: flex;
+    align-items: center;
+    gap: 0.6em;
+}
+
+.vpnsub-sub-title {
+    font-size: 1em;
+}
+
+.vpnsub-sub-status {
+    font-size: 0.8em;
+    color: var(--primary-color, #509eaf);
+    font-family: monospace;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 28em;
+}
+
+.vpnsub-sub-remove {
+    margin-left: auto;
+}
+
+/* ── Collapsible routing row ─────────────────────────────────────────────── */
+.vpnsub-collapse-label {
+    cursor: pointer;
+    user-select: none;
+}
+
+.vpnsub-collapse-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+    font-weight: 500;
+    color: var(--text-high, inherit);
+}
+
+.vpnsub-collapse-label:hover .vpnsub-collapse-toggle {
+    color: var(--primary-color, #509eaf);
+}
+
+.vpnsub-collapse-arrow {
+    font-size: 0.7em;
+    width: 1em;
+    display: inline-block;
+    text-align: center;
+    transition: transform 0.15s;
+}
+
+.vpnsub-count-badge {
+    display: inline-block;
+    background: var(--primary-color, #509eaf);
+    color: #fff;
+    border-radius: 10px;
+    padding: 0 0.5em;
+    font-size: 0.75em;
+    font-weight: 600;
+    line-height: 1.6;
+    min-width: 1.4em;
+    text-align: center;
+}
+
+.vpnsub-collapse-body {
+    padding: 0.5em 0 0.25em 0.25em;
+}
+
+.vpnsub-collapse-description {
+    font-size: 0.85em;
+    color: var(--text-low, #888);
+    margin-top: 0.35em;
+}
+
+/* ── DynamicList wrapper & toolbar ──────────────────────────────────────── */
+.vpnsub-dynlist-wrap {
+    max-width: 40em;
+}
+
+.vpnsub-dynlist-toolbar {
+    margin-bottom: 4px;
+}
+
+.vpnsub-dynlist-toggle {
+    font-size: 0.8em;
+    padding: 1px 0.6em;
+    opacity: 0.7;
+}
+
+.vpnsub-dynlist-toggle:hover {
+    opacity: 1;
+}
+
+.vpnsub-dynlist-textarea {
+    width: 100%;
+    box-sizing: border-box;
+    font-family: monospace;
+    font-size: 0.9em;
+    resize: vertical;
+}
+
+/* ── DynamicList ─────────────────────────────────────────────────────────── */
+.vpnsub-dynlist {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.vpnsub-dynlist-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.vpnsub-dynlist-row input {
+    flex: 1;
+}
+
+.vpnsub-dynlist-remove {
+    flex-shrink: 0;
+    min-width: 2em;
+    padding: 0 0.4em;
+    font-weight: bold;
+}
+
+.vpnsub-dynlist-add {
+    font-weight: bold;
+}
+
+.vpnsub-dynlist-create {
+    padding-top: 0.35rem;
+}
+
+/* ── Test tab ────────────────────────────────────────────────────────────── */
+.vpnsub-test-row-input {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    margin-bottom: 0.5em;
+}
+
+.vpnsub-test-urlinput {
+    flex: 1;
+    max-width: 36em;
+}
+
+.vpnsub-test-spinner {
+    margin-top: 1em;
+    color: var(--text-low, #888);
+    font-style: italic;
+}
+
+.vpnsub-test-error {
+    margin-top: 0.75em;
+    color: #e44;
+}
+
+.vpnsub-test-table {
+    margin-top: 1em;
+    display: grid;
+    grid-template-columns: minmax(8em, auto) 1fr;
+    gap: 0;
+    border: 1px solid var(--border-color-low, #444);
+    border-radius: 4px;
+    overflow: hidden;
+    max-width: 42em;
+}
+
+.vpnsub-test-kv {
+    display: contents;
+}
+
+.vpnsub-test-kv:not(:last-child) .vpnsub-test-key,
+.vpnsub-test-kv:not(:last-child) .vpnsub-test-val {
+    border-bottom: 1px solid var(--border-color-low, #333);
+}
+
+.vpnsub-test-key {
+    background: var(--mid-background-color, rgba(0, 0, 0, 0.07));
+    padding: 0.4em 0.75em;
+    font-weight: 600;
+    font-size: 0.88em;
+    white-space: nowrap;
+}
+
+.vpnsub-test-val {
+    padding: 0.4em 0.75em;
+    font-family: monospace;
+    font-size: 0.88em;
+    word-break: break-word;
+}
+
+/* ── Proxy widget ────────────────────────────────────────────────────────────── */
+
+/* Mode toggle (Auto / Manual pill) */
+.vpnsub-mode-toggle {
+    display: inline-flex;
+    margin-bottom: 0.65em;
+}
+
+.vpnsub-mode-btn {
+    min-width: 6.5em;
+    margin: 0;
+    font-size: 0.88em;
+    border-radius: 0;
+}
+
+.vpnsub-mode-btn + .vpnsub-mode-btn {
+    margin-left: -1px;
+}
+
+.vpnsub-mode-active {
+    font-weight: 600;
+}
+
+.vpnsub-mode-btn:first-child {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+.vpnsub-mode-btn:last-child {
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+}
+
+/* Auto pane */
+.vpnsub-proxy-current {
+    display: flex;
+    align-items: center;
+    gap: 0.3em;
+    margin-bottom: 0.5em;
+    font-size: 0.9em;
+}
+
+.vpnsub-proxy-current-label {
+    white-space: nowrap;
+}
+
+.vpnsub-proxy-current-name {
+    font-family: monospace;
+    color: var(--primary-color, #509eaf);
+}
+
+.vpnsub-proxy-current-none {
+    color: var(--text-low, #888);
+    font-style: italic;
+}
+
+.vpnsub-proxy-auto-settings {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.3em;
+    font-size: 0.88em;
+}
+
+.vpnsub-proxy-setting-label {
+    white-space: nowrap;
+}
+
+.vpnsub-proxy-setting-sep {
+    display: inline-block;
+    width: 0.8em;
+}
+
+.vpnsub-proxy-setting-unit {
+    color: var(--text-low, #888);
+}
+
+.vpnsub-proxy-auto-settings .cbi-input-text {
+    width: 5em;
+}
+
+/* Manual pane */
+.vpnsub-proxy-manual-toolbar {
+    margin-bottom: 0.5em;
+}
+
+.vpnsub-test-latency-btn {
+    font-size: 0.85em;
+    padding: 0.2em 0.75em;
+}
+
+.vpnsub-proxy-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 18em;
+    overflow-y: auto;
+    max-width: 38em;
+}
+
+.vpnsub-proxy-node-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.3em 0.65em;
+    border: 1px solid var(--border-color-low, #444);
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 0.88em;
+    transition:
+        border-color 0.12s,
+        color 0.12s;
+}
+
+.vpnsub-proxy-node-row:hover {
+    border-color: var(--primary-color, #509eaf);
+    color: var(--text-high, #eee);
+}
+
+.vpnsub-proxy-node-row.vpnsub-proxy-selected {
+    border-color: var(--primary-color, #509eaf);
+    color: var(--primary-color, #509eaf);
+    font-weight: 600;
+}
+
+.vpnsub-proxy-node-row.vpnsub-proxy-selected .vpnsub-latency {
+    opacity: 0.8;
+}
+
+.vpnsub-no-latency {
+    color: #e44;
+    font-size: 0.88em;
+    font-weight: bold;
+    font-family: monospace;
+    flex-shrink: 0;
+}
+
+/* Shared */
+.vpnsub-latency {
+    font-size: 0.85em;
+    font-family: monospace;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.vpnsub-latency-good {
+    color: #2ecc71;
+}
+.vpnsub-latency-warn {
+    color: #f39c12;
+}
+
+.vpnsub-proxy-node-name,
+.vpnsub-proxy-current-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 28em;
+    font-family:
+        "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", inherit;
+}
+
+/* Single-node display */
+.vpnsub-proxy-single {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    font-size: 0.88em;
+    color: var(--primary-color, #509eaf);
+    font-family: monospace;
+}
+
+/* ── Template editor ─────────────────────────────────────────────────────── */
+
+/* Shared metrics — must be identical on highlight and textarea */
+.vpnsub-template-highlight,
+.vpnsub-template-editor {
+    font-family: monospace;
+    font-size: 0.85em;
+    line-height: 1.5;
+    padding: 0.75em;
+    white-space: pre-wrap;
+    word-break: break-word;
+    box-sizing: border-box;
+}
+
+.vpnsub-template-wrap {
+    position: relative;
+    background: #1a1a1a;
+    border: 1px solid var(--border-color-low, #444);
+    border-radius: 4px;
+}
+
+/* Highlight overlay — behind the textarea, not interactive */
+.vpnsub-template-highlight {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    margin: 0;
+    overflow: hidden;
+    pointer-events: none;
+    color: #e0e0e0;
+    background: transparent;
+}
+
+/* Syntax colors (scoped to highlight overlay) */
+.vpnsub-template-highlight .hj-ph {
+    color: #f1c40f;
+}
+.vpnsub-template-highlight .hj-key {
+    color: #81a1c1;
+}
+.vpnsub-template-highlight .hj-str {
+    color: #a3be8c;
+}
+.vpnsub-template-highlight .hj-kw {
+    color: #bf616a;
+}
+.vpnsub-template-highlight .hj-num {
+    color: #d08770;
+}
+
+/* Error line highlight */
+.vpnsub-template-highlight .hj-err-line {
+    display: block;
+    background: rgba(220, 50, 50, 0.18);
+}
+
+/* Error state: red border on the wrapper */
+.vpnsub-template-wrap--error {
+    border-color: #e44 !important;
+}
+
+/* Textarea — transparent text so highlight shows through */
+.vpnsub-template-editor {
+    position: relative;
+    display: block;
+    width: 100%;
+    min-height: 28em;
+    resize: vertical;
+    margin: 0;
+    color: transparent;
+    caret-color: #e0e0e0;
+    background: transparent;
+    border: none;
+    outline: none;
+    z-index: 1;
+}
+
+.vpnsub-template-error {
+    color: #e44;
+    font-size: 0.85em;
+    margin-bottom: 0.5em;
+}
+
+.vpnsub-template-dirty {
+    color: #f39c12;
+    font-size: 0.85em;
+}
+
+.vpnsub-template-status {
+    font-family: monospace;
+    font-size: 0.8em;
+    color: #e44;
+    margin-top: 0.35em;
+}
+
+/* ── Placeholder reference table ─────────────────────────────────────────── */
+.vpnsub-tpl-ref-table {
+    width: 100%;
+    max-width: 60em;
+    border-collapse: collapse;
+    font-size: 0.88em;
+}
+
+.vpnsub-tpl-ref-table th,
+.vpnsub-tpl-ref-table td {
+    text-align: left;
+    padding: 0.4em 0.75em;
+    border-bottom: 1px solid var(--border-color-low, #444);
+}
+
+.vpnsub-tpl-ref-table thead th {
+    background: var(--mid-background-color, rgba(0, 0, 0, 0.07));
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.vpnsub-tpl-ref-name {
+    font-family: monospace;
+    white-space: nowrap;
+    color: var(--primary-color, #509eaf);
+}
+
+.vpnsub-tpl-ref-type {
+    white-space: nowrap;
+    color: var(--text-low, #888);
+}
+
+/* ── Tab description ─────────────────────────────────────────────────────── */
+.vpnsub-tab-desc {
+    font-size: 0.85em;
+    color: var(--text-low, #888);
+    margin: -0.5em 0 1em 0;
+    padding: 0 0.25em;
+}
+
+/* ── Log output ──────────────────────────────────────────────────────────── */
+.vpnsub-log {
+    background: #1a1a1a;
+    color: #e0e0e0;
+    font-family: monospace;
+    font-size: 0.85em;
+    padding: 0.75em;
+    border-radius: 4px;
+    max-height: 24em;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+}

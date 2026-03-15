@@ -2,57 +2,107 @@
 
 ## Project Structure & Module Organization
 
-This repository is intentionally small and centered on one OpenWrt automation script:
+This repository contains two OpenWrt packages plus the local Docker-based build tooling used to assemble them.
 
-- `subs.sh` — main POSIX `sh` script that downloads subscription data (auto-detects raw VLESS or base64 format), generates sing-box outbounds and route rules, validates the config, and restarts the service. Supports `--dry-run` and `-v`/`-vv`/`-vvv` verbosity flags.
-- `subs.example.json` — example subscription config; copy to `subs.json` on the router and fill in real URLs. `subs.json` is not tracked in the repository.  The subscription with `"default": true` provides the fallback outbound; others require a `domains` array for routing rules.
-- `config.template.json` — sing-box template with placeholders: `__DEFAULT_OUTBOUND__`, `__DEFAULT_TAG__`, `__VLESS_OUTBOUNDS__`, `__URLTEST_OUTBOUNDS__`, `__ROUTE_RULES__`.
-- `README.md` — setup, flags, deployment, and cron usage notes.
+### Root tooling
 
-There is no `src/` or `tests/` directory yet; keep new files near the root unless a larger test/docs structure is introduced.
+- `Makefile` — main entry point for local development: builds Docker images, packages, shells, and lint checks
+- `Dockerfile` — OpenWrt SDK builder image
+- `docker/entrypoint.sh` — syncs package sources into the SDK and builds `horn-vpn-manager` / `horn-vpn-manager-luci`
+- `bin/` — local build output (`.apk` / `.ipk` artifacts); treat as generated output, not source of truth
+
+### `horn-vpn-manager` (core package)
+
+- `horn-vpn-manager/Makefile` — OpenWrt package definition
+- `horn-vpn-manager/files/vpn-manager.sh` — installed CLI entry point (`vpn-manager`)
+- `horn-vpn-manager/files/subs.sh` — downloads subscription data and generates `/etc/sing-box/config.json`
+- `horn-vpn-manager/files/getdomains.sh` — downloads dnsmasq domain/subnet lists and rebuilds the VPN IP list
+- `horn-vpn-manager/files/horn-vpn-manager.init` — boot-time init script
+- `horn-vpn-manager/files/config.template.json` — default sing-box template
+- `horn-vpn-manager/files/subs.example.json` — example subscription config
+- `horn-vpn-manager/files/domains.example.json` — example domain/subnet config
+
+### `horn-vpn-manager-luci` (LuCI addon)
+
+- `horn-vpn-manager-luci/Makefile` — LuCI package definition
+- `horn-vpn-manager-luci/root/usr/libexec/rpcd/horn-vpn-manager` — rpcd backend
+- `horn-vpn-manager-luci/root/www/luci-static/resources/view/horn-vpn-manager/config.js` — main LuCI view
+- `horn-vpn-manager-luci/root/www/luci-static/resources/horn-vpn-manager/style.css` — frontend styles
+- `horn-vpn-manager-luci/root/usr/share/rpcd/acl.d/horn-vpn-manager.json` — ACL
+- `horn-vpn-manager-luci/root/usr/share/luci/menu.d/horn-vpn-manager.json` — menu entry
+- `horn-vpn-manager-luci/po/{en,ru}/horn-vpn-manager.po` — translations
+
+### On-device layout
+
+- CLI: `/usr/bin/vpn-manager`
+- Core scripts: `/usr/libexec/horn-vpn-manager/`
+- Config dir: `/etc/horn-vpn-manager/`
+- List/cache dir: `/etc/horn-vpn-manager/lists/`
+- Generated sing-box config: `/etc/sing-box/config.json`
+- Default template shipped by package: `/usr/share/horn-vpn-manager/config.template.default.json`
+- Tag/name cache for LuCI: `/etc/horn-vpn-manager/subs-tags.json`
+- Logs: `/tmp/horn-vpn-manager-sub.log`, `/tmp/horn-vpn-manager-domains.log`
 
 ## Build, Test, and Development Commands
 
-- `sh -n subs.sh` — quick syntax check for the shell script.
-- `shellcheck subs.sh` — optional lint pass if `shellcheck` is available locally.
-- `jq . subs.example.json` — validate example subscription JSON formatting.
-- `jq . config.template.json` — validate template JSON structure before deployment.
+- `make help` — list supported local tasks
+- `make build` — build `.apk` packages with the SNAPSHOT SDK
+- `make build-ipk OPENWRT_RELEASE=23.05.5` — build `.ipk` packages against a release SDK
+- `make shell` / `make shell-ipk` — open an interactive shell inside the SDK container
+- `make lint` — run `sh -n`, `shellcheck` when available, and `jq` validation for packaged JSON files
 
-Do not run `subs.sh` locally against live infrastructure. Use `--dry-run -v` for safe local inspection of generated config output.
+Useful focused checks:
+
+- `sh -n horn-vpn-manager/files/subs.sh`
+- `sh -n horn-vpn-manager/files/getdomains.sh`
+- `sh -n horn-vpn-manager/files/vpn-manager.sh`
+- `sh -n horn-vpn-manager-luci/root/usr/libexec/rpcd/horn-vpn-manager`
+- `jq . horn-vpn-manager/files/config.template.json`
+- `jq . horn-vpn-manager/files/subs.example.json`
+- `jq . horn-vpn-manager/files/domains.example.json`
+
+Do not run the OpenWrt scripts against your macOS/Linux host as if they were local utilities. They expect OpenWrt paths, services, and package layout. For safe runtime inspection, use an OpenWrt device/container and prefer `vpn-manager subscriptions dry-run -v`.
 
 ## Coding Style & Naming Conventions
 
-Use POSIX `sh`; avoid Bash-only features. Match the existing style:
+Use POSIX `sh`; avoid Bash-only features in packaged scripts and the rpcd backend.
 
 - Follow `.editorconfig` as the source of truth.
-- Use 2-space indentation in `*.sh` and `*.json`; use 4 spaces elsewhere unless overridden.
-- Uppercase variable names for path/config constants (`SUBS_CONF`, `TMPDIR`).
-- Lowercase snake_case for shell functions (`parse_uri`, `is_excluded`).
-- Keep log messages short and operational.
+- Use 2-space indentation in `*.sh` and `*.json`.
+- Keep shell constants uppercase (`CONF_DIR`, `TMPDIR`, `LOG_FILE`).
+- Keep shell functions lowercase snake_case (`compute_node_hash`, `wait_for_network`).
+- Keep log lines short and operational.
+- Preserve sing-box template placeholders exactly: `__LOG_LEVEL__`, `__VLESS_OUTBOUNDS__`, `__GROUP_OUTBOUNDS__`, `__ROUTE_RULES__`, `__DEFAULT_TAG__`.
+- `subs.json` uses a keyed object under `subscriptions`; those keys become stable tag prefixes (`<id>-single`, `<id>-auto`, `<id>-manual`, `<id>-node-<hash>`). Do not silently convert it to an array-based format.
 
-Prefer small, composable shell blocks over complex pipelines. Preserve placeholder names in `config.template.json` exactly. Keep Markdown files with a final newline; do not add one to files where `.editorconfig` forbids it.
+For LuCI JS, stay consistent with the existing plain LuCI style: RPC declarations at top, DOM creation via `E(...)`, no framework additions.
 
 ## Testing Guidelines
 
-There is no automated test suite yet. Before opening a change:
+There is no automated integration test suite yet. Before opening a change:
 
-- Run `sh -n subs.sh`.
-- Lint with `shellcheck subs.sh` when available.
-- Validate JSON files with `jq`.
-- If editing generation logic, test on a router or compatible environment with `sing-box check -c /etc/sing-box/config.json.new`.
-
-Document manual verification steps in the PR when runtime behavior changes.
+- Run `make lint`.
+- If you touch shell logic, run the relevant `sh -n` checks directly.
+- If you touch JSON templates/examples, validate them with `jq`.
+- If you change package manifests or Docker build flow, run the affected `make build*` target when feasible.
+- If you change sing-box generation logic, verify on-device with `sing-box check -c /etc/sing-box/config.json.new`.
+- If you change domain-list behavior, validate with `vpn-manager domains run -v` on OpenWrt and ensure dnsmasq/firewall reload still succeeds.
 
 ## Commit & Pull Request Guidelines
 
-Git history is currently minimal (`Init`), so use clear imperative commit messages, preferably scoped, for example:
+Use short imperative commit messages, preferably scoped:
 
-- `feat: add dry-run mode`
-- `fix: skip excluded servers case-insensitively`
-- `docs: clarify cron setup`
+- `feat: add manual selector for multi-node subscriptions`
+- `fix: preserve stable node tags across refreshes`
+- `docs: refresh package installation guide`
+- `build: add ipk build target`
 
-PRs should include a short summary, deployment impact, sample commands used for validation, and any config changes required on the router.
+PRs should state which package(s) are affected (`horn-vpn-manager`, `horn-vpn-manager-luci`, build tooling) and which checks were run.
 
 ## Security & Configuration Tips
 
-Do not commit real subscription URLs, credentials, or generated router configs. Keep production-specific values out of tracked files and scrub logs before sharing.
+Do not commit live subscription URLs, credentials, router-specific configs, or generated sing-box output.
+
+- Device-local files such as `subs.json`, `domains.json`, and `lists/manual-ip.lst` are configuration, not repository data.
+- The LuCI app reads and writes `/etc/config/dhcp` for manual `vpn_domains` ipset entries; treat that as user state.
+- `bin/` contains build artifacts and can become stale; rebuild instead of inferring behavior from old packages.

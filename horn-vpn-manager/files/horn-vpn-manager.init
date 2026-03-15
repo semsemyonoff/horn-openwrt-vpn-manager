@@ -1,0 +1,33 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+STOP=10
+
+CONF_DIR="/etc/horn-vpn-manager"
+MAX_WAIT=60
+
+wait_for_internet() {
+  local i=0
+  while [ "$i" -lt "$MAX_WAIT" ]; do
+    if curl -s -m 5 -o /dev/null "http://connectivitycheck.gstatic.com/generate_204" 2>/dev/null; then
+      return 0
+    fi
+    sleep 5
+    i=$((i + 5))
+  done
+  return 1
+}
+
+start() {
+  # Skip if not configured yet (fresh install)
+  [ -f "$CONF_DIR/subs.json" ] && [ -f "$CONF_DIR/domains.json" ] || return 0
+
+  if wait_for_internet; then
+    logger -t horn-vpn-manager "Internet available, updating domains and subscriptions"
+    vpn-manager domains run --no-color
+    vpn-manager subscriptions run --no-color
+  else
+    logger -t horn-vpn-manager "No internet after ${MAX_WAIT}s, restoring from cache"
+    vpn-manager domains restore --no-color
+  fi
+}

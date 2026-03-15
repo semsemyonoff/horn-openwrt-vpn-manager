@@ -15,6 +15,10 @@ insert_final_newline = true
 [*.{yml,yaml,json,sh}]
 indent_size = 2
 
-[*.mk]
+[{Makefile,*.mk}]
 indent_style = tab
+insert_final_newline = true
+
+[Dockerfile]
+indent_size = 4
 insert_final_newline = true

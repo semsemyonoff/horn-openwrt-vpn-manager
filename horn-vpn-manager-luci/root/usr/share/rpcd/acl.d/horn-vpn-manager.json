@@ -1,0 +1,37 @@
+{
+  "horn-vpn-manager-luci": {
+    "description": "LuCI access for horn-vpn-manager",
+    "read": {
+      "ubus": {
+        "horn-vpn-manager": [
+          "get_config",
+          "get_log",
+          "get_syslog",
+          "get_sb_status",
+          "get_template",
+          "get_domains_config",
+          "get_manual_ips",
+          "get_domains_log",
+          "get_manual_domains"
+        ]
+      }
+    },
+    "write": {
+      "ubus": {
+        "horn-vpn-manager": [
+          "set_config",
+          "run_script",
+          "test_url",
+          "set_proxy",
+          "test_delays",
+          "set_template",
+          "reset_template",
+          "set_domains_config",
+          "set_manual_ips",
+          "run_getdomains",
+          "set_manual_domains"
+        ]
+      }
+    }
+  }
+}

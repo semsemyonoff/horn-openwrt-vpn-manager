@@ -1,0 +1,7 @@
+.git
+.claude
+.DS_Store
+bin
+*.zip
+subs.json
+domains.json

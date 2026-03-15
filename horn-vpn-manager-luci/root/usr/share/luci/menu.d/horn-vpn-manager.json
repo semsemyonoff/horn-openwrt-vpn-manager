@@ -1,0 +1,12 @@
+{
+  "admin/network/horn-vpn-manager": {
+    "title": "VPN management",
+    "action": {
+      "type": "view",
+      "path": "horn-vpn-manager/config"
+    },
+    "depends": {
+      "acl": ["horn-vpn-manager-luci"]
+    }
+  }
+}
