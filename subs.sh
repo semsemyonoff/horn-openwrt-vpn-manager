@@ -223,7 +223,7 @@ fi
 # Read global settings before the loop (TEST_URL is needed for urltest groups)
 LOG_LEVEL=$(jq -r '.log_level // "warn"' "$SUBS_CONF")
 TEST_URL=$(jq -r '.test_url // "https://www.gstatic.com/generate_204"' "$SUBS_CONF")
-GLOBAL_RETRIES=$(jq -r '.retries // 3' "$SUBS_CONF")
+GLOBAL_RETRIES=$(jq -r '.retries // 5' "$SUBS_CONF")
 
 # ---- Process each subscription ----
 VLESS_OUTBOUNDS=""
@@ -261,11 +261,13 @@ while IFS= read -r sub_id; do
             log "  ${C_WARN}${sub_name}: connection failed (rc=${curl_rc})${RST}"
             vlog 3 "${C_DIM}    $(cat "$TMPDIR/${sub_id}.curl_err" 2>/dev/null)${RST}"
             attempt=$((attempt + 1))
+            [ "$attempt" -le "$((sub_retries + 1))" ] && sleep 5
             continue
         fi
         if [ "$http_code" != "200" ]; then
             log "  ${C_WARN}${sub_name}: HTTP ${http_code}${RST}"
             attempt=$((attempt + 1))
+            [ "$attempt" -le "$((sub_retries + 1))" ] && sleep 5
             continue
         fi
         download_ok=1
