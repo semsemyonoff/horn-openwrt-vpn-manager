@@ -21,6 +21,7 @@ SUBS_CONF="${CONF_DIR}/subs.json"
 CONFIG_TEMPLATE="${CONF_DIR}/config.template.json"
 CONFIG="/etc/sing-box/config.json"
 TAGS_FILE="${CONF_DIR}/subs-tags.json"
+UNSYNC_FLAG="${CONF_DIR}/.needs-update"
 TMPDIR="/tmp/horn-vpn-manager-sub"
 LOG="/tmp/horn-vpn-manager-sub.log"
 DRY_RUN=0
@@ -516,6 +517,8 @@ if [ "$check_rc" -eq 0 ]; then
         jq -Rn '[inputs | split("\t") | {(.[0]): .[1]}] | add // {}' \
             "$TMPDIR/tag-names.tsv" > "$TAGS_FILE"
     fi
+    # Clear unsync flag — config is now applied
+    rm -f "$UNSYNC_FLAG"
     log "${C_OK}Config OK, restarting sing-box...${RST}"
     restart_out=$(service sing-box restart 2>&1)
     [ -n "$restart_out" ] && log "${C_DIM}${restart_out}${RST}"

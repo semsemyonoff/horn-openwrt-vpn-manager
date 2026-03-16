@@ -10,6 +10,8 @@ TAGS_FILE="${CONF_DIR}/subs-tags.json"
 LOG_FILE="/tmp/horn-vpn-manager-sub.log"
 PID_FILE="/tmp/horn-vpn-manager.pid"
 
+UNSYNC_FLAG="${CONF_DIR}/.needs-update"
+
 DOMAINS_JSON="${CONF_DIR}/domains.json"
 DOMAINS_SCRIPT="/usr/libexec/horn-vpn-manager/getdomains.sh"
 DOMAINS_LOG="/tmp/horn-vpn-manager-domains.log"
@@ -18,7 +20,7 @@ MANUAL_IPS="${CONF_DIR}/lists/manual-ip.lst"
 
 case "$1" in
     list)
-        echo '{"get_config":{},"set_config":{"config":"Object"},"run_script":{"dry_run":"Boolean","verbose":"Number"},"get_log":{},"get_syslog":{"lines":"Number"},"test_url":{"url":"String"},"get_sb_status":{},"set_proxy":{"proxy":"String","selected":"String"},"test_delays":{"tags":"Array","url":"String"},"get_template":{},"set_template":{"template":"String"},"reset_template":{},"get_domains_config":{},"set_domains_config":{"config":"Object"},"get_manual_ips":{},"set_manual_ips":{"ips":"String"},"run_getdomains":{"verbose":"Number"},"get_domains_log":{},"get_manual_domains":{},"set_manual_domains":{"domains":"Array"}}'
+        echo '{"get_config":{},"set_config":{"config":"Object"},"run_script":{"dry_run":"Boolean","verbose":"Number"},"get_log":{},"get_syslog":{"lines":"Number"},"test_url":{"url":"String"},"get_sb_status":{},"set_proxy":{"proxy":"String","selected":"String"},"test_delays":{"tags":"Array","url":"String"},"get_template":{},"set_template":{"template":"String"},"reset_template":{},"get_domains_config":{},"set_domains_config":{"config":"Object"},"get_manual_ips":{},"set_manual_ips":{"ips":"String"},"run_getdomains":{"verbose":"Number"},"get_domains_log":{},"get_manual_domains":{},"set_manual_domains":{"domains":"Array"},"get_sync_status":{}}'
         ;;
     call)
         case "$2" in
@@ -36,6 +38,7 @@ case "$1" in
                 if echo "$input" | jq -e '.config' > /dev/null 2>&1; then
                     mkdir -p "$(dirname "$SUBS_JSON")"
                     echo "$input" | jq '.config' > "$SUBS_JSON"
+                    touch "$UNSYNC_FLAG"
                     printf '{"result":"ok"}'
                 else
                     printf '{"error":"Invalid config JSON"}'
@@ -235,6 +238,7 @@ TAGEOF
                 fi
                 if echo "$tmpl" | jq -e '.' > /dev/null 2>&1; then
                     printf '%s' "$tmpl" > "$TEMPLATE_FILE"
+                    touch "$UNSYNC_FLAG"
                     printf '{"result":"ok"}'
                 else
                     printf '{"error":"Invalid JSON"}'
@@ -247,6 +251,7 @@ TAGEOF
                     exit 0
                 fi
                 cp "$DEFAULT_TEMPLATE_FILE" "$TEMPLATE_FILE"
+                touch "$UNSYNC_FLAG"
                 printf '{"template":%s}' "$(jq -Rs '.' "$TEMPLATE_FILE")"
                 ;;
 
@@ -389,6 +394,14 @@ TAGEOF
                     printf '{"result":"ok","restarted":true}'
                 else
                     printf '{"result":"ok","restarted":false}'
+                fi
+                ;;
+
+            get_sync_status)
+                if [ -f "$UNSYNC_FLAG" ]; then
+                    printf '{"synced":false}'
+                else
+                    printf '{"synced":true}'
                 fi
                 ;;
 

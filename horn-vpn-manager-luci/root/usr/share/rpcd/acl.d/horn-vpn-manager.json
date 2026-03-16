@@ -12,7 +12,8 @@
           "get_domains_config",
           "get_manual_ips",
           "get_domains_log",
-          "get_manual_domains"
+          "get_manual_domains",
+          "get_sync_status"
         ]
       }
     },

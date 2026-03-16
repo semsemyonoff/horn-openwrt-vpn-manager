@@ -100,6 +100,10 @@ var callGetDomainsLog = rpc.declare({
     object: "horn-vpn-manager",
     method: "get_domains_log",
 });
+var callGetSyncStatus = rpc.declare({
+    object: "horn-vpn-manager",
+    method: "get_sync_status",
+});
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -750,7 +754,7 @@ function makeTabs(tabs) {
             t._descEl = E(
                 "div",
                 {
-                    class: "vpnsub-tab-desc",
+                    class: "cbi-map-descr",
                     style: i === 0 ? "" : "display:none",
                 },
                 t.desc,
@@ -785,6 +789,9 @@ return view.extend({
             callGetManualDomains().catch(function () {
                 return null;
             }),
+            callGetSyncStatus().catch(function () {
+                return null;
+            }),
         ]);
     },
 
@@ -797,6 +804,7 @@ return view.extend({
         var domainsData = results[4];
         var manualIpsData = results[5];
         var manualDomainsData = results[6];
+        var syncData = results[7];
 
         var cfg =
             data && data.config
@@ -908,6 +916,26 @@ return view.extend({
         );
         self._settingsDirtyEl = settingsDirtyEl;
 
+        var hasPendingChanges = !!(syncData && syncData.synced === false);
+        var unsyncBanner = E(
+            "div",
+            {
+                class: "alert-message warning vpnsub-unsync-banner",
+                style: hasPendingChanges ? "" : "display:none",
+            },
+            [
+                E("h4", {}, _("Configuration not applied")),
+                E(
+                    "p",
+                    {},
+                    _(
+                        "Settings have been saved but not yet applied to sing-box. Go to the Update tab and run update to apply changes.",
+                    ),
+                ),
+            ],
+        );
+        self._unsyncBanner = unsyncBanner;
+
         var settingsPane = E("div", { class: "vpnsub-tab-pane" }, [
             globalSection,
             E("div", { class: "cbi-section cbi-tblsection" }, [
@@ -920,9 +948,9 @@ return view.extend({
                 ),
             ]),
             E("div", { class: "cbi-page-actions" }, [
-                saveBtn,
-                "\u00a0\u00a0",
                 settingsDirtyEl,
+                "\u00a0\u00a0",
+                saveBtn,
             ]),
         ]);
 
@@ -1178,19 +1206,18 @@ return view.extend({
                     templateSaveBtn.disabled = true;
                     callSetTemplate(text)
                         .then(function (res) {
-                            if (res && res.error) {
-                                templateErrEl.textContent =
-                                    _("Error: ") + res.error;
-                                templateErrEl.style.display = "";
-                            } else {
-                                originalTemplate = text;
-                                dirtyEl.style.display = "none";
-                                ui.addNotification(
-                                    null,
-                                    E("p", _("Template saved")),
-                                    "info",
-                                );
-                            }
+                            if (res && res.error) throw new Error(res.error);
+                            originalTemplate = text;
+                            dirtyEl.style.display = "none";
+                            templateErrEl.style.display = "none";
+                            return self._refreshSyncStatus();
+                        })
+                        .then(function () {
+                            ui.addNotification(
+                                null,
+                                E("p", _("Template saved")),
+                                "info",
+                            );
                         })
                         .catch(function (err) {
                             templateErrEl.textContent =
@@ -1216,22 +1243,22 @@ return view.extend({
                     templateResetBtn.disabled = true;
                     callResetTemplate()
                         .then(function (res) {
-                            if (res && res.error) {
-                                templateErrEl.textContent =
-                                    _("Error: ") + res.error;
-                                templateErrEl.style.display = "";
-                            } else if (res && res.template) {
-                                templateTextarea.value = res.template;
-                                originalTemplate = res.template;
-                                dirtyEl.style.display = "none";
-                                updateHighlight();
-                                templateErrEl.style.display = "none";
-                                ui.addNotification(
-                                    null,
-                                    E("p", _("Template reset to default")),
-                                    "info",
-                                );
-                            }
+                            if (res && res.error) throw new Error(res.error);
+                            if (!res || !res.template)
+                                throw new Error(_("No template returned"));
+                            templateTextarea.value = res.template;
+                            originalTemplate = res.template;
+                            dirtyEl.style.display = "none";
+                            updateHighlight();
+                            templateErrEl.style.display = "none";
+                            return self._refreshSyncStatus();
+                        })
+                        .then(function () {
+                            ui.addNotification(
+                                null,
+                                E("p", _("Template reset to default")),
+                                "info",
+                            );
                         })
                         .catch(function (err) {
                             templateErrEl.textContent =
@@ -1305,11 +1332,11 @@ return view.extend({
             E("div", { class: "cbi-section" }, [
                 E("legend", {}, _("config.template.json")),
                 E("div", { class: "vpnsub-log-actions" }, [
+                    dirtyEl,
+                    "\u00a0\u00a0",
                     templateSaveBtn,
                     "\u00a0",
                     templateResetBtn,
-                    "\u00a0\u00a0",
-                    dirtyEl,
                 ]),
                 templateErrEl,
                 templateWrap,
@@ -1606,6 +1633,7 @@ return view.extend({
         // ── Assemble tabs ─────────────────────────────────────────────────────
         return E("div", { class: "cbi-map" }, [
             E("h2", {}, _("VPN management")),
+            unsyncBanner,
             makeTabs([
                 {
                     id: "settings",
@@ -2035,9 +2063,13 @@ return view.extend({
 
         var self = this;
         return callSetConfig(cfg)
-            .then(function () {
+            .then(function (res) {
+                if (res && res.error) throw new Error(res.error);
                 if (self._settingsDirtyEl)
                     self._settingsDirtyEl.style.display = "none";
+                return self._refreshSyncStatus();
+            })
+            .then(function () {
                 window.scrollTo({ top: 0, behavior: "smooth" });
                 ui.addNotification(null, E("p", _("Settings saved")), "info");
             })
@@ -2158,6 +2190,24 @@ return view.extend({
         }
     },
 
+    _showUnsync: function (show) {
+        if (this._unsyncBanner)
+            this._unsyncBanner.style.display = show ? "" : "none";
+    },
+
+    _refreshSyncStatus: function () {
+        var self = this;
+        return callGetSyncStatus()
+            .then(function (res) {
+                self._showUnsync(!!(res && res.synced === false));
+                return res;
+            })
+            .catch(function () {
+                self._showUnsync(false);
+                return null;
+            });
+    },
+
     // ── Save domains config ───────────────────────────────────────────────────
     handleDomainsSave: function (btn, urlInput, subnetWidget, dirtyEl) {
         var domainsUrl = urlInput.value.trim();
@@ -2239,7 +2289,8 @@ return view.extend({
         if (btn) btn.disabled = true;
 
         callRunScript(dryRun, verbose)
-            .then(function () {
+            .then(function (res) {
+                if (res && res.error) throw new Error(res.error);
                 self._pollTimer = setInterval(function () {
                     callGetLog().then(function (res) {
                         if (!res) return;
@@ -2253,6 +2304,7 @@ return view.extend({
                             clearInterval(self._pollTimer);
                             self._pollTimer = null;
                             if (btn) btn.disabled = false;
+                            if (!dryRun) self._refreshSyncStatus();
                         }
                     });
                 }, 2000);

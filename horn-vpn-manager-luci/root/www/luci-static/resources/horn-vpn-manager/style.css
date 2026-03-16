@@ -542,14 +542,6 @@
     color: var(--text-low, #888);
 }
 
-/* ── Tab description ─────────────────────────────────────────────────────── */
-.vpnsub-tab-desc {
-    font-size: 0.85em;
-    color: var(--text-low, #888);
-    margin: -0.5em 0 1em 0;
-    padding: 0 0.25em;
-}
-
 /* ── Log output ──────────────────────────────────────────────────────────── */
 .vpnsub-log {
     background: #1a1a1a;
@@ -562,4 +554,17 @@
     overflow-y: auto;
     white-space: pre-wrap;
     word-break: break-all;
+}
+
+/* ── Unsync banner ──────────────────────────────────────────────────────── */
+.vpnsub-unsync-banner {
+    margin-bottom: 1em;
+}
+
+.vpnsub-unsync-banner h4 {
+    margin: 0 0 0.25em 0;
+}
+
+.vpnsub-unsync-banner p {
+    margin: 0;
 }
