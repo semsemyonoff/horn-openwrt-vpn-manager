@@ -6,6 +6,9 @@ msgstr ""
 msgid "VPN management"
 msgstr "VPN management"
 
+msgid "Configure VPN subscriptions: URLs, routing rules, proxy selection and global settings"
+msgstr "Configure VPN subscriptions: URLs, routing rules, proxy selection and global settings"
+
 msgid "Global settings"
 msgstr "Global settings"
 
@@ -21,11 +24,23 @@ msgstr "URL test"
 msgid "URL used by urltest groups to measure latency"
 msgstr "URL used by urltest groups to measure latency"
 
+msgid "Retries"
+msgstr "Retries"
+
+msgid "Number of download retries per subscription on failure"
+msgstr "Number of download retries per subscription on failure"
+
+msgid "Leave empty to use the global setting"
+msgstr "Leave empty to use the global setting"
+
+msgid "Global default"
+msgstr "Global default"
+
 msgid "Subscriptions"
 msgstr "Subscriptions"
 
-msgid "Add subscription"
-msgstr "Add subscription"
+msgid "Add"
+msgstr "Add"
 
 msgid "Subscription"
 msgstr "Subscription"
@@ -35,6 +50,15 @@ msgstr "Subscription name"
 
 msgid "Name"
 msgstr "Name"
+
+msgid "Code"
+msgstr "Code"
+
+msgid "e.g. mullvad"
+msgstr "e.g. mullvad"
+
+msgid "Unique identifier used in tag names (e.g. {code}-manual)"
+msgstr "Unique identifier used in tag names (e.g. {code}-manual)"
 
 msgid "URL"
 msgstr "URL"
@@ -63,11 +87,23 @@ msgstr "Traffic to these IP ranges will be routed through this subscription"
 msgid "Exclude filters"
 msgstr "Exclude filters"
 
-msgid "Servers whose names contain any of these strings will be skipped (case-insensitive)"
-msgstr "Servers whose names contain any of these strings will be skipped (case-insensitive)"
+msgid "Servers whose names contain any of these strings will be skipped"
+msgstr "Servers whose names contain any of these strings will be skipped"
 
 msgid "Russia"
 msgstr "Russia"
+
+msgid "Interval"
+msgstr "Interval"
+
+msgid "How often urltest checks latency (e.g. 5m, 1m)"
+msgstr "How often urltest checks latency (e.g. 5m, 1m)"
+
+msgid "Tolerance"
+msgstr "Tolerance"
+
+msgid "Switch to a faster node only if it beats current by at least this many ms"
+msgstr "Switch to a faster node only if it beats current by at least this many ms"
 
 msgid "Remove"
 msgstr "Remove"
@@ -78,17 +114,35 @@ msgstr "Remove subscription"
 msgid "this subscription"
 msgstr "this subscription"
 
+msgid "Proxy"
+msgstr "Proxy"
+
+msgid "Auto"
+msgstr "Auto"
+
+msgid "Manual"
+msgstr "Manual"
+
+msgid "Current"
+msgstr "Current"
+
+msgid "Test latencies"
+msgstr "Test latencies"
+
+msgid "ID is required"
+msgstr "ID is required"
+
+msgid "Name is required"
+msgstr "Name is required"
+
+msgid "URL is required"
+msgstr "URL is required"
+
+msgid "Enter a valid URL (https://...)"
+msgstr "Enter a valid URL (https://...)"
+
 msgid "Save"
 msgstr "Save"
-
-msgid "Run script"
-msgstr "Run script"
-
-msgid "Script output"
-msgstr "Script output"
-
-msgid "Starting…"
-msgstr "Starting…"
 
 msgid "Settings saved"
 msgstr "Settings saved"
@@ -105,8 +159,20 @@ msgstr "Please select a default subscription"
 msgid "Only one subscription can be set as default"
 msgstr "Only one subscription can be set as default"
 
-msgid "Run & Output"
-msgstr "Run & Output"
+msgid "Unsaved changes"
+msgstr "Unsaved changes"
+
+msgid "Configuration not applied"
+msgstr "Configuration not applied"
+
+msgid "Settings have been saved but not yet applied to sing-box. Go to the Update tab and run update to apply changes."
+msgstr "Settings have been saved but not yet applied to sing-box. Go to the Update tab and run update to apply changes."
+
+msgid "Update"
+msgstr "Update"
+
+msgid "Run the subscription update script to download servers and regenerate sing-box config"
+msgstr "Run the subscription update script to download servers and regenerate sing-box config"
 
 msgid "Dry run"
 msgstr "Dry run"
@@ -114,11 +180,23 @@ msgstr "Dry run"
 msgid "Debug (-vvv)"
 msgstr "Debug (-vvv)"
 
+msgid "Run"
+msgstr "Run"
+
+msgid "Script output"
+msgstr "Script output"
+
+msgid "Starting…"
+msgstr "Starting…"
+
 msgid "Test"
 msgstr "Test"
 
 msgid "VPN connectivity test"
 msgstr "VPN connectivity test"
+
+msgid "Test VPN connectivity — checks which outbound handles a given URL through tun0"
+msgstr "Test VPN connectivity — checks which outbound handles a given URL through tun0"
 
 msgid "Sends a request through tun0 and reports which outbound handled it."
 msgstr "Sends a request through tun0 and reports which outbound handled it."
@@ -147,14 +225,17 @@ msgstr "Text mode"
 msgid "List mode"
 msgstr "List mode"
 
-msgid "Logs"
-msgstr "Logs"
-
 msgid "Sing-box logs"
 msgstr "Sing-box logs"
 
+msgid "View recent sing-box log entries from the system journal"
+msgstr "View recent sing-box log entries from the system journal"
+
 msgid "Sing-box template config"
 msgstr "Sing-box template config"
+
+msgid "Edit config.template.json — the template used to generate the sing-box configuration"
+msgstr "Edit config.template.json — the template used to generate the sing-box configuration"
 
 msgid "sing-box system log"
 msgstr "sing-box system log"
@@ -179,73 +260,6 @@ msgstr "Clear"
 
 msgid "(waiting for output…)"
 msgstr "(waiting for output…)"
-
-msgid "ID"
-msgstr "ID"
-
-msgid "e.g. mullvad"
-msgstr "e.g. mullvad"
-
-msgid "Stable identifier used in tag names (e.g. {id}-manual)"
-msgstr "Stable identifier used in tag names (e.g. {id}-manual)"
-
-msgid "Proxy"
-msgstr "Proxy"
-
-msgid "Auto"
-msgstr "Auto"
-
-msgid "ID is required"
-msgstr "ID is required"
-
-msgid "Name is required"
-msgstr "Name is required"
-
-msgid "URL is required"
-msgstr "URL is required"
-
-msgid "Enter a valid URL (https://...)"
-msgstr "Enter a valid URL (https://...)"
-msgid "Advanced"
-msgstr "Advanced"
-
-msgid "Interval"
-msgstr "Interval"
-
-msgid "How often urltest checks latency (e.g. 5m, 1m)"
-msgstr "How often urltest checks latency (e.g. 5m, 1m)"
-
-msgid "Tolerance"
-msgstr "Tolerance"
-
-msgid "Switch to a faster node only if it beats current by at least this many ms"
-msgstr "Switch to a faster node only if it beats current by at least this many ms"
-msgid "Code"
-msgstr "Code"
-
-msgid "Unique identifier used in tag names (e.g. {code}-manual)"
-msgstr "Unique identifier used in tag names (e.g. {code}-manual)"
-
-msgid "Retries"
-msgstr "Retries"
-
-msgid "Number of download retries per subscription on failure"
-msgstr "Number of download retries per subscription on failure"
-
-msgid "Leave empty to use the global setting"
-msgstr "Leave empty to use the global setting"
-
-msgid "Global default"
-msgstr "Global default"
-
-msgid "Manual"
-msgstr "Manual"
-
-msgid "Current"
-msgstr "Current"
-
-msgid "Test latencies"
-msgstr "Test latencies"
 
 msgid "Template"
 msgstr "Template"
@@ -292,6 +306,9 @@ msgstr "Template saved"
 msgid "Template reset to default"
 msgstr "Template reset to default"
 
+msgid "No template returned"
+msgstr "No template returned"
+
 msgid "Reset to default"
 msgstr "Reset to default"
 
@@ -303,6 +320,9 @@ msgstr "JSON error: "
 
 msgid "Domain list"
 msgstr "Domain list"
+
+msgid "Configure domain and subnet lists downloaded by the getdomains script, and static IP routes"
+msgstr "Configure domain and subnet lists downloaded by the getdomains script, and static IP routes"
 
 msgid "Domains URL"
 msgstr "Domains URL"
@@ -319,5 +339,29 @@ msgstr "URLs of IP subnet lists to route through VPN (one per line)"
 msgid "Manual IP / CIDR"
 msgstr "Manual IP / CIDR"
 
-msgid "Static IP addresses or subnets to always route through VPN, one per line"
-msgstr "Static IP addresses or subnets to always route through VPN, one per line"
+msgid "Edit manually via SSH: /etc/horn-vpn-manager/lists/manual-ip.lst"
+msgstr "Edit manually via SSH: /etc/horn-vpn-manager/lists/manual-ip.lst"
+
+msgid "Additional domains"
+msgstr "Additional domains"
+
+msgid "Manual dnsmasq domains"
+msgstr "Manual dnsmasq domains"
+
+msgid "Manage per-domain VPN routing via dnsmasq ipset — changes are written to /etc/config/dhcp"
+msgstr "Manage per-domain VPN routing via dnsmasq ipset — changes are written to /etc/config/dhcp"
+
+msgid "Domain"
+msgstr "Domain"
+
+msgid "example.com"
+msgstr "example.com"
+
+msgid "Domains routed through VPN via dnsmasq ipset (/etc/config/dhcp)"
+msgstr "Domains routed through VPN via dnsmasq ipset (/etc/config/dhcp)"
+
+msgid "Settings saved (dnsmasq restarted)"
+msgstr "Settings saved (dnsmasq restarted)"
+
+msgid "(empty)"
+msgstr "(empty)"

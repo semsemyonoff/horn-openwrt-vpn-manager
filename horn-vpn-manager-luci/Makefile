@@ -12,6 +12,7 @@ define Package/horn-vpn-manager-luci
   SUBMENU:=3. Applications
   TITLE:=LuCI interface for horn-vpn-manager
   # Runtime: luci-base, horn-vpn-manager (not enforced at build time)
+
   PKGARCH:=all
 endef
 
@@ -23,12 +24,17 @@ define Build/Configure
 endef
 
 define Build/Compile
+	mkdir -p $(PKG_BUILD_DIR)/i18n
+	python3 ./tools/po2lmo.py ./po/en/horn-vpn-manager.po $(PKG_BUILD_DIR)/i18n/horn-vpn-manager.en.lmo
+	python3 ./tools/po2lmo.py ./po/ru/horn-vpn-manager.po $(PKG_BUILD_DIR)/i18n/horn-vpn-manager.ru.lmo
 endef
 
 define Package/horn-vpn-manager-luci/install
 	$(CP) ./root/. $(1)/
 	$(INSTALL_DIR) $(1)/usr/libexec/rpcd
 	$(INSTALL_BIN) ./root/usr/libexec/rpcd/horn-vpn-manager $(1)/usr/libexec/rpcd/horn-vpn-manager
+	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/i18n
+	$(INSTALL_DATA) $(PKG_BUILD_DIR)/i18n/*.lmo $(1)/usr/lib/lua/luci/i18n/
 endef
 
 define Package/horn-vpn-manager-luci/postinst

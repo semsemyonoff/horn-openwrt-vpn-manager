@@ -6,6 +6,9 @@ msgstr ""
 msgid "VPN management"
 msgstr "Управление VPN"
 
+msgid "Configure VPN subscriptions: URLs, routing rules, proxy selection and global settings"
+msgstr "Настройка VPN-подписок: URL, правила маршрутизации, выбор прокси и глобальные параметры"
+
 msgid "Global settings"
 msgstr "Глобальные настройки"
 
@@ -21,11 +24,23 @@ msgstr "URL для проверки"
 msgid "URL used by urltest groups to measure latency"
 msgstr "URL, который urltest-группы используют для измерения задержки"
 
+msgid "Retries"
+msgstr "Повторы"
+
+msgid "Number of download retries per subscription on failure"
+msgstr "Количество повторных попыток загрузки при ошибке"
+
+msgid "Leave empty to use the global setting"
+msgstr "Оставьте пустым для использования глобального значения"
+
+msgid "Global default"
+msgstr "Глобальное"
+
 msgid "Subscriptions"
 msgstr "Подписки"
 
-msgid "Add subscription"
-msgstr "Добавить подписку"
+msgid "Add"
+msgstr "Добавить"
 
 msgid "Subscription"
 msgstr "Подписка"
@@ -35,6 +50,15 @@ msgstr "Название подписки"
 
 msgid "Name"
 msgstr "Название"
+
+msgid "Code"
+msgstr "Код"
+
+msgid "e.g. mullvad"
+msgstr "напр. mullvad"
+
+msgid "Unique identifier used in tag names (e.g. {code}-manual)"
+msgstr "Уникальный идентификатор, используется в именах тегов (напр. {code}-manual)"
 
 msgid "URL"
 msgstr "URL"
@@ -63,11 +87,23 @@ msgstr "Трафик к этим IP-диапазонам будет направ
 msgid "Exclude filters"
 msgstr "Исключить серверы"
 
-msgid "Servers whose names contain any of these strings will be skipped (case-insensitive)"
-msgstr "Серверы, в названии которых есть эти строки, будут пропущены (без учёта регистра)"
+msgid "Servers whose names contain any of these strings will be skipped"
+msgstr "Серверы, в названии которых есть эти строки, будут пропущены"
 
 msgid "Russia"
 msgstr "Россия"
+
+msgid "Interval"
+msgstr "Интервал"
+
+msgid "How often urltest checks latency (e.g. 5m, 1m)"
+msgstr "Как часто urltest проверяет задержку (напр. 5m, 1m)"
+
+msgid "Tolerance"
+msgstr "Допуск"
+
+msgid "Switch to a faster node only if it beats current by at least this many ms"
+msgstr "Переключиться на более быстрый узел только если он быстрее текущего на это значение (мс)"
 
 msgid "Remove"
 msgstr "Удалить"
@@ -78,17 +114,35 @@ msgstr "Удалить подписку"
 msgid "this subscription"
 msgstr "эту подписку"
 
+msgid "Proxy"
+msgstr "Прокси"
+
+msgid "Auto"
+msgstr "Авто"
+
+msgid "Manual"
+msgstr "Вручную"
+
+msgid "Current"
+msgstr "Текущий"
+
+msgid "Test latencies"
+msgstr "Проверить задержки"
+
+msgid "ID is required"
+msgstr "Обязательное поле"
+
+msgid "Name is required"
+msgstr "Обязательное поле"
+
+msgid "URL is required"
+msgstr "Обязательное поле"
+
+msgid "Enter a valid URL (https://...)"
+msgstr "Введите корректный URL (https://...)"
+
 msgid "Save"
 msgstr "Сохранить"
-
-msgid "Run script"
-msgstr "Запустить скрипт"
-
-msgid "Script output"
-msgstr "Вывод скрипта"
-
-msgid "Starting…"
-msgstr "Запуск…"
 
 msgid "Settings saved"
 msgstr "Настройки сохранены"
@@ -105,8 +159,20 @@ msgstr "Укажите подписку по умолчанию"
 msgid "Only one subscription can be set as default"
 msgstr "Только одна подписка может быть основной"
 
-msgid "Run & Output"
-msgstr "Запуск и вывод"
+msgid "Unsaved changes"
+msgstr "Несохранённые изменения"
+
+msgid "Configuration not applied"
+msgstr "Конфигурация не применена"
+
+msgid "Settings have been saved but not yet applied to sing-box. Go to the Update tab and run update to apply changes."
+msgstr "Настройки сохранены, но ещё не применены к sing-box. Перейдите на вкладку Обновление и запустите обновление."
+
+msgid "Update"
+msgstr "Обновление"
+
+msgid "Run the subscription update script to download servers and regenerate sing-box config"
+msgstr "Запустить скрипт обновления подписок для загрузки серверов и генерации конфига sing-box"
 
 msgid "Dry run"
 msgstr "Тестовый запуск"
@@ -114,11 +180,23 @@ msgstr "Тестовый запуск"
 msgid "Debug (-vvv)"
 msgstr "Отладка (-vvv)"
 
+msgid "Run"
+msgstr "Запустить"
+
+msgid "Script output"
+msgstr "Вывод скрипта"
+
+msgid "Starting…"
+msgstr "Запуск…"
+
 msgid "Test"
 msgstr "Тест"
 
 msgid "VPN connectivity test"
 msgstr "Тест подключения VPN"
+
+msgid "Test VPN connectivity — checks which outbound handles a given URL through tun0"
+msgstr "Проверка VPN-подключения — какой outbound обрабатывает запрос через tun0"
 
 msgid "Sends a request through tun0 and reports which outbound handled it."
 msgstr "Отправляет запрос через tun0 и показывает через какой outbound прошёл трафик."
@@ -147,14 +225,17 @@ msgstr "Текстовый режим"
 msgid "List mode"
 msgstr "Режим списка"
 
-msgid "Logs"
-msgstr "Логи"
-
 msgid "Sing-box logs"
 msgstr "Логи sing-box"
 
+msgid "View recent sing-box log entries from the system journal"
+msgstr "Просмотр последних записей sing-box из системного журнала"
+
 msgid "Sing-box template config"
 msgstr "Шаблон конфига sing-box"
+
+msgid "Edit config.template.json — the template used to generate the sing-box configuration"
+msgstr "Редактирование config.template.json — шаблона для генерации конфигурации sing-box"
 
 msgid "sing-box system log"
 msgstr "Системный лог sing-box"
@@ -179,73 +260,6 @@ msgstr "Очистить"
 
 msgid "(waiting for output…)"
 msgstr "(ожидание вывода…)"
-
-msgid "ID"
-msgstr "ID"
-
-msgid "e.g. mullvad"
-msgstr "напр. mullvad"
-
-msgid "Stable identifier used in tag names (e.g. {id}-manual)"
-msgstr "Стабильный идентификатор, используется в именах тегов (например, {id}-manual)"
-
-msgid "Proxy"
-msgstr "Прокси"
-
-msgid "Auto"
-msgstr "Авто"
-
-msgid "ID is required"
-msgstr "Обязательное поле"
-
-msgid "Name is required"
-msgstr "Обязательное поле"
-
-msgid "URL is required"
-msgstr "Обязательное поле"
-
-msgid "Enter a valid URL (https://...)"
-msgstr "Введите корректный URL (https://...)"
-msgid "Advanced"
-msgstr "Дополнительно"
-
-msgid "Interval"
-msgstr "Интервал"
-
-msgid "How often urltest checks latency (e.g. 5m, 1m)"
-msgstr "Как часто urltest проверяет задержку (напр. 5m, 1m)"
-
-msgid "Tolerance"
-msgstr "Допуск"
-
-msgid "Switch to a faster node only if it beats current by at least this many ms"
-msgstr "Переключиться на более быстрый узел только если он быстрее текущего на это значение (мс)"
-msgid "Code"
-msgstr "Код"
-
-msgid "Unique identifier used in tag names (e.g. {code}-manual)"
-msgstr "Уникальный идентификатор, используется в именах тегов (напр. {code}-manual)"
-
-msgid "Retries"
-msgstr "Повторы"
-
-msgid "Number of download retries per subscription on failure"
-msgstr "Количество повторных попыток загрузки при ошибке"
-
-msgid "Leave empty to use the global setting"
-msgstr "Оставьте пустым для использования глобального значения"
-
-msgid "Global default"
-msgstr "Глобальное"
-
-msgid "Manual"
-msgstr "Вручную"
-
-msgid "Current"
-msgstr "Текущий"
-
-msgid "Test latencies"
-msgstr "Проверить задержки"
 
 msgid "Template"
 msgstr "Шаблон"
@@ -292,6 +306,9 @@ msgstr "Шаблон сохранён"
 msgid "Template reset to default"
 msgstr "Шаблон сброшен к умолчанию"
 
+msgid "No template returned"
+msgstr "Шаблон не получен"
+
 msgid "Reset to default"
 msgstr "Сбросить к умолчанию"
 
@@ -301,11 +318,11 @@ msgstr "Сбросить шаблон к умолчанию?"
 msgid "JSON error: "
 msgstr "Ошибка JSON: "
 
-msgid "Domains"
-msgstr "Домены"
-
 msgid "Domain list"
 msgstr "Список доменов"
+
+msgid "Configure domain and subnet lists downloaded by the getdomains script, and static IP routes"
+msgstr "Настройка списков доменов и подсетей, загружаемых скриптом getdomains, и статических IP-маршрутов"
 
 msgid "Domains URL"
 msgstr "URL списка доменов"
@@ -322,5 +339,29 @@ msgstr "URL списков IP-подсетей для маршрутизации
 msgid "Manual IP / CIDR"
 msgstr "Ручные IP / CIDR"
 
-msgid "Static IP addresses or subnets to always route through VPN, one per line"
-msgstr "Статические IP-адреса или подсети для постоянной маршрутизации через VPN, по одному на строку"
+msgid "Edit manually via SSH: /etc/horn-vpn-manager/lists/manual-ip.lst"
+msgstr "Редактируйте вручную через SSH: /etc/horn-vpn-manager/lists/manual-ip.lst"
+
+msgid "Additional domains"
+msgstr "Дополнительные домены"
+
+msgid "Manual dnsmasq domains"
+msgstr "Ручные домены dnsmasq"
+
+msgid "Manage per-domain VPN routing via dnsmasq ipset — changes are written to /etc/config/dhcp"
+msgstr "Управление маршрутизацией VPN по доменам через dnsmasq ipset — изменения записываются в /etc/config/dhcp"
+
+msgid "Domain"
+msgstr "Домен"
+
+msgid "example.com"
+msgstr "example.com"
+
+msgid "Domains routed through VPN via dnsmasq ipset (/etc/config/dhcp)"
+msgstr "Домены, маршрутизируемые через VPN с помощью dnsmasq ipset (/etc/config/dhcp)"
+
+msgid "Settings saved (dnsmasq restarted)"
+msgstr "Настройки сохранены (dnsmasq перезапущен)"
+
+msgid "(empty)"
+msgstr "(пусто)"

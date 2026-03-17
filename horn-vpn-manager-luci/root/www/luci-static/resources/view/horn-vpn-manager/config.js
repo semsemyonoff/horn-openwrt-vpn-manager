@@ -1780,6 +1780,7 @@ return view.extend({
 
         var subId = sub.id || sub.name;
         var hasUrltest = !!(proxies && subId && proxies[subId + "-auto"]);
+        var isSingleNode = !!(proxies && subId && proxies[subId + "-single"]);
 
         // interval / tolerance inputs — placed in proxy widget Auto pane when multi-node,
         // otherwise rendered as plain form rows so they're always accessible to _collectConfig
@@ -1863,8 +1864,10 @@ return view.extend({
 
         if (proxyWidget) children.push(formRow(_("Proxy"), proxyWidget));
 
-        // Show interval/tolerance as plain rows only when not embedded in proxy widget
-        if (!hasUrltest) {
+        // Show interval/tolerance as plain rows only when multi-node but Auto pane
+        // was not created (should not normally happen). Hide for single-node and
+        // when proxy data is unavailable (sing-box is down).
+        if (!hasUrltest && !isSingleNode && proxyWidget) {
             children.push(
                 formRow(
                     _("Interval"),
