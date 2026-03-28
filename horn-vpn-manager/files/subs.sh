@@ -16,17 +16,19 @@
 # Requires: curl, base64, awk, sed, grep, jq, md5sum
 # ============================================================
 
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 CONF_DIR="/etc/horn-vpn-manager"
-SUBS_CONF="${CONF_DIR}/subs.json"
-CONFIG_TEMPLATE="${CONF_DIR}/config.template.json"
-CONFIG="/etc/sing-box/config.json"
-TAGS_FILE="${CONF_DIR}/subs-tags.json"
-UNSYNC_FLAG="${CONF_DIR}/.needs-update"
-TMPDIR="/tmp/horn-vpn-manager-sub"
-LOG="/tmp/horn-vpn-manager-sub.log"
+SUBS_CONF=""
+CONFIG_TEMPLATE=""
+CONFIG=""
+TAGS_FILE=""
+UNSYNC_FLAG=""
+TMPDIR=""
+LOG=""
 DRY_RUN=0
 VERBOSE=0
 COLOR=1
+DEBUG=0
 
 # ---- Argument parsing --------------------------------------------------------
 
@@ -40,16 +42,20 @@ show_help() {
     printf '  dry-run    Simulate run without writing config or restarting\n'
     printf '  help       Show this help message\n'
     printf '\nOptions:\n'
+    printf '  --debug          Use local files next to subs.sh and force dry-run mode\n'
     printf '  --no-color       Disable colored output\n'
     printf '  -v / -vv / -vvv  Verbosity level\n'
-    printf '\nConfig:  %s\n' "$SUBS_CONF"
-    printf 'Log:     %s\n' "$LOG"
+    printf '\nDefault config:  /etc/horn-vpn-manager/subs.json\n'
+    printf 'Debug config:    %s/subs.json\n' "$SCRIPT_DIR"
+    printf 'Default log:     /tmp/horn-vpn-manager-sub.log\n'
+    printf 'Debug log:       %s/subs.debug.log\n' "$SCRIPT_DIR"
 }
 
 CMD=""
 for arg in "$@"; do
     case "$arg" in
         run|dry-run|help) [ -z "$CMD" ] && CMD="$arg" ;;
+        --debug) DEBUG=1 ;;
         --no-color) COLOR=0 ;;
         -vvv) VERBOSE=3 ;;
         -vv)  VERBOSE=2 ;;
@@ -65,6 +71,26 @@ case "$CMD" in
         exit 0
         ;;
 esac
+
+if [ "$DEBUG" -eq 1 ]; then
+    DRY_RUN=1
+    CONF_DIR="$SCRIPT_DIR"
+    SUBS_CONF="${SCRIPT_DIR}/subs.json"
+    CONFIG_TEMPLATE="${SCRIPT_DIR}/config.template.json"
+    CONFIG="${SCRIPT_DIR}/config.debug.json"
+    TAGS_FILE="${SCRIPT_DIR}/subs-tags.debug.json"
+    UNSYNC_FLAG="${SCRIPT_DIR}/.needs-update.debug"
+    TMPDIR="${SCRIPT_DIR}/.tmp-horn-vpn-manager-sub"
+    LOG="${SCRIPT_DIR}/subs.debug.log"
+else
+    SUBS_CONF="${CONF_DIR}/subs.json"
+    CONFIG_TEMPLATE="${CONF_DIR}/config.template.json"
+    CONFIG="/etc/sing-box/config.json"
+    TAGS_FILE="${CONF_DIR}/subs-tags.json"
+    UNSYNC_FLAG="${CONF_DIR}/.needs-update"
+    TMPDIR="/tmp/horn-vpn-manager-sub"
+    LOG="/tmp/horn-vpn-manager-sub.log"
+fi
 
 # Set up ANSI color codes (empty strings when disabled)
 if [ "$COLOR" -eq 1 ]; then
@@ -94,16 +120,42 @@ vlog() {
     [ "$VERBOSE" -ge "$1" ] && log "$2"
 }
 
+normalize_count() {
+    case "$1" in
+        ''|*[!0-9]*)
+            printf '0\n'
+            ;;
+        *)
+            printf '%s\n' "$1"
+            ;;
+    esac
+}
+
+debug_dump_file_lines() {
+    [ "$VERBOSE" -ge 3 ] || return 0
+
+    local label="$1"
+    local file="$2"
+
+    [ -s "$file" ] || return 0
+
+    log "${C_DIM}    [dbg] ${label}:${RST}"
+    while IFS= read -r line || [ -n "$line" ]; do
+        [ -n "$line" ] || continue
+        log "${C_DIM}      ${line}${RST}"
+    done < "$file"
+}
+
 # Returns 0 (true) if server name matches an exclude pattern
 # shellcheck disable=SC3043
 is_excluded() {
     local name="$1"
     local name_lower
-    name_lower=$(echo "$name" | tr '[:upper:]' '[:lower:]')
+    name_lower=$(echo "$name" | tr 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' 'abcdefghijklmnopqrstuvwxyz')
 
     while IFS= read -r pattern; do
         local pattern_lower
-        pattern_lower=$(echo "$pattern" | tr '[:upper:]' '[:lower:]')
+        pattern_lower=$(echo "$pattern" | tr 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' 'abcdefghijklmnopqrstuvwxyz')
         case "$name_lower" in
             *"$pattern_lower"*) return 0 ;;
         esac
@@ -200,6 +252,14 @@ parse_uri() {
 
 mkdir -p "$TMPDIR"
 
+if [ "$DEBUG" -eq 1 ]; then
+    log "${C_INFO}Debug mode: using local files from ${C_BOLD}${SCRIPT_DIR}${RST}"
+    log "${C_DIM}  debug implies dry-run; no config replace or service restart${RST}"
+    log "${C_DIM}  subs=${SUBS_CONF}${RST}"
+    log "${C_DIM}  template=${CONFIG_TEMPLATE}${RST}"
+    log "${C_DIM}  output=${CONFIG}${RST}"
+fi
+
 # ---- Validate subscriptions config ----
 if [ ! -f "$SUBS_CONF" ]; then
     log "${C_ERR}ERROR: $SUBS_CONF not found${RST}"
@@ -223,6 +283,13 @@ if [ "$DEF_COUNT" -gt 1 ]; then
     exit 1
 fi
 
+# Default subscriptions must be enabled (enabled!=false)
+DEF_DISABLED=$(jq '[.subscriptions[] | select(.default == true and ((if has("enabled") then .enabled else true end) | tostring | ascii_downcase) == "false")] | length' "$SUBS_CONF" 2>/dev/null || echo 0)
+if [ "$DEF_DISABLED" -gt 0 ]; then
+    log "${C_ERR}ERROR: Default subscription cannot be disabled${RST}"
+    exit 1
+fi
+
 # Read global settings before the loop (TEST_URL is needed for urltest groups)
 LOG_LEVEL=$(jq -r '.log_level // "warn"' "$SUBS_CONF")
 TEST_URL=$(jq -r '.test_url // "https://www.gstatic.com/generate_204"' "$SUBS_CONF")
@@ -241,7 +308,14 @@ while IFS= read -r sub_id; do
     sub_name=$(jq -r ".subscriptions[\"$sub_id\"].name" "$SUBS_CONF")
     sub_url=$(jq -r ".subscriptions[\"$sub_id\"].url" "$SUBS_CONF")
     is_default=$(jq -r ".subscriptions[\"$sub_id\"].default // false" "$SUBS_CONF")
+    is_enabled=$(jq -r ".subscriptions[\"$sub_id\"] | (if has(\"enabled\") then .enabled else true end) | tostring | ascii_downcase" "$SUBS_CONF")
     sub_interval=$(jq -r ".subscriptions[\"$sub_id\"].interval // \"5m\"" "$SUBS_CONF")
+
+    # Skip disabled subscriptions (default subscriptions cannot be disabled — validated above)
+    if [ "$is_enabled" = "false" ]; then
+        log "${C_WARN}Skipping disabled ${C_BOLD}${sub_name}${RST}${C_WARN}...${RST}"
+        continue
+    fi
     sub_tolerance=$(jq -r ".subscriptions[\"$sub_id\"].tolerance // 100" "$SUBS_CONF")
     rawfile="$TMPDIR/${sub_id}.raw"
     outfile="$TMPDIR/${sub_id}.txt"
@@ -278,6 +352,10 @@ while IFS= read -r sub_id; do
     done
 
     if [ "$download_ok" -eq 0 ]; then
+        if [ "$is_default" = "true" ]; then
+            log "${C_ERR}ERROR: Default subscription '${sub_name}' failed to download, aborting${RST}"
+            exit 1
+        fi
         log "  ${C_ERR}${sub_name}: all attempts failed, skipping${RST}"
         continue
     fi
@@ -294,7 +372,7 @@ while IFS= read -r sub_id; do
         continue
     fi
 
-    lines=$(grep -c "^vless://" "$outfile" 2>/dev/null || echo 0)
+    lines=$(normalize_count "$(grep -c "^vless://" "$outfile" 2>/dev/null || true)")
     log "  ${sub_name}: ${C_BOLD}${lines}${RST} server(s) found"
 
     # ---- First pass: collect non-excluded URIs ----
@@ -312,7 +390,7 @@ while IFS= read -r sub_id; do
         printf '%s\n' "$line" >> "$uri_file"
     done < "$outfile"
 
-    node_count=$(grep -c '' "$uri_file" 2>/dev/null || echo 0)
+    node_count=$(normalize_count "$(grep -c '' "$uri_file" 2>/dev/null || true)")
     if [ "$skipped" -gt 0 ]; then
         log "  ${sub_name}: kept ${C_OK}${node_count}${RST}, skipped ${C_WARN}${skipped}${RST}"
     else
@@ -416,6 +494,168 @@ ${selector}"
     # Route rules for non-default subscriptions with domains/ip routing
     domains=$(jq -c ".subscriptions[\"$sub_id\"].domains // empty" "$SUBS_CONF")
     ip_cidrs=$(jq -c ".subscriptions[\"$sub_id\"].ip // empty" "$SUBS_CONF")
+
+    # ---- Download and merge domain_urls ----
+    domain_url_count=$(jq -r ".subscriptions[\"$sub_id\"].domain_urls | length // 0" "$SUBS_CONF" 2>/dev/null || echo 0)
+    if [ "$domain_url_count" -gt 0 ]; then
+        # Collect manual domains into a dedup file (one per line, sorted)
+        if [ -n "$domains" ]; then
+            echo "$domains" | jq -r '.[]' | tr 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' 'abcdefghijklmnopqrstuvwxyz' | LC_ALL=C sort -u > "$TMPDIR/${sub_id}.domains_manual.tmp"
+        else
+            : > "$TMPDIR/${sub_id}.domains_manual.tmp"
+        fi
+        : > "$TMPDIR/${sub_id}.domains_urls.tmp"
+
+        jq -r ".subscriptions[\"$sub_id\"].domain_urls[]" "$SUBS_CONF" | while IFS= read -r durl; do
+            [ -z "$durl" ] && continue
+            vlog 1 "  ${C_INFO}Downloading domain list: ${C_DIM}${durl}${RST}"
+            durl_file="$TMPDIR/${sub_id}.durl_$(printf '%s' "$durl" | md5sum | cut -c1-8).tmp"
+            durl_ok=0
+            durl_attempt=1
+            while [ "$durl_attempt" -le "$((sub_retries + 1))" ]; do
+                [ "$durl_attempt" -gt 1 ] && log "  ${C_WARN}domain_urls: retry $((durl_attempt - 1))/${sub_retries} for $(echo "$durl" | sed 's|.*/||')${RST}"
+                http_code=$(curl -sS -L -m 15 -o "$durl_file" -w "%{http_code}" "$durl" 2>/dev/null)
+                curl_rc=$?
+                if [ "$curl_rc" -ne 0 ] || [ "$http_code" = "000" ] || [ -z "$http_code" ]; then
+                    durl_attempt=$((durl_attempt + 1))
+                    [ "$durl_attempt" -le "$((sub_retries + 1))" ] && sleep 5
+                    continue
+                fi
+                if [ "$http_code" != "200" ]; then
+                    durl_attempt=$((durl_attempt + 1))
+                    [ "$durl_attempt" -le "$((sub_retries + 1))" ] && sleep 5
+                    continue
+                fi
+                durl_ok=1
+                break
+            done
+            if [ "$durl_ok" -eq 0 ] || [ ! -s "$durl_file" ]; then
+                log "  ${C_WARN}domain_urls: failed to download ${durl} after $((sub_retries + 1)) attempt(s)${RST}"
+                continue
+            fi
+            # Strip Windows line endings
+            tr -d '\r' < "$durl_file" > "$durl_file.clean" && mv "$durl_file.clean" "$durl_file"
+            # Validate: each non-empty line must look like a domain
+            invalid_lines=$(normalize_count "$(grep -cvE '^\s*$|^\s*#|^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$' "$durl_file" 2>/dev/null || true)")
+            total_lines=$(normalize_count "$(grep -cvE '^\s*$|^\s*#' "$durl_file" 2>/dev/null || true)")
+            if [ "$total_lines" -eq 0 ]; then
+                log "  ${C_WARN}domain_urls: empty list from ${durl}${RST}"
+                continue
+            fi
+            if [ "$invalid_lines" -gt 0 ]; then
+                log "  ${C_WARN}domain_urls: ${invalid_lines} invalid line(s) in ${durl}, skipping${RST}"
+                vlog 2 "  ${C_DIM}$(grep -vE '^\s*$|^\s*#|^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$' "$durl_file" | head -3)${RST}"
+                continue
+            fi
+            # Append valid domains (strip comments, empty lines, lowercase)
+            grep -vE '^\s*$|^\s*#' "$durl_file" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' 'abcdefghijklmnopqrstuvwxyz' > "$durl_file.valid"
+            cat "$durl_file.valid" >> "$TMPDIR/${sub_id}.domains_urls.tmp"
+            debug_dump_file_lines "domains from $(echo "$durl" | sed 's|.*/||')" "$durl_file.valid"
+            vlog 1 "  ${C_OK}domain_urls${RST}: ${total_lines} domain(s) from $(echo "$durl" | sed 's|.*/||')"
+        done
+
+        # Deduplicate: remove entries already in manual list or duplicated across URLs
+        if [ -s "$TMPDIR/${sub_id}.domains_urls.tmp" ]; then
+            LC_ALL=C sort -u "$TMPDIR/${sub_id}.domains_urls.tmp" > "$TMPDIR/${sub_id}.domains_urls_uniq.tmp"
+            # Remove domains already present in the manual list
+            if [ -s "$TMPDIR/${sub_id}.domains_manual.tmp" ]; then
+                LC_ALL=C comm -23 "$TMPDIR/${sub_id}.domains_urls_uniq.tmp" "$TMPDIR/${sub_id}.domains_manual.tmp" > "$TMPDIR/${sub_id}.domains_urls_new.tmp"
+            else
+                cp "$TMPDIR/${sub_id}.domains_urls_uniq.tmp" "$TMPDIR/${sub_id}.domains_urls_new.tmp"
+            fi
+            new_domain_count=$(wc -l < "$TMPDIR/${sub_id}.domains_urls_new.tmp" | tr -d ' ')
+            if [ "$new_domain_count" -gt 0 ]; then
+                # Merge: combine manual domains array with new URL domains
+                url_domains_json=$(jq -Rc '.' "$TMPDIR/${sub_id}.domains_urls_new.tmp" | jq -sc '.')
+                if [ -n "$domains" ]; then
+                    domains=$(echo "$domains" "$url_domains_json" | jq -sc '.[0] + .[1] | unique')
+                else
+                    domains="$url_domains_json"
+                fi
+                log "  ${sub_name}: merged ${C_OK}${new_domain_count}${RST} domain(s) from URLs"
+            fi
+        fi
+    fi
+
+    # ---- Download and merge ip_urls ----
+    ip_url_count=$(jq -r ".subscriptions[\"$sub_id\"].ip_urls | length // 0" "$SUBS_CONF" 2>/dev/null || echo 0)
+    if [ "$ip_url_count" -gt 0 ]; then
+        # Collect manual IPs into a dedup file
+        if [ -n "$ip_cidrs" ]; then
+            echo "$ip_cidrs" | jq -r '.[]' | LC_ALL=C sort -u > "$TMPDIR/${sub_id}.ips_manual.tmp"
+        else
+            : > "$TMPDIR/${sub_id}.ips_manual.tmp"
+        fi
+        : > "$TMPDIR/${sub_id}.ips_urls.tmp"
+
+        jq -r ".subscriptions[\"$sub_id\"].ip_urls[]" "$SUBS_CONF" | while IFS= read -r iurl; do
+            [ -z "$iurl" ] && continue
+            vlog 1 "  ${C_INFO}Downloading IP list: ${C_DIM}${iurl}${RST}"
+            iurl_file="$TMPDIR/${sub_id}.iurl_$(printf '%s' "$iurl" | md5sum | cut -c1-8).tmp"
+            iurl_ok=0
+            iurl_attempt=1
+            while [ "$iurl_attempt" -le "$((sub_retries + 1))" ]; do
+                [ "$iurl_attempt" -gt 1 ] && log "  ${C_WARN}ip_urls: retry $((iurl_attempt - 1))/${sub_retries} for $(echo "$iurl" | sed 's|.*/||')${RST}"
+                http_code=$(curl -sS -L -m 15 -o "$iurl_file" -w "%{http_code}" "$iurl" 2>/dev/null)
+                curl_rc=$?
+                if [ "$curl_rc" -ne 0 ] || [ "$http_code" = "000" ] || [ -z "$http_code" ]; then
+                    iurl_attempt=$((iurl_attempt + 1))
+                    [ "$iurl_attempt" -le "$((sub_retries + 1))" ] && sleep 5
+                    continue
+                fi
+                if [ "$http_code" != "200" ]; then
+                    iurl_attempt=$((iurl_attempt + 1))
+                    [ "$iurl_attempt" -le "$((sub_retries + 1))" ] && sleep 5
+                    continue
+                fi
+                iurl_ok=1
+                break
+            done
+            if [ "$iurl_ok" -eq 0 ] || [ ! -s "$iurl_file" ]; then
+                log "  ${C_WARN}ip_urls: failed to download ${iurl} after $((sub_retries + 1)) attempt(s)${RST}"
+                continue
+            fi
+            # Strip Windows line endings
+            tr -d '\r' < "$iurl_file" > "$iurl_file.clean" && mv "$iurl_file.clean" "$iurl_file"
+            # Validate: each non-empty/non-comment line must look like an IP or CIDR
+            invalid_lines=$(normalize_count "$(grep -cvE '^\s*$|^\s*#|^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$|^[0-9a-fA-F:]+(/[0-9]+)?$' "$iurl_file" 2>/dev/null || true)")
+            total_lines=$(normalize_count "$(grep -cvE '^\s*$|^\s*#' "$iurl_file" 2>/dev/null || true)")
+            if [ "$total_lines" -eq 0 ]; then
+                log "  ${C_WARN}ip_urls: empty list from ${iurl}${RST}"
+                continue
+            fi
+            if [ "$invalid_lines" -gt 0 ]; then
+                log "  ${C_WARN}ip_urls: ${invalid_lines} invalid line(s) in ${iurl}, skipping${RST}"
+                vlog 2 "  ${C_DIM}$(grep -vE '^\s*$|^\s*#|^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$|^[0-9a-fA-F:]+(/[0-9]+)?$' "$iurl_file" | head -3)${RST}"
+                continue
+            fi
+            grep -vE '^\s*$|^\s*#' "$iurl_file" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' > "$iurl_file.valid"
+            cat "$iurl_file.valid" >> "$TMPDIR/${sub_id}.ips_urls.tmp"
+            debug_dump_file_lines "ips from $(echo "$iurl" | sed 's|.*/||')" "$iurl_file.valid"
+            vlog 1 "  ${C_OK}ip_urls${RST}: ${total_lines} entry(ies) from $(echo "$iurl" | sed 's|.*/||')"
+        done
+
+        # Deduplicate
+        if [ -s "$TMPDIR/${sub_id}.ips_urls.tmp" ]; then
+            LC_ALL=C sort -u "$TMPDIR/${sub_id}.ips_urls.tmp" > "$TMPDIR/${sub_id}.ips_urls_uniq.tmp"
+            if [ -s "$TMPDIR/${sub_id}.ips_manual.tmp" ]; then
+                LC_ALL=C comm -23 "$TMPDIR/${sub_id}.ips_urls_uniq.tmp" "$TMPDIR/${sub_id}.ips_manual.tmp" > "$TMPDIR/${sub_id}.ips_urls_new.tmp"
+            else
+                cp "$TMPDIR/${sub_id}.ips_urls_uniq.tmp" "$TMPDIR/${sub_id}.ips_urls_new.tmp"
+            fi
+            new_ip_count=$(wc -l < "$TMPDIR/${sub_id}.ips_urls_new.tmp" | tr -d ' ')
+            if [ "$new_ip_count" -gt 0 ]; then
+                url_ips_json=$(jq -Rc '.' "$TMPDIR/${sub_id}.ips_urls_new.tmp" | jq -sc '.')
+                if [ -n "$ip_cidrs" ]; then
+                    ip_cidrs=$(echo "$ip_cidrs" "$url_ips_json" | jq -sc '.[0] + .[1] | unique')
+                else
+                    ip_cidrs="$url_ips_json"
+                fi
+                log "  ${sub_name}: merged ${C_OK}${new_ip_count}${RST} IP/CIDR(s) from URLs"
+            fi
+        fi
+    fi
+
     if [ "$is_default" != "true" ] && { [ -n "$domains" ] || [ -n "$ip_cidrs" ]; }; then
         if [ -n "$domains" ]; then
             rule="      {
@@ -505,31 +745,40 @@ if [ "$DRY_RUN" -eq 1 ]; then
     exit 0
 fi
 
+if ! command -v sing-box > /dev/null 2>&1; then
+    log "${C_ERR}ERROR: sing-box not found, cannot validate config${RST}"
+    rm -f "${CONFIG}.new"
+    exit 1
+fi
+
 check_out=$(sing-box check -c "${CONFIG}.new" 2>&1)
 check_rc=$?
 [ -n "$check_out" ] && log "${C_DIM}${check_out}${RST}"
 
-if [ "$check_rc" -eq 0 ]; then
-    [ -f "$CONFIG" ] && cp "$CONFIG" "${CONFIG}.bak"
-    mv "${CONFIG}.new" "$CONFIG"
-    # Save tag->name mapping for LuCI display
-    if [ -s "$TMPDIR/tag-names.tsv" ]; then
-        jq -Rn '[inputs | split("\t") | {(.[0]): .[1]}] | add // {}' \
-            "$TMPDIR/tag-names.tsv" > "$TAGS_FILE"
-    fi
-    # Clear unsync flag — config is now applied
-    rm -f "$UNSYNC_FLAG"
-    log "${C_OK}Config OK, restarting sing-box...${RST}"
-    restart_out=$(service sing-box restart 2>&1)
-    [ -n "$restart_out" ] && log "${C_DIM}${restart_out}${RST}"
-    sleep 2
-    if pidof sing-box > /dev/null; then
-        log "${C_OK}${C_BOLD}sing-box restarted successfully${RST}"
-    else
-        log "${C_WARN}WARNING: sing-box may not have started${RST}"
-    fi
-else
+if [ "$check_rc" -ne 0 ]; then
     log "${C_ERR}ERROR: Invalid config, keeping old one${RST}"
     rm -f "${CONFIG}.new"
     exit 1
+fi
+
+[ -f "$CONFIG" ] && cp "$CONFIG" "${CONFIG}.bak"
+mv "${CONFIG}.new" "$CONFIG"
+
+# Save tag->name mapping for LuCI display
+if [ -s "$TMPDIR/tag-names.tsv" ]; then
+    jq -Rn '[inputs | split("\t") | {(.[0]): .[1]}] | add // {}' \
+        "$TMPDIR/tag-names.tsv" > "$TAGS_FILE"
+fi
+
+# Clear unsync flag — config is now applied
+rm -f "$UNSYNC_FLAG"
+
+log "${C_OK}Config OK, restarting sing-box...${RST}"
+restart_out=$(service sing-box restart 2>&1)
+[ -n "$restart_out" ] && log "${C_DIM}${restart_out}${RST}"
+sleep 2
+if pidof sing-box > /dev/null; then
+    log "${C_OK}${C_BOLD}sing-box restarted successfully${RST}"
+else
+    log "${C_WARN}WARNING: sing-box may not have started${RST}"
 fi

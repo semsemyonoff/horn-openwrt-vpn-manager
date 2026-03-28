@@ -36,8 +36,21 @@ case "$1" in
                 read -r input
                 # Extract the "config" field as raw JSON and write to file
                 if echo "$input" | jq -e '.config' > /dev/null 2>&1; then
+                    config_json=$(echo "$input" | jq '.config')
+                    # Validate: default subscriptions must not be disabled
+                    def_disabled=$(echo "$config_json" | jq '[.subscriptions[]? | select(.default == true and ((if has("enabled") then .enabled else true end) | tostring | ascii_downcase) == "false")] | length')
+                    if [ "$def_disabled" -gt 0 ]; then
+                        printf '{"error":"Default subscription cannot be disabled"}'
+                        exit 0
+                    fi
+                    # Validate: at least one enabled default subscription
+                    def_enabled=$(echo "$config_json" | jq '[.subscriptions[]? | select(.default == true and ((if has("enabled") then .enabled else true end) | tostring | ascii_downcase) != "false")] | length')
+                    if [ "$def_enabled" -eq 0 ]; then
+                        printf '{"error":"At least one enabled default subscription is required"}'
+                        exit 0
+                    fi
                     mkdir -p "$(dirname "$SUBS_JSON")"
-                    echo "$input" | jq '.config' > "$SUBS_JSON"
+                    echo "$config_json" > "$SUBS_JSON"
                     touch "$UNSYNC_FLAG"
                     printf '{"result":"ok"}'
                 else
@@ -382,7 +395,7 @@ TAGEOF
 
                 # Rewrite the file: stripped content + new domain blocks
                 {
-                    printf '%s' "$stripped"
+                    printf '%s\n' "$stripped"
                     echo "$input" | jq -r '.domains[]? // empty' | while IFS= read -r domain; do
                         [ -z "$domain" ] && continue
                         printf 'config ipset\n\tlist name '\''vpn_domains'\''\n\tlist domain '\''%s'\''\n\n' "$domain"

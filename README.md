@@ -77,25 +77,34 @@ Init script `/etc/init.d/horn-vpn-manager` ждёт доступ в интерн
       "name": "vless-default",
       "url": "https://example.com/my-default-vless",
       "default": true,
+      "enabled": true,
       "exclude": ["Россия", "traffic", "expire"]
     },
     "blanc": {
       "name": "Blanc",
       "url": "https://example.com/blanc/sub",
+      "enabled": true,
       "domains": [
         "chatgpt.com",
         "openai.com",
         "oaiusercontent.com"
+      ],
+      "domain_urls": [
+        "https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/discord.lst"
       ],
       "exclude": ["Россия", "traffic", "expire"]
     },
     "corpnet": {
       "name": "CorpNet",
       "url": "https://example.com/corpnet/sub",
+      "enabled": false,
       "ip": [
         "10.0.0.0/8",
         "172.16.0.0/12",
         "192.168.0.0/16"
+      ],
+      "ip_urls": [
+        "https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Subnets/IPv4/telegram.lst"
       ]
     }
   }
@@ -115,7 +124,10 @@ Init script `/etc/init.d/horn-vpn-manager` ждёт доступ в интерн
 - `url` — URL подписки
 - `default` — ровно одна подписка должна иметь `true`; её outbound попадёт в `route.final`
 - `domains` — список `domain_suffix` для route rule
+- `domain_urls` — список URL-ов, откуда при запуске скрипта будут скачаны домены (по одному на строку); скачанные домены мерджатся с `domains`, дедуплицируются между собой и с ручными записями; содержимое валидируется — если в ответе не домены, список пропускается
 - `ip` — список CIDR для `ip_cidr` route rule
+- `ip_urls` — список URL-ов с IP/CIDR (по одному на строку); работает аналогично `domain_urls` — мерджатся с `ip`, дедуплицируются, валидируются
+- `enabled` — использовать ли подписку (`true` по умолчанию); если `false`, подписка пропускается. Дефолтная подписка не может быть отключена
 - `exclude` — подстроки для фильтрации имён узлов
 - `interval` — период `urltest` для multi-node подписки, по умолчанию `5m`
 - `tolerance` — tolerance `urltest`, по умолчанию `100`

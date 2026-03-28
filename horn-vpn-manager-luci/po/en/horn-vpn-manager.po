@@ -365,3 +365,12 @@ msgstr "Settings saved (dnsmasq restarted)"
 
 msgid "(empty)"
 msgstr "(empty)"
+
+msgid "Enabled"
+msgstr "Enabled"
+
+msgid "Use this subscription"
+msgstr "Use this subscription"
+
+msgid "Disabled subscriptions are skipped during updates"
+msgstr "Disabled subscriptions are skipped during updates"

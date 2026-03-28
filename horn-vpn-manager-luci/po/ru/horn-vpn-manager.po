@@ -365,3 +365,12 @@ msgstr "Настройки сохранены (dnsmasq перезапущен)"
 
 msgid "(empty)"
 msgstr "(пусто)"
+
+msgid "Enabled"
+msgstr "Включена"
+
+msgid "Use this subscription"
+msgstr "Использовать эту подписку"
+
+msgid "Disabled subscriptions are skipped during updates"
+msgstr "Отключенные подписки пропускаются при обновлении"

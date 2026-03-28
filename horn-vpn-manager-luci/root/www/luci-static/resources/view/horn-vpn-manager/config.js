@@ -884,7 +884,7 @@ return view.extend({
                 click: function () {
                     var i = self._subIdx++;
                     var card = self._makeCard(
-                        { name: "", url: "", default: false },
+                        { name: "", url: "", default: false, enabled: true },
                         i,
                     );
                     subList.appendChild(card);
@@ -1701,9 +1701,23 @@ return view.extend({
         var cardId = "vpnsub-sub-" + idx;
 
         var domainsW = dynList(sub.domains || [], _("example.com"));
+        var domainUrlsW = dynList(
+            sub.domain_urls || [],
+            "https://raw.githubusercontent.com/.../domains.lst",
+        );
         var ipW = dynList(sub.ip || [], "192.168.0.0/16");
+        var ipUrlsW = dynList(
+            sub.ip_urls || [],
+            "https://raw.githubusercontent.com/.../subnets.lst",
+        );
         var excludeW = dynList(sub.exclude || [], _("Russia"));
-        self._widgets[idx] = { domains: domainsW, ip: ipW, exclude: excludeW };
+        self._widgets[idx] = {
+            domains: domainsW,
+            domain_urls: domainUrlsW,
+            ip: ipW,
+            ip_urls: ipUrlsW,
+            exclude: excludeW,
+        };
 
         var nameInput = E("input", {
             type: "text",
@@ -1756,6 +1770,13 @@ return view.extend({
             },
         });
         if (sub.default === true) defInput.checked = true;
+
+        var enabledInput = E("input", {
+            type: "checkbox",
+            class: "vpnsub-sub-enabled",
+        });
+        if (sub.enabled !== false && sub.enabled !== "false")
+            enabledInput.checked = true;
 
         var removeBtn = E(
             "button",
@@ -1826,6 +1847,15 @@ return view.extend({
         );
         if (sub.default === true) domainsRow.style.display = "none";
 
+        var domainUrlsRow = makeCollapsible(
+            _("Domain list URLs"),
+            domainUrlsW,
+            _(
+                "URLs to download domain lists from (one domain per line); downloaded domains are merged and deduplicated with manual entries",
+            ),
+        );
+        if (sub.default === true) domainUrlsRow.style.display = "none";
+
         var ipRow = makeCollapsible(
             _("IP / CIDR"),
             ipW,
@@ -1834,6 +1864,15 @@ return view.extend({
             ),
         );
         if (sub.default === true) ipRow.style.display = "none";
+
+        var ipUrlsRow = makeCollapsible(
+            _("IP list URLs"),
+            ipUrlsW,
+            _(
+                "URLs to download IP/CIDR lists from (one entry per line); downloaded entries are merged and deduplicated with manual entries",
+            ),
+        );
+        if (sub.default === true) ipUrlsRow.style.display = "none";
 
         var children = [
             E("div", { class: "vpnsub-sub-header" }, [
@@ -1859,6 +1898,14 @@ return view.extend({
                     "\u00a0" + _("Use as default outbound (fallback route)"),
                 ]),
                 _("Exactly one subscription must be marked as default"),
+            ),
+            formRow(
+                _("Enabled"),
+                E("label", {}, [
+                    enabledInput,
+                    "\u00a0" + _("Use this subscription"),
+                ]),
+                _("Disabled subscriptions are skipped during updates"),
             ),
         ];
 
@@ -1887,7 +1934,9 @@ return view.extend({
         }
 
         children.push(domainsRow);
+        children.push(domainUrlsRow);
         children.push(ipRow);
+        children.push(ipUrlsRow);
         children.push(
             formRow(
                 _("Exclude filters"),
@@ -1930,8 +1979,12 @@ return view.extend({
                     : sanitizeId(name);
                 var url = card.querySelector(".vpnsub-sub-url").value.trim();
                 var isDef = card.querySelector(".vpnsub-sub-default").checked;
+                var enabledEl = card.querySelector(".vpnsub-sub-enabled");
+                var isEnabled = !enabledEl || enabledEl.checked;
                 var domains = w.domains ? w.domains.getValue() : [];
+                var domainUrls = w.domain_urls ? w.domain_urls.getValue() : [];
                 var ip = w.ip ? w.ip.getValue() : [];
+                var ipUrls = w.ip_urls ? w.ip_urls.getValue() : [];
                 var exclude = w.exclude ? w.exclude.getValue() : [];
 
                 var intervalEl = card.querySelector(".vpnsub-sub-interval");
@@ -1941,8 +1994,11 @@ return view.extend({
 
                 var sub = { name: name, url: url };
                 if (isDef) sub.default = true;
+                if (!isEnabled) sub.enabled = false;
                 if (domains.length) sub.domains = domains;
+                if (domainUrls.length) sub.domain_urls = domainUrls;
                 if (ip.length) sub.ip = ip;
+                if (ipUrls.length) sub.ip_urls = ipUrls;
                 if (exclude.length) sub.exclude = exclude;
                 if (interval) sub.interval = interval;
                 if (toleranceRaw !== "") {

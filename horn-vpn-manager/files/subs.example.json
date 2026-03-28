@@ -7,15 +7,20 @@
       "name": "vless-default",
       "url": "https://example.com/my-default-vless",
       "default": true,
+      "enabled": true,
       "exclude": ["Россия", "traffic", "expire"]
     },
     "blanc": {
       "name": "Blanc",
       "url": "https://example.com/blanc/sub",
+      "enabled": true,
       "domains": [
         "chatgpt.com",
         "openai.com",
         "oaiusercontent.com"
+      ],
+      "domain_urls": [
+        "https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/discord.lst"
       ],
       "exclude": ["Россия", "traffic", "expire"]
     },
@@ -27,6 +32,10 @@
         "anthropic.com",
         "claude.ai"
       ],
+      "domain_urls": [
+        "https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/google.lst",
+        "https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/anthropic.lst"
+      ],
       "exclude": ["Россия", "Torrent"],
       "interval": "2m",
       "tolerance": 50
@@ -34,10 +43,14 @@
     "corpnet": {
       "name": "CorpNet",
       "url": "https://example.com/corpnet/sub",
+      "enabled": false,
       "ip": [
         "10.0.0.0/8",
         "172.16.0.0/12",
         "192.168.0.0/16"
+      ],
+      "ip_urls": [
+        "https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Subnets/IPv4/telegram.lst"
       ],
       "exclude": ["Россия"]
     },
