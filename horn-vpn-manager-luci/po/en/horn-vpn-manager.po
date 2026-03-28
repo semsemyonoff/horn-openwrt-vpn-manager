@@ -374,3 +374,18 @@ msgstr "Use this subscription"
 
 msgid "Disabled subscriptions are skipped during updates"
 msgstr "Disabled subscriptions are skipped during updates"
+
+msgid "Export"
+msgstr "Export"
+
+msgid "Import"
+msgstr "Import"
+
+msgid "Config imported"
+msgstr "Config imported"
+
+msgid "Invalid JSON file"
+msgstr "Invalid JSON file"
+
+msgid "Invalid config: missing subscriptions"
+msgstr "Invalid config: missing subscriptions"

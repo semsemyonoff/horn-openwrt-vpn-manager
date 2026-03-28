@@ -374,3 +374,18 @@ msgstr "Использовать эту подписку"
 
 msgid "Disabled subscriptions are skipped during updates"
 msgstr "Отключенные подписки пропускаются при обновлении"
+
+msgid "Export"
+msgstr "Экспорт"
+
+msgid "Import"
+msgstr "Импорт"
+
+msgid "Config imported"
+msgstr "Конфигурация импортирована"
+
+msgid "Invalid JSON file"
+msgstr "Некорректный JSON-файл"
+
+msgid "Invalid config: missing subscriptions"
+msgstr "Некорректный конфиг: отсутствуют подписки"

@@ -766,6 +766,47 @@ function makeTabs(tabs) {
     return wrapper;
 }
 
+// ── Import / Export helpers ───────────────────────────────────────────────────
+
+function downloadJson(data, filename) {
+    var blob = new Blob([JSON.stringify(data, null, 2)], {
+        type: "application/json",
+    });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+function importJson(accept) {
+    return new Promise(function (resolve, reject) {
+        var input = document.createElement("input");
+        input.type = "file";
+        input.accept = accept || ".json";
+        input.addEventListener("change", function () {
+            var file = input.files && input.files[0];
+            if (!file) return reject(new Error("No file selected"));
+            var reader = new FileReader();
+            reader.onload = function () {
+                try {
+                    resolve(JSON.parse(reader.result));
+                } catch (e) {
+                    reject(new Error(_("Invalid JSON file")));
+                }
+            };
+            reader.onerror = function () {
+                reject(new Error("Failed to read file"));
+            };
+            reader.readAsText(file);
+        });
+        input.click();
+    });
+}
+
 // ── Main view ─────────────────────────────────────────────────────────────────
 return view.extend({
     _widgets: null,
@@ -936,6 +977,62 @@ return view.extend({
         );
         self._unsyncBanner = unsyncBanner;
 
+        var subsExportBtn = E(
+            "button",
+            {
+                type: "button",
+                class: "cbi-button",
+                click: function () {
+                    callGetConfig().then(function (res) {
+                        var cfg = res && res.config ? res.config : {};
+                        downloadJson(cfg, "subs.json");
+                    });
+                },
+            },
+            _("Export"),
+        );
+
+        var subsImportBtn = E(
+            "button",
+            {
+                type: "button",
+                class: "cbi-button",
+                click: function () {
+                    importJson(".json")
+                        .then(function (data) {
+                            if (
+                                !data ||
+                                typeof data !== "object" ||
+                                !data.subscriptions
+                            ) {
+                                throw new Error(
+                                    _("Invalid config: missing subscriptions"),
+                                );
+                            }
+                            return callSetConfig(data);
+                        })
+                        .then(function (res) {
+                            if (res && res.error) throw new Error(res.error);
+                            ui.addNotification(
+                                null,
+                                E("p", _("Config imported")),
+                                "info",
+                            );
+                            window.location.reload();
+                        })
+                        .catch(function (err) {
+                            if (err && err.message)
+                                ui.addNotification(
+                                    null,
+                                    E("p", _("Error: ") + err.message),
+                                    "error",
+                                );
+                        });
+                },
+            },
+            _("Import"),
+        );
+
         var settingsPane = E("div", { class: "vpnsub-tab-pane" }, [
             globalSection,
             E("div", { class: "cbi-section cbi-tblsection" }, [
@@ -948,6 +1045,10 @@ return view.extend({
                 ),
             ]),
             E("div", { class: "cbi-page-actions" }, [
+                subsExportBtn,
+                "\u00a0",
+                subsImportBtn,
+                "\u00a0\u00a0",
                 settingsDirtyEl,
                 "\u00a0\u00a0",
                 saveBtn,
@@ -1407,6 +1508,56 @@ return view.extend({
             _("Save"),
         );
 
+        var domainsExportBtn = E(
+            "button",
+            {
+                type: "button",
+                class: "cbi-button",
+                click: function () {
+                    callGetDomainsConfig().then(function (res) {
+                        var cfg = res && res.config ? res.config : {};
+                        downloadJson(cfg, "domains.json");
+                    });
+                },
+            },
+            _("Export"),
+        );
+
+        var domainsImportBtn = E(
+            "button",
+            {
+                type: "button",
+                class: "cbi-button",
+                click: function () {
+                    importJson(".json")
+                        .then(function (data) {
+                            if (!data || typeof data !== "object") {
+                                throw new Error(_("Invalid JSON file"));
+                            }
+                            return callSetDomainsConfig(data);
+                        })
+                        .then(function (res) {
+                            if (res && res.error) throw new Error(res.error);
+                            ui.addNotification(
+                                null,
+                                E("p", _("Config imported")),
+                                "info",
+                            );
+                            window.location.reload();
+                        })
+                        .catch(function (err) {
+                            if (err && err.message)
+                                ui.addNotification(
+                                    null,
+                                    E("p", _("Error: ") + err.message),
+                                    "error",
+                                );
+                        });
+                },
+            },
+            _("Import"),
+        );
+
         var domainsLogPre = E(
             "pre",
             { class: "vpnsub-log", id: "vpnsub-domains-log" },
@@ -1523,9 +1674,13 @@ return view.extend({
                     ]);
                 })(),
                 E("div", { class: "cbi-page-actions" }, [
-                    domainsSaveBtn,
+                    domainsExportBtn,
+                    "\u00a0",
+                    domainsImportBtn,
                     "\u00a0\u00a0",
                     domainsDirtyEl,
+                    "\u00a0\u00a0",
+                    domainsSaveBtn,
                 ]),
             ]),
             E("div", { class: "cbi-section" }, [
