@@ -165,7 +165,6 @@ is_excluded() {
 }
 
 # Compute 8-char MD5 hash from stable VLESS connection parameters.
-# Inputs: type, server, port, uuid, security, sni, pbk, sid, flow, fp.
 # The hash is stable as long as the connection parameters do not change.
 # shellcheck disable=SC3043
 compute_node_hash() {
@@ -178,16 +177,22 @@ compute_node_hash() {
     local port="${sp##*:}"
     local params="${rest#*\?}"; params="${params%%#*}"
 
-    local sni pbk sid flow fp security
-    sni=$(echo "$params"      | tr '&' '\n' | grep "^sni="      | cut -d= -f2-)
-    pbk=$(echo "$params"      | tr '&' '\n' | grep "^pbk="      | cut -d= -f2-)
-    sid=$(echo "$params"      | tr '&' '\n' | grep "^sid="      | cut -d= -f2-)
-    flow=$(echo "$params"     | tr '&' '\n' | grep "^flow="     | cut -d= -f2-)
-    fp=$(echo "$params"       | tr '&' '\n' | grep "^fp="       | cut -d= -f2-)
-    security=$(echo "$params" | tr '&' '\n' | grep "^security=" | cut -d= -f2-)
+    local sni pbk sid flow fp security transport_type path host serviceName alpn
+    sni=$(echo "$params"            | tr '&' '\n' | grep "^sni="         | cut -d= -f2-)
+    pbk=$(echo "$params"            | tr '&' '\n' | grep "^pbk="         | cut -d= -f2-)
+    sid=$(echo "$params"            | tr '&' '\n' | grep "^sid="         | cut -d= -f2-)
+    flow=$(echo "$params"           | tr '&' '\n' | grep "^flow="        | cut -d= -f2-)
+    fp=$(echo "$params"             | tr '&' '\n' | grep "^fp="          | cut -d= -f2-)
+    security=$(echo "$params"       | tr '&' '\n' | grep "^security="    | cut -d= -f2-)
+    transport_type=$(echo "$params" | tr '&' '\n' | grep "^type="        | cut -d= -f2-)
+    path=$(echo "$params"           | tr '&' '\n' | grep "^path="        | cut -d= -f2-)
+    host=$(echo "$params"           | tr '&' '\n' | grep "^host="        | cut -d= -f2-)
+    serviceName=$(echo "$params"    | tr '&' '\n' | grep "^serviceName=" | cut -d= -f2-)
+    alpn=$(echo "$params"           | tr '&' '\n' | grep "^alpn="        | cut -d= -f2-)
 
-    printf 'vless|%s|%s|%s|%s|%s|%s|%s|%s|%s' \
+    printf 'vless|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s' \
         "$server" "$port" "$uuid" "$security" "$sni" "$pbk" "$sid" "$flow" "$fp" \
+        "$transport_type" "$path" "$host" "$serviceName" \
         | md5sum | cut -c1-8
 }
 
@@ -207,13 +212,32 @@ parse_uri() {
     local params="${rest#*\?}"
     params="${params%%#*}"
 
-    local sni pbk sid flow fp security
-    sni=$(echo "$params" | tr '&' '\n' | grep "^sni=" | cut -d= -f2-)
-    pbk=$(echo "$params" | tr '&' '\n' | grep "^pbk=" | cut -d= -f2-)
-    sid=$(echo "$params" | tr '&' '\n' | grep "^sid=" | cut -d= -f2-)
-    flow=$(echo "$params" | tr '&' '\n' | grep "^flow=" | cut -d= -f2-)
-    fp=$(echo "$params" | tr '&' '\n' | grep "^fp=" | cut -d= -f2-)
-    security=$(echo "$params" | tr '&' '\n' | grep "^security=" | cut -d= -f2-)
+    # Extract all known URI parameters
+    local sni pbk sid flow fp security transport_type path host
+    local serviceName headerType alpn encryption mode
+    sni=$(echo "$params"            | tr '&' '\n' | grep "^sni="         | cut -d= -f2-)
+    pbk=$(echo "$params"            | tr '&' '\n' | grep "^pbk="         | cut -d= -f2-)
+    sid=$(echo "$params"            | tr '&' '\n' | grep "^sid="         | cut -d= -f2-)
+    flow=$(echo "$params"           | tr '&' '\n' | grep "^flow="        | cut -d= -f2-)
+    fp=$(echo "$params"             | tr '&' '\n' | grep "^fp="          | cut -d= -f2-)
+    security=$(echo "$params"       | tr '&' '\n' | grep "^security="    | cut -d= -f2-)
+    transport_type=$(echo "$params" | tr '&' '\n' | grep "^type="        | cut -d= -f2-)
+    path=$(echo "$params"           | tr '&' '\n' | grep "^path="        | cut -d= -f2-)
+    host=$(echo "$params"           | tr '&' '\n' | grep "^host="        | cut -d= -f2-)
+    serviceName=$(echo "$params"    | tr '&' '\n' | grep "^serviceName=" | cut -d= -f2-)
+    headerType=$(echo "$params"     | tr '&' '\n' | grep "^headerType="  | cut -d= -f2-)
+    alpn=$(echo "$params"           | tr '&' '\n' | grep "^alpn="        | cut -d= -f2-)
+    encryption=$(echo "$params"     | tr '&' '\n' | grep "^encryption="  | cut -d= -f2-)
+    mode=$(echo "$params"           | tr '&' '\n' | grep "^mode="        | cut -d= -f2-)
+
+    # URL-decode path (%2F → /)
+    if [ -n "$path" ]; then
+        path=$(printf '%s' "$path" | sed 's/%2F/\//g; s/%2f/\//g; s/%20/ /g; s/%3D/=/g; s/%3d/=/g; s/%26/\&/g; s/%3F/?/g; s/%3f/?/g')
+    fi
+    # URL-decode host
+    if [ -n "$host" ]; then
+        host=$(printf '%s' "$host" | sed 's/%2F/\//g; s/%2f/\//g; s/%20/ /g')
+    fi
 
     local json="    {
       \"type\": \"vless\",
@@ -226,25 +250,102 @@ parse_uri() {
       \"flow\": \"${flow}\""
 
     json="$json,
+      \"packet_encoding\": \"xudp\""
+
+    # ---- TLS block ----
+    if [ "$security" = "tls" ] || [ "$security" = "reality" ] || [ -z "$security" ]; then
+        json="$json,
       \"tls\": {
         \"enabled\": true,
         \"insecure\": false"
 
-    [ -n "$sni" ] && json="$json,
+        [ -n "$sni" ] && json="$json,
         \"server_name\": \"${sni}\""
 
-    [ -n "$fp" ] && json="$json,
+        # ALPN: comma-separated → JSON array
+        if [ -n "$alpn" ]; then
+            local alpn_json=""
+            local IFS_OLD="$IFS"
+            IFS=','
+            for a in $alpn; do
+                [ -n "$alpn_json" ] && alpn_json="$alpn_json, "
+                alpn_json="$alpn_json\"$a\""
+            done
+            IFS="$IFS_OLD"
+            json="$json,
+        \"alpn\": [${alpn_json}]"
+        fi
+
+        [ -n "$fp" ] && json="$json,
         \"utls\": { \"enabled\": true, \"fingerprint\": \"${fp}\" }"
 
-    if [ "$security" = "reality" ] && [ -n "$pbk" ]; then
-        json="$json,
+        if [ "$security" = "reality" ] && [ -n "$pbk" ]; then
+            json="$json,
         \"reality\": { \"enabled\": true, \"public_key\": \"${pbk}\""
-        [ -n "$sid" ] && json="$json, \"short_id\": \"${sid}\""
-        json="$json }"
+            [ -n "$sid" ] && json="$json, \"short_id\": \"${sid}\""
+            json="$json }"
+        fi
+
+        json="$json
+      }"
+    fi
+
+    # ---- Transport block ----
+    # Determine effective transport type
+    local eff_transport=""
+    case "$transport_type" in
+        ws)    eff_transport="ws" ;;
+        grpc)  eff_transport="grpc" ;;
+        http|h2) eff_transport="http" ;;
+        quic)  eff_transport="quic" ;;
+        xhttp) eff_transport="xhttp" ;;
+        tcp)
+            # tcp with headerType=http means HTTP transport
+            [ "$headerType" = "http" ] && eff_transport="http"
+            ;;
+    esac
+
+    if [ -n "$eff_transport" ]; then
+        json="$json,
+      \"transport\": {
+        \"type\": \"${eff_transport}\""
+
+        case "$eff_transport" in
+            ws)
+                [ -n "$path" ] && json="$json,
+        \"path\": \"${path}\""
+                if [ -n "$host" ]; then
+                    json="$json,
+        \"headers\": { \"Host\": \"${host}\" }"
+                fi
+                ;;
+            http)
+                [ -n "$host" ] && json="$json,
+        \"host\": [\"${host}\"]"
+                [ -n "$path" ] && json="$json,
+        \"path\": \"${path}\""
+                ;;
+            grpc)
+                [ -n "$serviceName" ] && json="$json,
+        \"service_name\": \"${serviceName}\""
+                ;;
+            xhttp)
+                [ -n "$mode" ] && json="$json,
+        \"mode\": \"${mode}\""
+                [ -n "$host" ] && json="$json,
+        \"host\": \"${host}\""
+                [ -n "$path" ] && json="$json,
+        \"path\": \"${path}\""
+                json="$json,
+        \"x_padding_bytes\": \"100-1000\""
+                ;;
+        esac
+
+        json="$json
+      }"
     fi
 
     json="$json
-      }
     }"
 
     echo "$json"
@@ -361,12 +462,25 @@ while IFS= read -r sub_id; do
     fi
     vlog 3 "${C_DIM}  [dbg] ${sub_name}: $(wc -c < "$rawfile" | tr -d ' ') bytes${RST}"
 
-    # Auto-detect encoding: raw VLESS or base64
+    # Decompress gzip if needed (try gzip -d; if file isn't gzip it will fail harmlessly)
+    if gzip -d -c "$rawfile" > "$TMPDIR/${sub_id}.raw.ungz" 2>/dev/null; then
+        mv "$TMPDIR/${sub_id}.raw.ungz" "$rawfile"
+        vlog 1 "${C_DIM}  ${sub_name}: decompressed gzip${RST}"
+    fi
+
+    # Normalize line endings (\r\n → \n) in-place
+    if LC_ALL=C grep -qU $'\r' "$rawfile" 2>/dev/null; then
+        LC_ALL=C sed 's/\r//' "$rawfile" > "$TMPDIR/${sub_id}.raw.norm" && mv "$TMPDIR/${sub_id}.raw.norm" "$rawfile"
+    fi
+
+    # Auto-detect encoding: raw VLESS, standard base64, or URL-safe base64
     if grep -q "^vless://" "$rawfile" 2>/dev/null; then
         cp "$rawfile" "$outfile"
         vlog 1 "${C_DIM}  ${sub_name}: raw format${RST}"
     elif base64 -d < "$rawfile" > "$outfile" 2>/dev/null && grep -q "^vless://" "$outfile"; then
         vlog 1 "${C_DIM}  ${sub_name}: base64 format${RST}"
+    elif LC_ALL=C tr -- '-_' '+/' < "$rawfile" | base64 -d > "$outfile" 2>/dev/null && grep -q "^vless://" "$outfile"; then
+        vlog 1 "${C_DIM}  ${sub_name}: base64url format${RST}"
     else
         log "  ${C_WARN}${sub_name}: no VLESS URIs found, skipping${RST}"
         continue
