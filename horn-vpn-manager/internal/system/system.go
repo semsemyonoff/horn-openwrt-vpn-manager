@@ -79,7 +79,7 @@ func (o *OpenWrt) ApplyDomains(cacheFile, dnsmasqDir string) error {
 		return fmt.Errorf("read domain cache: %w", err)
 	}
 	dest := filepath.Join(dnsmasqDir, "domains.lst")
-	if err := os.WriteFile(dest, data, 0o644); err != nil {
+	if err := atomicWrite(dest, data); err != nil {
 		return fmt.Errorf("write dnsmasq config: %w", err)
 	}
 	logx.Info("Domain list applied to %s, restarting dnsmasq...", dest)
@@ -155,6 +155,23 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return os.WriteFile(dst, data, 0o644)
+}
+
+// atomicWrite writes data to path via a temp file and rename so readers never
+// see a partial write.
+func atomicWrite(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 // ApplyIPs reloads the firewall so it picks up the updated IP list.

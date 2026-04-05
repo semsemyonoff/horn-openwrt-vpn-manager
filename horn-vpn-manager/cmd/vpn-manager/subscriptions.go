@@ -127,6 +127,7 @@ func subscriptionsRunDebug(flags subsFlags, dryRun bool) error {
 	applier := subscription.NewDebugApplier()
 	runner := subscription.NewRunner(cfg, applier)
 	runner.OutDir = outDir
+	runner.ConfigDir = outDir
 	runner.DryRun = dryRun
 
 	return runner.Run(ctx)

@@ -251,13 +251,17 @@ func BuildOutbounds(id string, uris []string, interval string, tolerance int, te
 // nodeToOutbound converts a parsed VLESS node into a typed sing-box VLESSOutbound.
 func nodeToOutbound(n *vless.Node, tag string) *VLESSOutbound {
 	ob := &VLESSOutbound{
-		Type:           "vless",
-		Tag:            tag,
-		Server:         n.Server,
-		ServerPort:     n.Port,
-		UUID:           n.UUID,
-		Flow:           n.Flow,
-		PacketEncoding: packetEncoding,
+		Type:       "vless",
+		Tag:        tag,
+		Server:     n.Server,
+		ServerPort: n.Port,
+		UUID:       n.UUID,
+		Flow:       n.Flow,
+	}
+	// packet_encoding is incompatible with XTLS flow (e.g. xtls-rprx-vision).
+	// Only set it when flow is absent.
+	if n.Flow == "" {
+		ob.PacketEncoding = packetEncoding
 	}
 
 	// TLS block: generate only when security is explicitly "tls" or "reality".

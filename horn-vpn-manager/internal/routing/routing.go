@@ -133,12 +133,18 @@ func (r *Runner) Run(ctx context.Context) error {
 		if len(ipList) > 0 {
 			data := []byte(strings.Join(ipList, "\n") + "\n")
 			path := filepath.Join(r.ListsDir, VPNIPListFile)
-			if err := atomicWrite(path, data); err != nil {
-				return fmt.Errorf("write vpn-ip-list: %w", err)
-			}
-			logx.Info("IP list updated: %s entries -> %s", logx.Bold(fmt.Sprintf("%d", len(ipList))), path)
-			if err := r.Applier.ApplyIPs(path); err != nil {
-				logx.Err("Failed to apply IPs: %v", err)
+			// Only write and reload the firewall when content actually changed.
+			existing, _ := os.ReadFile(path)
+			if string(existing) != string(data) {
+				if err := atomicWrite(path, data); err != nil {
+					return fmt.Errorf("write vpn-ip-list: %w", err)
+				}
+				logx.Info("IP list updated: %s entries -> %s", logx.Bold(fmt.Sprintf("%d", len(ipList))), path)
+				if err := r.Applier.ApplyIPs(path); err != nil {
+					logx.Err("Failed to apply IPs: %v", err)
+				}
+			} else {
+				logx.Info("IP list unchanged, skipping firewall reload")
 			}
 		} else {
 			logx.Info("No IP entries, skipping firewall reload")
