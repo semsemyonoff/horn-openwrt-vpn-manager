@@ -53,6 +53,12 @@ func parseRoutingFlags(args []string) (routingFlags, error) {
 }
 
 func routingRun(args []string) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return routingRunCtx(ctx, args)
+}
+
+func routingRunCtx(ctx context.Context, args []string) error {
 	flags, err := parseRoutingFlags(args)
 	if err != nil {
 		return err
@@ -67,9 +73,6 @@ func routingRun(args []string) error {
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	applier := system.NewOpenWrt()
 	runner := routing.NewRunner(cfg, applier)

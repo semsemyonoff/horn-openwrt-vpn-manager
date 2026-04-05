@@ -74,6 +74,17 @@ func (r *Runner) fetchOptsForSub(sub *config.Subscription) fetch.Options {
 	}
 }
 
+// urlHost returns only the scheme and host of a URL for safe logging.
+// Subscription URLs commonly embed auth tokens in the path or query string;
+// logging only the host avoids credential exposure in verbose output.
+func urlHost(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return "[configured]"
+	}
+	return u.Scheme + "://" + u.Host + "/..."
+}
+
 // extractNodeName returns the display name from a VLESS URI fragment.
 // Converts '+' to space to match vless.Parse behavior, since subscription
 // generators commonly encode spaces as '+' in URI fragments.
@@ -169,7 +180,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 
 		logx.Info("Downloading subscription %s...", logx.Bold(id))
-		logx.Detail("  URL: %s", sub.URL)
+		logx.Detail("  URL: %s", urlHost(sub.URL))
 
 		opts := r.fetchOptsForSub(sub)
 		data, err := fetch.Download(ctx, sub.URL, opts)

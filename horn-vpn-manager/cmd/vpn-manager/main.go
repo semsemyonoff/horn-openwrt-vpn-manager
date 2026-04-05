@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 )
 
 func main() {
@@ -73,12 +76,20 @@ func runSubscriptions(args []string) error {
 	}
 }
 
-// runBoth runs routing, then subscriptions, forwarding the same flags to each.
+// runBoth runs routing, then subscriptions using a shared signal context so
+// that SIGTERM/interrupt during the routing phase also prevents subscriptions
+// from starting.
 func runBoth(args []string) error {
-	if err := routingRun(args); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := routingRunCtx(ctx, args); err != nil {
 		return fmt.Errorf("routing: %w", err)
 	}
-	if err := subscriptionsRun(args); err != nil {
+	if ctx.Err() != nil {
+		return fmt.Errorf("interrupted: %w", ctx.Err())
+	}
+	if err := subscriptionsRunCtx(ctx, args); err != nil {
 		return fmt.Errorf("subscriptions: %w", err)
 	}
 	return nil

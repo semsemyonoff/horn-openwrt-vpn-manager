@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/config"
@@ -104,10 +105,10 @@ func runCheck(args []string) error {
 	}
 
 	// Non-fatal: check if sing-box is available on the system.
-	if _, err := os.Stat("/usr/bin/sing-box"); err != nil {
-		logx.Warn("sing-box not found at /usr/bin/sing-box (expected on OpenWrt device)")
+	if singboxPath, err := exec.LookPath("sing-box"); err != nil {
+		logx.Warn("sing-box not found in $PATH (expected on OpenWrt device)")
 	} else {
-		logx.OK("sing-box binary found")
+		logx.OK("sing-box binary found: %s", singboxPath)
 	}
 
 	logx.Header("check passed")

@@ -44,6 +44,12 @@ func parseSubsFlags(args []string) (subsFlags, error) {
 }
 
 func subscriptionsRun(args []string) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return subscriptionsRunCtx(ctx, args)
+}
+
+func subscriptionsRunCtx(ctx context.Context, args []string) error {
 	flags, err := parseSubsFlags(args)
 	if err != nil {
 		return err
@@ -58,9 +64,6 @@ func subscriptionsRun(args []string) error {
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	applier := system.NewOpenWrt()
 	runner := subscription.NewRunner(cfg, applier)
