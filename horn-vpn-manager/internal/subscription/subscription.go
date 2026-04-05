@@ -65,18 +65,20 @@ func (r *Runner) fetchOptsForSub(sub *config.Subscription) fetch.Options {
 	}
 }
 
-// extractNodeName returns the URL-decoded fragment (display name/label) from a VLESS URI.
+// extractNodeName returns the display name from a VLESS URI fragment.
+// Converts '+' to space to match vless.Parse behavior, since subscription
+// generators commonly encode spaces as '+' in URI fragments.
 // Returns an empty string if no fragment is present.
 func extractNodeName(uri string) string {
 	if u, err := url.Parse(uri); err == nil && u.Fragment != "" {
-		return u.Fragment
+		return strings.ReplaceAll(u.Fragment, "+", " ")
 	}
 	if idx := strings.LastIndex(uri, "#"); idx >= 0 {
 		name := uri[idx+1:]
 		if unescaped, err := url.PathUnescape(name); err == nil {
-			return unescaped
+			return strings.ReplaceAll(unescaped, "+", " ")
 		}
-		return name
+		return strings.ReplaceAll(name, "+", " ")
 	}
 	return ""
 }
@@ -239,8 +241,11 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 
 	if processed == 0 && len(r.Cfg.Subscriptions) > 0 {
-		logx.Warn("No subscriptions were processed successfully")
-		return nil
+		return fmt.Errorf("no subscriptions were processed successfully")
+	}
+
+	if defaultFinalTag == "" {
+		return fmt.Errorf("default subscription produced no outbound tag; check that the default subscription has a URL configured")
 	}
 
 	// Render the final sing-box config from the template and all outbound plans.

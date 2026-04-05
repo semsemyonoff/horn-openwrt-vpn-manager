@@ -182,5 +182,9 @@ func extractVLESSLines(data []byte) []string {
 			uris = append(uris, line)
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		// Line exceeded scanner buffer; return what was collected so far.
+		return uris
+	}
 	return uris
 }

@@ -218,6 +218,10 @@ func ParseLines(data []byte) []string {
 		}
 		lines = append(lines, line)
 	}
+	if err := scanner.Err(); err != nil {
+		// Line exceeded scanner buffer; return what was collected so far.
+		return lines
+	}
 	return lines
 }
 

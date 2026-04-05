@@ -189,6 +189,7 @@ func TestStableHash_NameDoesNotAffectHash(t *testing.T) {
 func TestStableHash_KnownValue(t *testing.T) {
 	// Verify hash matches expected value computed from legacy shell formula:
 	// printf 'vless|example.com|443|uuid-test|tls|sni.example.com||||||||' | md5sum | cut -c1-8
+	// Result: 62ba582c
 	n := &vless.Node{
 		UUID:     "uuid-test",
 		Server:   "example.com",
@@ -197,16 +198,9 @@ func TestStableHash_KnownValue(t *testing.T) {
 		SNI:      "sni.example.com",
 	}
 	h := vless.StableHash(n)
-	if len(h) != 8 {
-		t.Errorf("expected 8-char hash, got %d chars: %q", len(h), h)
-	}
-	// The hash should be lowercase hex
-	for _, c := range h {
-		isDigit := '0' <= c && c <= '9'
-		isHexLower := 'a' <= c && c <= 'f'
-		if !isDigit && !isHexLower {
-			t.Errorf("hash %q contains non-hex character %q", h, c)
-		}
+	const want = "62ba582c"
+	if h != want {
+		t.Errorf("StableHash = %q, want %q (legacy shell formula mismatch)", h, want)
 	}
 }
 

@@ -148,7 +148,7 @@ func TestRunner_Run_download_failure_continues(t *testing.T) {
 	}
 }
 
-func TestRunner_Run_no_url_skipped(t *testing.T) {
+func TestRunner_Run_no_url_returns_error(t *testing.T) {
 	cfg := &config.Config{
 		Fetch: config.Fetch{Retries: 1, TimeoutSeconds: 5, Parallelism: 1},
 		Subscriptions: map[string]*config.Subscription{
@@ -160,8 +160,9 @@ func TestRunner_Run_no_url_skipped(t *testing.T) {
 	runner := NewRunner(cfg, applier)
 	runner.OutDir = t.TempDir()
 
-	if err := runner.Run(context.Background()); err != nil {
-		t.Fatalf("Run() error: %v", err)
+	// A subscription with no URL cannot produce any output; Run must return an error.
+	if err := runner.Run(context.Background()); err == nil {
+		t.Fatal("Run() succeeded unexpectedly; want error when no subscriptions can be processed")
 	}
 }
 
@@ -448,7 +449,7 @@ func TestExtractNodeName(t *testing.T) {
 		uri  string
 		want string
 	}{
-		{"vless://id@host:443?foo=bar#Hello+World", "Hello+World"},
+		{"vless://id@host:443?foo=bar#Hello+World", "Hello World"},
 		{"vless://id@host:443?foo=bar#Hello%20World", "Hello World"},
 		{"vless://id@host:443?foo=bar", ""},
 		{"vless://id@host:443?foo=bar#", ""},

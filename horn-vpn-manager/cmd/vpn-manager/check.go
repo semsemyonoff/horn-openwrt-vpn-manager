@@ -65,9 +65,10 @@ func runCheck(args []string) error {
 				break
 			}
 		}
-		// Check subscription-level constraints without aborting.
+		// Check subscription-level constraints.
 		if err := cfg.ValidateSubscriptions(); err != nil {
-			logx.Warn("Subscription config issue: %v", err)
+			logx.Err("Subscription config issue: %v", err)
+			return err
 		}
 	} else {
 		logx.Info("No subscriptions configured")

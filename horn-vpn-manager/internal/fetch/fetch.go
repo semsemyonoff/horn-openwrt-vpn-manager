@@ -49,7 +49,7 @@ func Download(ctx context.Context, url string, opts Options) ([]byte, error) {
 			continue
 		}
 
-		body, err := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 		_ = resp.Body.Close()
 
 		if err != nil {
@@ -86,7 +86,11 @@ func Download(ctx context.Context, url string, opts Options) ([]byte, error) {
 func DownloadAll(ctx context.Context, urls []string, opts Options) []Result {
 	results := make([]Result, len(urls))
 
-	sem := make(chan struct{}, opts.Parallelism)
+	parallelism := opts.Parallelism
+	if parallelism <= 0 {
+		parallelism = 1
+	}
+	sem := make(chan struct{}, parallelism)
 	var wg sync.WaitGroup
 
 	for i, u := range urls {
