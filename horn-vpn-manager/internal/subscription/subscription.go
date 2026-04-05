@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -55,7 +56,7 @@ func NewRunner(cfg *config.Config, applier Applier) *Runner {
 // retry count if set, otherwise falling back to the global config value.
 func (r *Runner) fetchOptsForSub(sub *config.Subscription) fetch.Options {
 	retries := r.Cfg.Fetch.Retries
-	if sub.Retries != nil {
+	if sub.Retries != nil && *sub.Retries > 0 {
 		retries = *sub.Retries
 	}
 	return fetch.Options{
@@ -142,7 +143,14 @@ func (r *Runner) Run(ctx context.Context) error {
 		failedSubs      []string
 	)
 
-	for id, sub := range r.Cfg.Subscriptions {
+	subIDs := make([]string, 0, len(r.Cfg.Subscriptions))
+	for id := range r.Cfg.Subscriptions {
+		subIDs = append(subIDs, id)
+	}
+	sort.Strings(subIDs)
+
+	for _, id := range subIDs {
+		sub := r.Cfg.Subscriptions[id]
 		if !sub.IsEnabled() {
 			logx.Info("Skipping disabled subscription: %s", logx.Bold(id))
 			continue

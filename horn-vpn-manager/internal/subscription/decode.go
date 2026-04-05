@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/logx"
 )
 
 // Format identifies the detected payload encoding.
@@ -160,7 +162,7 @@ func decompressGzip(data []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	out, err := io.ReadAll(r)
+	out, err := io.ReadAll(io.LimitReader(r, 50<<20))
 	if closeErr := r.Close(); closeErr != nil && err == nil {
 		err = closeErr
 	}
@@ -176,6 +178,7 @@ func normalizeLineEndings(data []byte) []byte {
 func extractVLESSLines(data []byte) []string {
 	var uris []string
 	scanner := bufio.NewScanner(bytes.NewReader(data))
+	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if strings.HasPrefix(line, "vless://") {
@@ -183,7 +186,7 @@ func extractVLESSLines(data []byte) []string {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		// Line exceeded scanner buffer; return what was collected so far.
+		logx.Warn("vless line scan truncated (line too long): %v", err)
 		return uris
 	}
 	return uris

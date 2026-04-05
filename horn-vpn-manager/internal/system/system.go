@@ -65,7 +65,7 @@ func (d *DebugApplier) ApplySingbox(configPath string) error {
 func (o *OpenWrt) ApplyDomains(cacheFile, dnsmasqDir string) error {
 	// Validate syntax
 	out, err := o.Cmd.Run("dnsmasq", "--conf-file="+cacheFile, "--test")
-	if err != nil || !strings.Contains(string(out), "syntax check OK") {
+	if err != nil {
 		return fmt.Errorf("dnsmasq syntax check failed: %s", string(out))
 	}
 	logx.OK("dnsmasq syntax check passed")

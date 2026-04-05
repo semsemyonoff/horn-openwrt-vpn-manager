@@ -90,19 +90,26 @@ func DownloadAll(ctx context.Context, urls []string, opts Options) []Result {
 	if parallelism <= 0 {
 		parallelism = 1
 	}
-	sem := make(chan struct{}, parallelism)
-	var wg sync.WaitGroup
-
+	type indexedURL struct {
+		idx int
+		url string
+	}
+	work := make(chan indexedURL, len(urls))
 	for i, u := range urls {
-		wg.Add(1)
-		go func(idx int, url string) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
+		work <- indexedURL{i, u}
+	}
+	close(work)
 
-			data, err := Download(ctx, url, opts)
-			results[idx] = Result{URL: url, Data: data, Err: err}
-		}(i, u)
+	var wg sync.WaitGroup
+	for w := 0; w < parallelism; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for item := range work {
+				data, err := Download(ctx, item.url, opts)
+				results[item.idx] = Result{URL: item.url, Data: data, Err: err}
+			}
+		}()
 	}
 
 	wg.Wait()
