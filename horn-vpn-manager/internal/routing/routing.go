@@ -122,7 +122,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	// Apply
 	if domainsUpdated {
 		if err := r.Applier.ApplyDomains(r.domainsCachePath(), "/tmp/dnsmasq.d"); err != nil {
-			logx.Err("Failed to apply domains: %v", err)
+			return fmt.Errorf("apply domains: %w", err)
 		}
 	}
 	if subnetsUpdated || fileExists(r.Cfg.Routing.Subnets.ManualFile) {
@@ -141,7 +141,7 @@ func (r *Runner) Run(ctx context.Context) error {
 				}
 				logx.Info("IP list updated: %s entries -> %s", logx.Bold(fmt.Sprintf("%d", len(ipList))), path)
 				if err := r.Applier.ApplyIPs(path); err != nil {
-					logx.Err("Failed to apply IPs: %v", err)
+					return fmt.Errorf("apply IPs: %w", err)
 				}
 			} else {
 				logx.Info("IP list unchanged, skipping firewall reload")
@@ -231,7 +231,7 @@ func ParseLines(data []byte) []string {
 		lines = append(lines, line)
 	}
 	if err := scanner.Err(); err != nil {
-		// Line exceeded scanner buffer; return what was collected so far.
+		logx.Warn("ParseLines: scanner error (%v); list may be incomplete", err)
 		return lines
 	}
 	return lines

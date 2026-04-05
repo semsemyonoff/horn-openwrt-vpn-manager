@@ -30,7 +30,7 @@ case "${1:-help}" in
         shift
         exec "$LIBEXEC_DIR/subs.sh" "$@"
         ;;
-    domains)
+    routing|domains)
         shift
         exec "$LIBEXEC_DIR/getdomains.sh" "$@"
         ;;
