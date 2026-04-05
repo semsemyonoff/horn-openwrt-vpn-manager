@@ -31,15 +31,16 @@ func binDir() (string, error) {
 	return filepath.Dir(exe), nil
 }
 
-func parseRoutingFlags(args []string) routingFlags {
+func parseRoutingFlags(args []string) (routingFlags, error) {
 	f := routingFlags{configPath: config.DefaultPath}
 	for i := 0; i < len(args); i++ {
 		switch {
 		case args[i] == "-c" || args[i] == "--config":
-			if i+1 < len(args) {
-				i++
-				f.configPath = args[i]
+			if i+1 >= len(args) {
+				return f, fmt.Errorf("flag %s requires an argument", args[i])
 			}
+			i++
+			f.configPath = args[i]
 		case args[i] == "--debug":
 			f.debug = true
 		case args[i] == "--no-color":
@@ -48,11 +49,14 @@ func parseRoutingFlags(args []string) routingFlags {
 			f.verbosity = len(args[i]) - 1 // -v=1, -vv=2, -vvv=3
 		}
 	}
-	return f
+	return f, nil
 }
 
 func routingRun(args []string) error {
-	flags := parseRoutingFlags(args)
+	flags, err := parseRoutingFlags(args)
+	if err != nil {
+		return err
+	}
 	logx.Setup(!flags.noColor, flags.verbosity, flags.debug)
 
 	if flags.debug {
@@ -112,7 +116,10 @@ func routingRunDebug(flags routingFlags) error {
 }
 
 func routingRestore(args []string) error {
-	flags := parseRoutingFlags(args)
+	flags, err := parseRoutingFlags(args)
+	if err != nil {
+		return err
+	}
 	logx.Setup(!flags.noColor, flags.verbosity, false)
 
 	cfg, err := config.Load(flags.configPath)

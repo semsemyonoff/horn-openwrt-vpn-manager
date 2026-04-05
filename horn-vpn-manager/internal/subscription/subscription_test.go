@@ -394,7 +394,6 @@ func TestRunner_Run_subs_tags_written(t *testing.T) {
 	runner := NewRunner(cfg, &fakeApplier{})
 	runner.OutDir = outDir
 	runner.ConfigDir = configDir
-	runner.DryRun = true
 
 	if err := runner.Run(context.Background()); err != nil {
 		t.Fatalf("Run() error: %v", err)

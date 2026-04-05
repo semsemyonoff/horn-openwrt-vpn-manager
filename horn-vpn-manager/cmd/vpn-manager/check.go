@@ -15,26 +15,30 @@ type checkFlags struct {
 	noColor    bool
 }
 
-func parseCheckFlags(args []string) checkFlags {
+func parseCheckFlags(args []string) (checkFlags, error) {
 	f := checkFlags{configPath: config.DefaultPath}
 	for i := 0; i < len(args); i++ {
 		switch {
 		case args[i] == "-c" || args[i] == "--config":
-			if i+1 < len(args) {
-				i++
-				f.configPath = args[i]
+			if i+1 >= len(args) {
+				return f, fmt.Errorf("flag %s requires an argument", args[i])
 			}
+			i++
+			f.configPath = args[i]
 		case args[i] == "--no-color":
 			f.noColor = true
 		case strings.HasPrefix(args[i], "-v") && !strings.HasPrefix(args[i], "--"):
 			f.verbosity = len(args[i]) - 1
 		}
 	}
-	return f
+	return f, nil
 }
 
 func runCheck(args []string) error {
-	flags := parseCheckFlags(args)
+	flags, err := parseCheckFlags(args)
+	if err != nil {
+		return err
+	}
 	logx.Setup(!flags.noColor, flags.verbosity, false)
 
 	logx.Header("config check")

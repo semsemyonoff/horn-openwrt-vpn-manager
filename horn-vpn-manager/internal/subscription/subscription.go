@@ -288,19 +288,6 @@ func (r *Runner) Run(ctx context.Context) error {
 		return fmt.Errorf("create output dir: %w", err)
 	}
 
-	// Write subs-tags.json for future LuCI UI integration under the config dir,
-	// not the sing-box dir, so LuCI can find it at /etc/horn-vpn-manager/subs-tags.json.
-	if len(tagNames) > 0 {
-		if tagsData, err := json.MarshalIndent(tagNames, "", "  "); err == nil {
-			tagsPath := filepath.Join(r.ConfigDir, singbox.SubsTagsFilename)
-			if err := atomicWrite(tagsPath, append(tagsData, '\n')); err != nil {
-				logx.Warn("Failed to write %s: %v", singbox.SubsTagsFilename, err)
-			} else {
-				logx.Detail("Tag names written: %s", tagsPath)
-			}
-		}
-	}
-
 	if r.DryRun {
 		// In dry-run, write directly to configPath for inspection; skip validation and restart.
 		if err := atomicWrite(configPath, configData); err != nil {
@@ -309,6 +296,18 @@ func (r *Runner) Run(ctx context.Context) error {
 		logx.OK("sing-box config written (dry-run): %s", configPath)
 		logx.Dim("dry-run: skipping sing-box apply and restart")
 	} else {
+		// Write subs-tags.json for future LuCI UI integration under the config dir,
+		// not the sing-box dir, so LuCI can find it at /etc/horn-vpn-manager/subs-tags.json.
+		if len(tagNames) > 0 {
+			if tagsData, err := json.MarshalIndent(tagNames, "", "  "); err == nil {
+				tagsPath := filepath.Join(r.ConfigDir, singbox.SubsTagsFilename)
+				if err := atomicWrite(tagsPath, append(tagsData, '\n')); err != nil {
+					logx.Warn("Failed to write %s: %v", singbox.SubsTagsFilename, err)
+				} else {
+					logx.Detail("Tag names written: %s", tagsPath)
+				}
+			}
+		}
 		// Write to staging first; ApplySingbox validates against staging, then atomically
 		// promotes it to configPath and restarts sing-box. This ensures the live config is
 		// never replaced by an invalid one.

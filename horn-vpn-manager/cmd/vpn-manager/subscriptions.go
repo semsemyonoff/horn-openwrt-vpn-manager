@@ -22,15 +22,16 @@ type subsFlags struct {
 	noColor    bool
 }
 
-func parseSubsFlags(args []string) subsFlags {
+func parseSubsFlags(args []string) (subsFlags, error) {
 	f := subsFlags{configPath: config.DefaultPath}
 	for i := 0; i < len(args); i++ {
 		switch {
 		case args[i] == "-c" || args[i] == "--config":
-			if i+1 < len(args) {
-				i++
-				f.configPath = args[i]
+			if i+1 >= len(args) {
+				return f, fmt.Errorf("flag %s requires an argument", args[i])
 			}
+			i++
+			f.configPath = args[i]
 		case args[i] == "--debug":
 			f.debug = true
 		case args[i] == "--no-color":
@@ -39,11 +40,14 @@ func parseSubsFlags(args []string) subsFlags {
 			f.verbosity = len(args[i]) - 1
 		}
 	}
-	return f
+	return f, nil
 }
 
 func subscriptionsRun(args []string) error {
-	flags := parseSubsFlags(args)
+	flags, err := parseSubsFlags(args)
+	if err != nil {
+		return err
+	}
 	logx.Setup(!flags.noColor, flags.verbosity, flags.debug)
 
 	if flags.debug {
@@ -65,7 +69,10 @@ func subscriptionsRun(args []string) error {
 }
 
 func subscriptionsDryRun(args []string) error {
-	flags := parseSubsFlags(args)
+	flags, err := parseSubsFlags(args)
+	if err != nil {
+		return err
+	}
 	logx.Setup(!flags.noColor, flags.verbosity, flags.debug)
 
 	if flags.debug {
