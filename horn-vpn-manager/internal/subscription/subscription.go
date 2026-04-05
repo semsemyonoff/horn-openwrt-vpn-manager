@@ -118,6 +118,8 @@ func (r *Runner) Run(ctx context.Context) error {
 		return fmt.Errorf("subscription config invalid: %w", err)
 	}
 
+	start := time.Now()
+
 	if r.DryRun {
 		logx.Header("subscriptions dry-run")
 		logx.Dim("dry-run: config will be rendered but not applied")
@@ -135,6 +137,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		defaultFinalTag string
 		tagNames        = make(map[string]string)
 		processed       int
+		failedSubs      []string
 	)
 
 	for id, sub := range r.Cfg.Subscriptions {
@@ -160,6 +163,7 @@ func (r *Runner) Run(ctx context.Context) error {
 			if sub.Default {
 				return fmt.Errorf("default subscription %q failed to download, aborting", id)
 			}
+			failedSubs = append(failedSubs, id)
 			continue
 		}
 
@@ -169,6 +173,7 @@ func (r *Runner) Run(ctx context.Context) error {
 			if sub.Default {
 				return fmt.Errorf("default subscription %q failed to decode, aborting", id)
 			}
+			failedSubs = append(failedSubs, id)
 			continue
 		}
 
@@ -197,6 +202,7 @@ func (r *Runner) Run(ctx context.Context) error {
 			if sub.Default {
 				return fmt.Errorf("default subscription %q failed to build outbounds, aborting", id)
 			}
+			failedSubs = append(failedSubs, id)
 			continue
 		}
 
@@ -280,6 +286,13 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 	}
 
+	elapsed := time.Since(start).Round(time.Millisecond)
+	if len(failedSubs) > 0 {
+		logx.Warn("subscriptions: %d processed, %d failed (%s) — elapsed: %s",
+			processed, len(failedSubs), strings.Join(failedSubs, ", "), elapsed)
+	} else {
+		logx.OK("subscriptions: %d processed — elapsed: %s", processed, elapsed)
+	}
 	logx.Header("done")
 	return nil
 }

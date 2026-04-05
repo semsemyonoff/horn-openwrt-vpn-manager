@@ -23,6 +23,8 @@ func run(args []string) error {
 		return runRouting(args[1:])
 	case "subscriptions":
 		return runSubscriptions(args[1:])
+	case "check":
+		return runCheck(args[1:])
 	case "help", "-h", "--help":
 		printUsage()
 		return nil
@@ -77,6 +79,7 @@ Usage: vpn-manager <command> [subcommand] [options]
 Commands:
   routing        Manage domain/IP routing lists (download, apply, restore)
   subscriptions  Download and process VPN subscriptions
+  check          Validate config and report what is configured
   help           Show this help message
 
 Run "vpn-manager <command> help" for command-specific options.

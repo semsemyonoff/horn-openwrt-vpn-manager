@@ -188,9 +188,9 @@ The migrated Go implementation must cover both explicitly requested stages and t
 
 ### Task 9: Finish integration, CLI polish, and regression coverage
 
-- [ ] Make sure the subscriptions pipeline integrates cleanly with the existing Go routing core and shared config/fetch/system packages
-- [ ] Ensure logging is operationally clear for cron-style use, including success, partial failure, and fatal failure cases
-- [ ] Add end-to-end integration tests for `subscriptions run` and `subscriptions dry-run` using fixtures and fake system hooks
-- [ ] Review whether any temporary shell wrappers still need to call the new subscriptions Go path, and keep them thin if they remain
-- [ ] Update any affected docs or examples needed to make the new subscriptions pipeline understandable to the next implementation step
-- [ ] Mark completed
+- [x] Make sure the subscriptions pipeline integrates cleanly with the existing Go routing core and shared config/fetch/system packages
+- [x] Ensure logging is operationally clear for cron-style use, including success, partial failure, and fatal failure cases
+- [x] Add end-to-end integration tests for `subscriptions run` and `subscriptions dry-run` using fixtures and fake system hooks
+- [x] Review whether any temporary shell wrappers still need to call the new subscriptions Go path, and keep them thin if they remain
+- [x] Update any affected docs or examples needed to make the new subscriptions pipeline understandable to the next implementation step
+- [x] Mark completed

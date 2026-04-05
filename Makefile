@@ -72,6 +72,7 @@ lint: go-fmt go-lint ## Run all checks (Go + shell + JSON)
 	@echo ">> JSON validation..."
 	@for f in \
 		horn-vpn-manager/files/config.template.json \
+		horn-vpn-manager/files/config.example.json \
 		horn-vpn-manager/files/subs.example.json \
 		horn-vpn-manager/files/domains.example.json \
 		horn-vpn-manager-luci/root/usr/share/rpcd/acl.d/horn-vpn-manager.json \

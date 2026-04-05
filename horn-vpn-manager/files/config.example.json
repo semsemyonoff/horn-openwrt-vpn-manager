@@ -1,0 +1,49 @@
+{
+  "singbox": {
+    "log_level": "warn",
+    "test_url": "https://www.gstatic.com/generate_204",
+    "template": "/etc/horn-vpn-manager/sing-box.template.json"
+  },
+  "fetch": {
+    "retries": 3,
+    "timeout_seconds": 15,
+    "parallelism": 2
+  },
+  "routing": {
+    "domains": {
+      "url": "https://example.com/domains.lst"
+    },
+    "subnets": {
+      "urls": [
+        "https://example.com/subnets1.lst",
+        "https://example.com/subnets2.lst"
+      ],
+      "manual_file": "/etc/horn-vpn-manager/lists/manual-ip.lst"
+    }
+  },
+  "subscriptions": {
+    "default": {
+      "name": "Default",
+      "url": "https://example.com/sub",
+      "default": true,
+      "enabled": true,
+      "exclude": ["Russia", "traffic"],
+      "interval": "5m",
+      "tolerance": 100
+    },
+    "work": {
+      "name": "Work",
+      "url": "https://example.com/work",
+      "route": {
+        "domains": ["jira.example.com"],
+        "domain_urls": [
+          "https://example.com/work-domains.lst"
+        ],
+        "ip_cidrs": ["203.0.113.0/24"],
+        "ip_urls": [
+          "https://example.com/work-ips.lst"
+        ]
+      }
+    }
+  }
+}

@@ -3,7 +3,7 @@
 START=100
 STOP=10
 
-CONF_DIR="/etc/horn-vpn-manager"
+CONF_FILE="/etc/horn-vpn-manager/config.json"
 MAX_WAIT=60
 
 wait_for_internet() {
@@ -20,14 +20,14 @@ wait_for_internet() {
 
 start() {
   # Skip if not configured yet (fresh install)
-  [ -f "$CONF_DIR/subs.json" ] && [ -f "$CONF_DIR/domains.json" ] || return 0
+  [ -f "$CONF_FILE" ] || return 0
 
   if wait_for_internet; then
-    logger -t horn-vpn-manager "Internet available, updating domains and subscriptions"
-    vpn-manager domains run --no-color
+    logger -t horn-vpn-manager "Internet available, updating routing and subscriptions"
+    vpn-manager routing run --no-color
     vpn-manager subscriptions run --no-color
   else
-    logger -t horn-vpn-manager "No internet after ${MAX_WAIT}s, restoring from cache"
-    vpn-manager domains restore --no-color
+    logger -t horn-vpn-manager "No internet after ${MAX_WAIT}s, restoring routing from cache"
+    vpn-manager routing restore --no-color
   fi
 }
