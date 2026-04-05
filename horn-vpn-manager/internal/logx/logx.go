@@ -69,9 +69,17 @@ func (l *Logger) printf(format string, args ...any) {
 	_, _ = fmt.Fprintln(l.out, msg)
 }
 
+// stateSnapshot returns a consistent snapshot of the mutable logger state.
+func (l *Logger) stateSnapshot() (color bool, level Level, debug bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.color, l.level, l.debug
+}
+
 // colorize wraps text in ANSI color codes if color is enabled.
 func (l *Logger) c(code, text string) string {
-	if !l.color {
+	color, _, _ := l.stateSnapshot()
+	if !color {
 		return text
 	}
 	return code + text + cReset
@@ -85,8 +93,9 @@ func Header(text string) {
 // Info prints a normal-level message (always visible): green timestamp.
 func Info(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
+	_, _, debug := std.stateSnapshot()
 	prefix := std.c(cGreen, fmt.Sprintf("[%s]", timestamp()))
-	if std.debug {
+	if debug {
 		prefix = std.c(cYellow, "[DEBUG]") + " " + prefix
 	}
 	std.printf("%s %s", prefix, msg)
@@ -95,8 +104,9 @@ func Info(format string, args ...any) {
 // OK prints a success message: green timestamp + green text.
 func OK(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
+	_, _, debug := std.stateSnapshot()
 	prefix := std.c(cGreen, fmt.Sprintf("[%s]", timestamp()))
-	if std.debug {
+	if debug {
 		prefix = std.c(cYellow, "[DEBUG]") + " " + prefix
 	}
 	std.printf("%s %s", prefix, std.c(cGreen, msg))
@@ -117,7 +127,8 @@ func Err(format string, args ...any) {
 
 // Detail prints a verbose-level message (visible at -v): cyan timestamp.
 func Detail(format string, args ...any) {
-	if std.level < LevelVerbose {
+	_, level, _ := std.stateSnapshot()
+	if level < LevelVerbose {
 		return
 	}
 	msg := fmt.Sprintf(format, args...)
@@ -126,7 +137,8 @@ func Detail(format string, args ...any) {
 
 // Debug prints a debug-level message (visible at -vv): dim.
 func Debug(format string, args ...any) {
-	if std.level < LevelDebug {
+	_, level, _ := std.stateSnapshot()
+	if level < LevelDebug {
 		return
 	}
 	msg := fmt.Sprintf(format, args...)
@@ -135,7 +147,8 @@ func Debug(format string, args ...any) {
 
 // Trace prints a trace-level message (visible at -vvv): dim with [dbg] prefix.
 func Trace(format string, args ...any) {
-	if std.level < LevelTrace {
+	_, level, _ := std.stateSnapshot()
+	if level < LevelTrace {
 		return
 	}
 	msg := fmt.Sprintf(format, args...)

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/logx"
 	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/vless"
 )
 
@@ -188,9 +189,13 @@ func BuildOutbounds(id string, uris []string, interval string, tolerance int, te
 	for _, u := range uris {
 		n, err := vless.Parse(u)
 		if err != nil {
-			return nil, fmt.Errorf("parse VLESS URI %q: %w", u, err)
+			logx.Warn("skipping unparseable VLESS URI: %v", err)
+			continue
 		}
 		nodes = append(nodes, n)
+	}
+	if len(nodes) == 0 {
+		return nil, fmt.Errorf("no valid VLESS nodes found in subscription %q", id)
 	}
 
 	if len(nodes) == 1 {
@@ -254,8 +259,9 @@ func nodeToOutbound(n *vless.Node, tag string) *VLESSOutbound {
 		PacketEncoding: packetEncoding,
 	}
 
-	// TLS block: generate when security is "tls", "reality", or empty (legacy behavior).
-	if n.Security == "tls" || n.Security == "reality" || n.Security == "" {
+	// TLS block: generate only when security is explicitly "tls" or "reality".
+	// An empty security field means plaintext — do not inject TLS.
+	if n.Security == "tls" || n.Security == "reality" {
 		tls := &OutboundTLS{
 			Enabled:    true,
 			Insecure:   false,
