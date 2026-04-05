@@ -127,12 +127,12 @@ The migrated Go implementation must cover both explicitly requested stages and t
 
 ### Task 3: Add gzip plus base64 handling and payload normalization
 
-- [ ] Implement gzip detection/decompression before payload decoding, matching the legacy shell behavior
-- [ ] Support the `gzip + base64` path explicitly, as requested
-- [ ] Normalize Windows line endings before URI extraction
-- [ ] Add tests for raw gzip, gzip + base64, gzip + base64url, and line-ending normalization
-- [ ] Make sure the decoding pipeline remains incremental and debuggable, with clear log messages per format
-- [ ] Mark completed
+- [x] Implement gzip detection/decompression before payload decoding, matching the legacy shell behavior
+- [x] Support the `gzip + base64` path explicitly, as requested
+- [x] Normalize Windows line endings before URI extraction
+- [x] Add tests for raw gzip, gzip + base64, gzip + base64url, and line-ending normalization
+- [x] Make sure the decoding pipeline remains incremental and debuggable, with clear log messages per format
+- [x] Mark completed
 
 ### Task 4: Add subscription validation, retries, and exclusion filtering
 

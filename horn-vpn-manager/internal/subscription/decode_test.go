@@ -1,6 +1,8 @@
 package subscription
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/base64"
 	"os"
 	"path/filepath"
@@ -8,6 +10,20 @@ import (
 	"strings"
 	"testing"
 )
+
+// gzipBytes compresses data with gzip for use in tests.
+func gzipBytes(t *testing.T, data []byte) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	w := gzip.NewWriter(&buf)
+	if _, err := w.Write(data); err != nil {
+		t.Fatalf("gzip write: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("gzip close: %v", err)
+	}
+	return buf.Bytes()
+}
 
 func TestDecodePayload_raw(t *testing.T) {
 	data := []byte("vless://uuid1@host1.example.com:443?encryption=none#Node+1\nvless://uuid2@host2.example.com:443?encryption=none#Node+2\n")
@@ -207,14 +223,110 @@ func TestDecodePayload_empty(t *testing.T) {
 	}
 }
 
+func TestDecodePayload_gzip(t *testing.T) {
+	raw := "vless://uuid1@host1.example.com:443?encryption=none#Node+1\nvless://uuid2@host2.example.com:443?encryption=none#Node+2\n"
+	compressed := gzipBytes(t, []byte(raw))
+
+	uris, err := DecodePayload(compressed)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(uris) != 2 {
+		t.Fatalf("got %d URIs, want 2", len(uris))
+	}
+	if uris[0] != "vless://uuid1@host1.example.com:443?encryption=none#Node+1" {
+		t.Errorf("uri[0] = %q", uris[0])
+	}
+}
+
+func TestDecodePayload_gzip_base64(t *testing.T) {
+	raw := "vless://uuid1@host1.example.com:443?encryption=none#Node+1\nvless://uuid2@host2.example.com:443?encryption=none#Node+2\n"
+	compressed := gzipBytes(t, []byte(raw))
+	encoded := base64.StdEncoding.EncodeToString(compressed)
+
+	uris, err := DecodePayload([]byte(encoded))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(uris) != 2 {
+		t.Fatalf("got %d URIs, want 2", len(uris))
+	}
+}
+
+func TestDecodePayload_gzip_base64url(t *testing.T) {
+	raw := "vless://uuid1@host1.example.com:443?encryption=none#Node+1\nvless://uuid2@host2.example.com:443?encryption=none#Node+2\n"
+	compressed := gzipBytes(t, []byte(raw))
+	encoded := base64.URLEncoding.EncodeToString(compressed)
+
+	uris, err := DecodePayload([]byte(encoded))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(uris) != 2 {
+		t.Fatalf("got %d URIs, want 2", len(uris))
+	}
+}
+
+func TestDecodePayload_gzip_windows_line_endings(t *testing.T) {
+	raw := "vless://uuid1@host1.example.com:443?encryption=none#Node+1\r\nvless://uuid2@host2.example.com:443?encryption=none#Node+2\r\n"
+	compressed := gzipBytes(t, []byte(raw))
+
+	uris, err := DecodePayload(compressed)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(uris) != 2 {
+		t.Fatalf("got %d URIs, want 2", len(uris))
+	}
+	for _, uri := range uris {
+		if strings.ContainsRune(uri, '\r') {
+			t.Errorf("URI contains carriage return: %q", uri)
+		}
+	}
+}
+
+func TestDecodePayload_gzip_base64_no_padding(t *testing.T) {
+	raw := "vless://uuid1@host1.example.com:443?encryption=none#Node+1\n"
+	compressed := gzipBytes(t, []byte(raw))
+	encoded := base64.RawStdEncoding.EncodeToString(compressed)
+
+	uris, err := DecodePayload([]byte(encoded))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(uris) != 1 {
+		t.Fatalf("got %d URIs, want 1", len(uris))
+	}
+}
+
+func TestNormalizeLineEndings(t *testing.T) {
+	input := []byte("line1\r\nline2\r\nline3\n")
+	want := []byte("line1\nline2\nline3\n")
+	got := normalizeLineEndings(input)
+	if !bytes.Equal(got, want) {
+		t.Errorf("normalizeLineEndings(%q) = %q, want %q", input, got, want)
+	}
+}
+
+func TestNormalizeLineEndings_no_crlf(t *testing.T) {
+	input := []byte("line1\nline2\nline3\n")
+	got := normalizeLineEndings(input)
+	if !bytes.Equal(got, input) {
+		t.Errorf("normalizeLineEndings modified input without \\r\\n: %q", got)
+	}
+}
+
 func TestFormatString(t *testing.T) {
 	cases := []struct {
 		format Format
 		want   string
 	}{
 		{FormatRaw, "raw"},
+		{FormatGzip, "gzip"},
 		{FormatBase64, "base64"},
 		{FormatBase64URL, "base64url"},
+		{FormatGzipBase64, "gzip+base64"},
+		{FormatGzipBase64URL, "gzip+base64url"},
 		{FormatUnknown, "unknown"},
 	}
 	for _, tc := range cases {
