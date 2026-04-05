@@ -15,12 +15,17 @@ import (
 )
 
 // fakeApplier records calls without executing system commands.
+// It performs the staging→final rename to match real applier behavior so tests
+// that check for the final config.json continue to work.
 type fakeApplier struct {
 	applySingboxCalls []string
 }
 
-func (f *fakeApplier) ApplySingbox(configPath string) error {
-	f.applySingboxCalls = append(f.applySingboxCalls, configPath)
+func (f *fakeApplier) ApplySingbox(stagingPath, finalPath string) error {
+	if err := os.Rename(stagingPath, finalPath); err != nil {
+		return err
+	}
+	f.applySingboxCalls = append(f.applySingboxCalls, finalPath)
 	return nil
 }
 
@@ -168,7 +173,7 @@ func TestRunner_Run_no_url_returns_error(t *testing.T) {
 
 func TestDebugApplier_ApplySingbox(t *testing.T) {
 	a := NewDebugApplier()
-	if err := a.ApplySingbox("/some/path/config.json"); err != nil {
+	if err := a.ApplySingbox("/some/path/config.json.new", "/some/path/config.json"); err != nil {
 		t.Errorf("DebugApplier.ApplySingbox() error: %v", err)
 	}
 }
@@ -385,15 +390,17 @@ func TestRunner_Run_subs_tags_written(t *testing.T) {
 	}
 
 	outDir := t.TempDir()
+	configDir := t.TempDir()
 	runner := NewRunner(cfg, &fakeApplier{})
 	runner.OutDir = outDir
+	runner.ConfigDir = configDir
 	runner.DryRun = true
 
 	if err := runner.Run(context.Background()); err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
 
-	tagsPath := filepath.Join(outDir, "subs-tags.json")
+	tagsPath := filepath.Join(configDir, "subs-tags.json")
 	data, err := os.ReadFile(tagsPath)
 	if err != nil {
 		t.Fatalf("subs-tags.json not written: %v", err)

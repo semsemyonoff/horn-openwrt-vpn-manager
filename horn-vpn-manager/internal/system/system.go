@@ -55,8 +55,8 @@ func (d *DebugApplier) ApplyIPs(ipListFile string) error {
 	return nil
 }
 
-func (d *DebugApplier) ApplySingbox(configPath string) error {
-	logx.Dim("skipping sing-box apply in debug mode (config=%s)", configPath)
+func (d *DebugApplier) ApplySingbox(stagingPath, finalPath string) error {
+	logx.Dim("skipping sing-box apply in debug mode (staging=%s final=%s)", stagingPath, finalPath)
 	return nil
 }
 
@@ -92,15 +92,22 @@ func (o *OpenWrt) ApplyDomains(cacheFile, dnsmasqDir string) error {
 	return nil
 }
 
-// ApplySingbox validates the new config with sing-box check and restarts sing-box.
-// configPath must be the path to the already-written new config file.
-func (o *OpenWrt) ApplySingbox(configPath string) error {
+// ApplySingbox validates the config at stagingPath with sing-box check, then
+// atomically renames it to finalPath and restarts sing-box. On validation
+// failure the staging file is removed and finalPath is left untouched.
+func (o *OpenWrt) ApplySingbox(stagingPath, finalPath string) error {
 	logx.Info("Validating sing-box config...")
-	out, err := o.Cmd.Run("sing-box", "check", "-c", configPath)
+	out, err := o.Cmd.Run("sing-box", "check", "-c", stagingPath)
 	if err != nil {
+		_ = os.Remove(stagingPath)
 		return fmt.Errorf("sing-box check failed: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	logx.OK("sing-box config validation passed")
+
+	if err := os.Rename(stagingPath, finalPath); err != nil {
+		_ = os.Remove(stagingPath)
+		return fmt.Errorf("promote sing-box config: %w", err)
+	}
 
 	logx.Info("Restarting sing-box...")
 	if out, err := o.Cmd.Run("/etc/init.d/sing-box", "restart"); err != nil {

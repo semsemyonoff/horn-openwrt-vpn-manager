@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/config"
@@ -246,4 +247,6 @@ func TestRunner_RouteRule_DefaultNoRule(t *testing.T) {
 // fakeRouteApplier satisfies the subscription.Applier interface for route tests.
 type fakeRouteApplier struct{}
 
-func (f *fakeRouteApplier) ApplySingbox(configPath string) error { return nil }
+func (f *fakeRouteApplier) ApplySingbox(stagingPath, finalPath string) error {
+	return os.Rename(stagingPath, finalPath)
+}

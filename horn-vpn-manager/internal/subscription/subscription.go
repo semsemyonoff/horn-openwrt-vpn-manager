@@ -20,9 +20,15 @@ import (
 // DefaultOutDir is where generated sing-box config is written on-device.
 const DefaultOutDir = "/etc/sing-box"
 
+// DefaultConfigDir is the horn-vpn-manager config directory on-device.
+const DefaultConfigDir = "/etc/horn-vpn-manager"
+
 // Applier abstracts system side-effects for the subscription pipeline.
 type Applier interface {
-	ApplySingbox(configPath string) error
+	// ApplySingbox validates the config at stagingPath, atomically moves it to
+	// finalPath, and restarts sing-box. On validation failure stagingPath is
+	// removed and finalPath is left untouched.
+	ApplySingbox(stagingPath, finalPath string) error
 }
 
 // DebugApplier logs system actions without executing them.
@@ -30,25 +36,27 @@ type DebugApplier struct{}
 
 func NewDebugApplier() *DebugApplier { return &DebugApplier{} }
 
-func (d *DebugApplier) ApplySingbox(configPath string) error {
-	logx.Dim("skipping sing-box apply in debug mode (config=%s)", configPath)
+func (d *DebugApplier) ApplySingbox(stagingPath, finalPath string) error {
+	logx.Dim("skipping sing-box apply in debug mode (staging=%s final=%s)", stagingPath, finalPath)
 	return nil
 }
 
 // Runner executes the subscription pipeline.
 type Runner struct {
-	Cfg    *config.Config
-	Apply  Applier
-	OutDir string
-	DryRun bool
+	Cfg       *config.Config
+	Apply     Applier
+	OutDir    string
+	ConfigDir string
+	DryRun    bool
 }
 
 // NewRunner returns a Runner using the provided config and applier.
 func NewRunner(cfg *config.Config, applier Applier) *Runner {
 	return &Runner{
-		Cfg:    cfg,
-		Apply:  applier,
-		OutDir: DefaultOutDir,
+		Cfg:       cfg,
+		Apply:     applier,
+		OutDir:    DefaultOutDir,
+		ConfigDir: DefaultConfigDir,
 	}
 }
 
@@ -269,20 +277,17 @@ func (r *Runner) Run(ctx context.Context) error {
 		return fmt.Errorf("render sing-box config: %w", err)
 	}
 
+	configPath := filepath.Join(r.OutDir, "config.json")
+
 	if err := os.MkdirAll(r.OutDir, 0o755); err != nil {
 		return fmt.Errorf("create output dir: %w", err)
 	}
 
-	configPath := filepath.Join(r.OutDir, "config.json")
-	if err := atomicWrite(configPath, configData); err != nil {
-		return fmt.Errorf("write sing-box config: %w", err)
-	}
-	logx.OK("sing-box config written: %s", configPath)
-
-	// Write subs-tags.json for future LuCI UI integration.
+	// Write subs-tags.json for future LuCI UI integration under the config dir,
+	// not the sing-box dir, so LuCI can find it at /etc/horn-vpn-manager/subs-tags.json.
 	if len(tagNames) > 0 {
 		if tagsData, err := json.MarshalIndent(tagNames, "", "  "); err == nil {
-			tagsPath := filepath.Join(r.OutDir, singbox.SubsTagsFilename)
+			tagsPath := filepath.Join(r.ConfigDir, singbox.SubsTagsFilename)
 			if err := atomicWrite(tagsPath, append(tagsData, '\n')); err != nil {
 				logx.Warn("Failed to write %s: %v", singbox.SubsTagsFilename, err)
 			} else {
@@ -292,11 +297,24 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 
 	if r.DryRun {
+		// In dry-run, write directly to configPath for inspection; skip validation and restart.
+		if err := atomicWrite(configPath, configData); err != nil {
+			return fmt.Errorf("write sing-box config: %w", err)
+		}
+		logx.OK("sing-box config written (dry-run): %s", configPath)
 		logx.Dim("dry-run: skipping sing-box apply and restart")
 	} else {
-		if err := r.Apply.ApplySingbox(configPath); err != nil {
+		// Write to staging first; ApplySingbox validates against staging, then atomically
+		// promotes it to configPath and restarts sing-box. This ensures the live config is
+		// never replaced by an invalid one.
+		stagingPath := configPath + ".new"
+		if err := os.WriteFile(stagingPath, configData, 0o644); err != nil {
+			return fmt.Errorf("write sing-box config staging: %w", err)
+		}
+		if err := r.Apply.ApplySingbox(stagingPath, configPath); err != nil {
 			return fmt.Errorf("apply sing-box: %w", err)
 		}
+		logx.OK("sing-box config applied: %s", configPath)
 	}
 
 	elapsed := time.Since(start).Round(time.Millisecond)
@@ -346,5 +364,9 @@ func atomicWrite(path string, data []byte) error {
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp) // best-effort cleanup
+		return err
+	}
+	return nil
 }

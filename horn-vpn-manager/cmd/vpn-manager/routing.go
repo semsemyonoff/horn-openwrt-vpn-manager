@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/config"
 	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/logx"
@@ -63,7 +64,7 @@ func routingRun(args []string) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	applier := system.NewOpenWrt()
@@ -100,7 +101,7 @@ func routingRunDebug(flags routingFlags) error {
 		return fmt.Errorf("create output dir: %w", err)
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	applier := system.NewDebugApplier()

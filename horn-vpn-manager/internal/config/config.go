@@ -114,6 +114,7 @@ func (c *Config) validate() error {
 //   - at least one subscription must be defined
 //   - exactly one subscription must have "default": true
 //   - the default subscription must not be disabled
+//   - no subscription may have an empty string in its exclude list
 func (c *Config) ValidateSubscriptions() error {
 	if len(c.Subscriptions) == 0 {
 		return fmt.Errorf("no subscriptions configured")
@@ -124,6 +125,11 @@ func (c *Config) ValidateSubscriptions() error {
 		if sub.Default {
 			defaultCount++
 			defaultID = id
+		}
+		for _, pat := range sub.Exclude {
+			if pat == "" {
+				return fmt.Errorf("subscription %q has an empty exclude pattern: remove it or provide a non-empty pattern", id)
+			}
 		}
 	}
 	if defaultCount == 0 {

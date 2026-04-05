@@ -162,7 +162,7 @@ func decompressGzip(data []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	out, err := io.ReadAll(io.LimitReader(r, 50<<20))
+	out, err := io.ReadAll(io.LimitReader(r, 10<<20))
 	if closeErr := r.Close(); closeErr != nil && err == nil {
 		err = closeErr
 	}

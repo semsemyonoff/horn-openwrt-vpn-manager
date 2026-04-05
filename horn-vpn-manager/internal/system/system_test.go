@@ -115,8 +115,10 @@ func TestApplyIPs_fw4(t *testing.T) {
 }
 
 func TestApplySingbox_success(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "config.json")
-	writeFile(t, configPath, []byte(`{"log":{"level":"warn"}}`))
+	dir := t.TempDir()
+	stagingPath := filepath.Join(dir, "config.json.new")
+	finalPath := filepath.Join(dir, "config.json")
+	writeFile(t, stagingPath, []byte(`{"log":{"level":"warn"}}`))
 
 	cmd := &fakeRunner{
 		runFunc: func(name string, _ ...string) ([]byte, error) {
@@ -125,7 +127,7 @@ func TestApplySingbox_success(t *testing.T) {
 	}
 
 	o := &OpenWrt{Cmd: cmd}
-	if err := o.ApplySingbox(configPath); err != nil {
+	if err := o.ApplySingbox(stagingPath, finalPath); err != nil {
 		t.Fatalf("ApplySingbox: %v", err)
 	}
 
@@ -139,11 +141,21 @@ func TestApplySingbox_success(t *testing.T) {
 	if cmd.calls[1][0] != "/etc/init.d/sing-box" || cmd.calls[1][1] != "restart" {
 		t.Errorf("second call = %v, want /etc/init.d/sing-box restart", cmd.calls[1])
 	}
+
+	// Staging must be promoted to final path.
+	if _, err := os.Stat(finalPath); err != nil {
+		t.Errorf("final config not found after apply: %v", err)
+	}
+	if _, err := os.Stat(stagingPath); err == nil {
+		t.Errorf("staging file should be gone after successful apply")
+	}
 }
 
 func TestApplySingbox_check_failure(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "config.json")
-	writeFile(t, configPath, []byte(`{}`))
+	dir := t.TempDir()
+	stagingPath := filepath.Join(dir, "config.json.new")
+	finalPath := filepath.Join(dir, "config.json")
+	writeFile(t, stagingPath, []byte(`{}`))
 
 	cmd := &fakeRunner{
 		runFunc: func(name string, _ ...string) ([]byte, error) {
@@ -155,7 +167,7 @@ func TestApplySingbox_check_failure(t *testing.T) {
 	}
 
 	o := &OpenWrt{Cmd: cmd}
-	err := o.ApplySingbox(configPath)
+	err := o.ApplySingbox(stagingPath, finalPath)
 	if err == nil {
 		t.Fatal("expected error when sing-box check fails")
 	}
@@ -165,10 +177,20 @@ func TestApplySingbox_check_failure(t *testing.T) {
 			t.Errorf("sing-box restart should not be called after check failure")
 		}
 	}
+	// Staging must be cleaned up; final must be untouched.
+	if _, err := os.Stat(stagingPath); err == nil {
+		t.Errorf("staging file should be removed after check failure")
+	}
+	if _, err := os.Stat(finalPath); err == nil {
+		t.Errorf("final config should not exist after check failure with no prior config")
+	}
 }
 
-func TestApplySingbox_config_path_passed_to_check(t *testing.T) {
-	configPath := "/etc/sing-box/config.json"
+func TestApplySingbox_staging_path_passed_to_check(t *testing.T) {
+	dir := t.TempDir()
+	stagingPath := filepath.Join(dir, "config.json.new")
+	finalPath := filepath.Join(dir, "config.json")
+	writeFile(t, stagingPath, []byte(`{}`))
 
 	var checkArgs []string
 	cmd := &fakeRunner{
@@ -181,10 +203,10 @@ func TestApplySingbox_config_path_passed_to_check(t *testing.T) {
 	}
 
 	o := &OpenWrt{Cmd: cmd}
-	_ = o.ApplySingbox(configPath)
+	_ = o.ApplySingbox(stagingPath, finalPath)
 
-	if len(checkArgs) < 2 || checkArgs[0] != "check" || checkArgs[1] != "-c" || checkArgs[2] != configPath {
-		t.Errorf("sing-box check args = %v, want [check -c %s]", checkArgs, configPath)
+	if len(checkArgs) < 3 || checkArgs[0] != "check" || checkArgs[1] != "-c" || checkArgs[2] != stagingPath {
+		t.Errorf("sing-box check args = %v, want [check -c %s]", checkArgs, stagingPath)
 	}
 }
 
