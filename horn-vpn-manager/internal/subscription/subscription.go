@@ -364,6 +364,9 @@ func (r *Runner) writeDryRunNodes(id string, uris []string) error {
 
 // atomicWrite writes data to path via a temp file and rename to prevent partial writes.
 func atomicWrite(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
 		return err

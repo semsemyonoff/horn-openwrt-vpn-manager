@@ -23,9 +23,7 @@ define Package/horn-vpn-manager/description
 endef
 
 define Package/horn-vpn-manager/conffiles
-/etc/horn-vpn-manager/subs.json
-/etc/horn-vpn-manager/config.template.json
-/etc/horn-vpn-manager/domains.json
+/etc/horn-vpn-manager/config.json
 /etc/horn-vpn-manager/lists/manual-ip.lst
 endef
 
@@ -44,9 +42,8 @@ define Package/horn-vpn-manager/install
 	$(INSTALL_BIN) ./files/getdomains.sh $(1)/usr/libexec/horn-vpn-manager/getdomains.sh
 
 	$(INSTALL_DIR) $(1)/usr/share/horn-vpn-manager
-	$(INSTALL_DATA) ./files/config.template.json $(1)/usr/share/horn-vpn-manager/config.template.default.json
-	$(INSTALL_DATA) ./files/subs.example.json $(1)/usr/share/horn-vpn-manager/subs.example.json
-	$(INSTALL_DATA) ./files/domains.example.json $(1)/usr/share/horn-vpn-manager/domains.example.json
+	$(INSTALL_DATA) ./files/sing-box.template.default.json $(1)/usr/share/horn-vpn-manager/sing-box.template.default.json
+	$(INSTALL_DATA) ./files/config.example.json $(1)/usr/share/horn-vpn-manager/config.example.json
 
 	$(INSTALL_DIR) $(1)/etc/horn-vpn-manager/lists
 	$(INSTALL_CONF) ./files/config.template.json $(1)/etc/horn-vpn-manager/config.template.json

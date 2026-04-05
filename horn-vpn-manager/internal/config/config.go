@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 )
 
 const DefaultPath = "/etc/horn-vpn-manager/config.json"
@@ -132,6 +133,11 @@ func (c *Config) ValidateSubscriptions() error {
 		for _, pat := range sub.Exclude {
 			if pat == "" {
 				return fmt.Errorf("subscription %q has an empty exclude pattern: remove it or provide a non-empty pattern", id)
+			}
+		}
+		if sub.Interval != "" {
+			if _, err := time.ParseDuration(sub.Interval); err != nil {
+				return fmt.Errorf("subscription %q has invalid interval %q: must be a Go duration (e.g. \"5m\", \"30s\")", id, sub.Interval)
 			}
 		}
 	}

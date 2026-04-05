@@ -92,23 +92,29 @@ func (r *Runner) Run(ctx context.Context) error {
 		results := fetch.DownloadAll(ctx, urls, opts)
 
 		var allLines []string
+		anySucceeded := false
 		for i, res := range results {
 			if res.Err != nil {
 				logx.Err("Failed to download subnet list: %s", res.URL)
 				continue
 			}
+			anySucceeded = true
 			lines := ParseLines(res.Data)
 			logx.Detail("  [%d/%d] %s entries from %s", i+1, len(urls), logx.Bold(fmt.Sprintf("%d", len(lines))), lastPathSegment(res.URL))
 			allLines = append(allLines, lines...)
 		}
 
-		deduped := Dedup(allLines)
-		data := []byte(strings.Join(deduped, "\n") + "\n")
-		if err := atomicWrite(r.subnetsCachePath(), data); err != nil {
-			return fmt.Errorf("write subnets cache: %w", err)
+		if anySucceeded {
+			deduped := Dedup(allLines)
+			data := []byte(strings.Join(deduped, "\n") + "\n")
+			if err := atomicWrite(r.subnetsCachePath(), data); err != nil {
+				return fmt.Errorf("write subnets cache: %w", err)
+			}
+			logx.Info("Subnet cache: %s unique entries -> %s", logx.Bold(fmt.Sprintf("%d", len(deduped))), r.subnetsCachePath())
+			subnetsUpdated = true
+		} else {
+			logx.Warn("All subnet downloads failed; keeping existing cache")
 		}
-		logx.Info("Subnet cache: %s unique entries -> %s", logx.Bold(fmt.Sprintf("%d", len(deduped))), r.subnetsCachePath())
-		subnetsUpdated = true
 	} else {
 		logx.Info("No subnet URLs configured, skipping")
 	}

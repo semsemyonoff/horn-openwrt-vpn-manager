@@ -19,6 +19,8 @@ func run(args []string) error {
 	}
 
 	switch args[0] {
+	case "run":
+		return runBoth(args[1:])
 	case "routing":
 		return runRouting(args[1:])
 	case "subscriptions":
@@ -71,12 +73,24 @@ func runSubscriptions(args []string) error {
 	}
 }
 
+// runBoth runs routing, then subscriptions, forwarding the same flags to each.
+func runBoth(args []string) error {
+	if err := routingRun(args); err != nil {
+		return fmt.Errorf("routing: %w", err)
+	}
+	if err := subscriptionsRun(args); err != nil {
+		return fmt.Errorf("subscriptions: %w", err)
+	}
+	return nil
+}
+
 func printUsage() {
 	fmt.Print(`vpn-manager — VPN subscription and routing manager for OpenWrt
 
 Usage: vpn-manager <command> [subcommand] [options]
 
 Commands:
+  run            Run routing and subscriptions pipelines (initial bootstrap)
   routing        Manage domain/IP routing lists (download, apply, restore)
   subscriptions  Download and process VPN subscriptions
   check          Validate config and report what is configured

@@ -328,7 +328,9 @@ func buildTransport(n *vless.Node) *OutboundTransport {
 			XPaddingBytes: "100-1000",
 		}
 	case "quic":
-		return &OutboundTransport{Type: "quic"}
+		// QUIC transport is not a standalone transport block in sing-box VLESS;
+		// treat as plain TCP so sing-box check does not fail.
+		return nil
 	default:
 		// plain tcp or no transport; no transport block needed
 		return nil
