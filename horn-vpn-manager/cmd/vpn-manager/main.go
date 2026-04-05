@@ -21,6 +21,8 @@ func run(args []string) error {
 	switch args[0] {
 	case "routing":
 		return runRouting(args[1:])
+	case "subscriptions":
+		return runSubscriptions(args[1:])
 	case "help", "-h", "--help":
 		printUsage()
 		return nil
@@ -48,6 +50,25 @@ func runRouting(args []string) error {
 	}
 }
 
+func runSubscriptions(args []string) error {
+	if len(args) == 0 {
+		printSubscriptionsHelp()
+		return nil
+	}
+
+	switch args[0] {
+	case "run":
+		return subscriptionsRun(args[1:])
+	case "dry-run":
+		return subscriptionsDryRun(args[1:])
+	case "help", "-h", "--help":
+		printSubscriptionsHelp()
+		return nil
+	default:
+		return fmt.Errorf("unknown subscriptions subcommand: %s", args[0])
+	}
+}
+
 func printUsage() {
 	fmt.Print(`vpn-manager — VPN subscription and routing manager for OpenWrt
 
@@ -55,9 +76,28 @@ Usage: vpn-manager <command> [subcommand] [options]
 
 Commands:
   routing        Manage domain/IP routing lists (download, apply, restore)
+  subscriptions  Download and process VPN subscriptions
   help           Show this help message
 
 Run "vpn-manager <command> help" for command-specific options.
+`)
+}
+
+func printSubscriptionsHelp() {
+	fmt.Print(`vpn-manager subscriptions — download and process VPN subscriptions
+
+Usage: vpn-manager subscriptions <subcommand> [options]
+
+Subcommands:
+  run            Download subscriptions and process nodes
+  dry-run        Download and decode subscriptions without applying to system
+  help           Show this help message
+
+Options:
+  -c, --config   Path to config file (default: /etc/horn-vpn-manager/config.json)
+  -v             Increase verbosity (up to -vvv)
+  --no-color     Disable colored output
+  --debug        Debug mode: config from binary dir, output to ./out, no system actions
 `)
 }
 

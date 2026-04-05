@@ -85,7 +85,132 @@ func TestLoad_validation_empty_routing(t *testing.T) {
 
 	_, err := Load(path)
 	if err == nil {
-		t.Fatal("expected validation error for empty routing")
+		t.Fatal("expected validation error for empty routing and no subscriptions")
+	}
+}
+
+func TestLoad_subscriptions_only(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	writeFile(t, path, `{
+		"subscriptions": {
+			"default": {
+				"name": "Default",
+				"url": "https://example.com/sub",
+				"default": true
+			}
+		}
+	}`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.Subscriptions) != 1 {
+		t.Errorf("subscriptions count = %d, want 1", len(cfg.Subscriptions))
+	}
+	sub := cfg.Subscriptions["default"]
+	if sub == nil {
+		t.Fatal("subscription 'default' not found")
+	}
+	if sub.Name != "Default" {
+		t.Errorf("name = %q, want %q", sub.Name, "Default")
+	}
+	if sub.URL != "https://example.com/sub" {
+		t.Errorf("url = %q, want %q", sub.URL, "https://example.com/sub")
+	}
+	if !sub.Default {
+		t.Error("default = false, want true")
+	}
+	if !sub.IsEnabled() {
+		t.Error("IsEnabled() = false for subscription with no enabled field")
+	}
+}
+
+func TestLoad_subscription_disabled(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	f := false
+	_ = f
+	writeFile(t, path, `{
+		"subscriptions": {
+			"s1": {"name": "S1", "url": "https://example.com/s1", "enabled": false}
+		}
+	}`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	sub := cfg.Subscriptions["s1"]
+	if sub == nil {
+		t.Fatal("subscription 's1' not found")
+	}
+	if sub.IsEnabled() {
+		t.Error("IsEnabled() = true for explicitly disabled subscription")
+	}
+}
+
+func TestLoad_singbox_section(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	writeFile(t, path, `{
+		"singbox": {
+			"log_level": "warn",
+			"test_url": "https://www.gstatic.com/generate_204",
+			"template": "/etc/horn-vpn-manager/sing-box.template.json"
+		},
+		"subscriptions": {
+			"s1": {"name": "S1", "url": "https://example.com/s1"}
+		}
+	}`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Singbox.LogLevel != "warn" {
+		t.Errorf("singbox.log_level = %q, want %q", cfg.Singbox.LogLevel, "warn")
+	}
+	if cfg.Singbox.TestURL != "https://www.gstatic.com/generate_204" {
+		t.Errorf("singbox.test_url = %q", cfg.Singbox.TestURL)
+	}
+	if cfg.Singbox.Template != "/etc/horn-vpn-manager/sing-box.template.json" {
+		t.Errorf("singbox.template = %q", cfg.Singbox.Template)
+	}
+}
+
+func TestLoad_subscription_route(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	writeFile(t, path, `{
+		"subscriptions": {
+			"work": {
+				"name": "Work",
+				"url": "https://example.com/work",
+				"route": {
+					"domains": ["jira.example.com"],
+					"domain_urls": ["https://example.com/work-domains.lst"],
+					"ip_cidrs": ["203.0.113.0/24"],
+					"ip_urls": ["https://example.com/work-ips.lst"]
+				}
+			}
+		}
+	}`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	sub := cfg.Subscriptions["work"]
+	if sub.Route == nil {
+		t.Fatal("route is nil")
+	}
+	if len(sub.Route.Domains) != 1 || sub.Route.Domains[0] != "jira.example.com" {
+		t.Errorf("domains = %v", sub.Route.Domains)
+	}
+	if len(sub.Route.IPCIDRs) != 1 || sub.Route.IPCIDRs[0] != "203.0.113.0/24" {
+		t.Errorf("ip_cidrs = %v", sub.Route.IPCIDRs)
 	}
 }
 

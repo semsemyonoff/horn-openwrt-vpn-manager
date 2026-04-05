@@ -1,0 +1,3 @@
+vless://uuid1@host1.example.com:443?encryption=none&security=tls&sni=host1.example.com#Node+1
+vless://uuid2@host2.example.com:443?encryption=none&security=tls&sni=host2.example.com#Node+2
+vless://uuid3@host3.example.com:8443?encryption=none&security=reality&pbk=abc123#Node+3

@@ -10,8 +10,42 @@ import (
 const DefaultPath = "/etc/horn-vpn-manager/config.json"
 
 type Config struct {
-	Fetch   Fetch   `json:"fetch"`
-	Routing Routing `json:"routing"`
+	Fetch         Fetch                    `json:"fetch"`
+	Singbox       Singbox                  `json:"singbox"`
+	Routing       Routing                  `json:"routing"`
+	Subscriptions map[string]*Subscription `json:"subscriptions"`
+}
+
+// Singbox holds settings used when generating sing-box config.
+type Singbox struct {
+	LogLevel string `json:"log_level"`
+	TestURL  string `json:"test_url"`
+	Template string `json:"template"`
+}
+
+// Subscription defines a single subscription entry.
+type Subscription struct {
+	Name      string             `json:"name"`
+	URL       string             `json:"url"`
+	Default   bool               `json:"default"`
+	Enabled   *bool              `json:"enabled"`
+	Exclude   []string           `json:"exclude"`
+	Interval  string             `json:"interval"`
+	Tolerance int                `json:"tolerance"`
+	Route     *SubscriptionRoute `json:"route,omitempty"`
+}
+
+// IsEnabled returns true if the subscription is not explicitly disabled.
+func (s *Subscription) IsEnabled() bool {
+	return s.Enabled == nil || *s.Enabled
+}
+
+// SubscriptionRoute holds per-subscription routing policy.
+type SubscriptionRoute struct {
+	Domains    []string `json:"domains"`
+	DomainURLs []string `json:"domain_urls"`
+	IPCIDRs    []string `json:"ip_cidrs"`
+	IPURLs     []string `json:"ip_urls"`
 }
 
 type Fetch struct {
@@ -66,8 +100,10 @@ func (c *Config) applyDefaults() {
 }
 
 func (c *Config) validate() error {
-	if c.Routing.Domains.URL == "" && len(c.Routing.Subnets.URLs) == 0 {
-		return fmt.Errorf("routing: at least one of domains.url or subnets.urls must be configured")
+	hasRouting := c.Routing.Domains.URL != "" || len(c.Routing.Subnets.URLs) > 0
+	hasSubs := len(c.Subscriptions) > 0
+	if !hasRouting && !hasSubs {
+		return fmt.Errorf("config must have at least routing (domains.url or subnets.urls) or subscriptions configured")
 	}
 	return nil
 }
