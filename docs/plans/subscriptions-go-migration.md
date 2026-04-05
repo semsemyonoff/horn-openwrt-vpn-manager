@@ -136,13 +136,13 @@ The migrated Go implementation must cover both explicitly requested stages and t
 
 ### Task 4: Add subscription validation, retries, and exclusion filtering
 
-- [ ] Port config-level validation from the shell script: at least one subscription, exactly one default subscription, and the default subscription must not be disabled
-- [ ] Preserve handling for disabled subscriptions: skip them without aborting the whole run
-- [ ] Implement global retries plus per-subscription retry overrides
-- [ ] Implement exclude-pattern filtering against decoded server names
-- [ ] Add tests for default-subscription validation, disabled subscriptions, retry behavior, and exclusion filtering
-- [ ] Keep failure semantics aligned with legacy behavior: a failed default subscription aborts the run, non-default failures are logged and skipped
-- [ ] Mark completed
+- [x] Port config-level validation from the shell script: at least one subscription, exactly one default subscription, and the default subscription must not be disabled
+- [x] Preserve handling for disabled subscriptions: skip them without aborting the whole run
+- [x] Implement global retries plus per-subscription retry overrides
+- [x] Implement exclude-pattern filtering against decoded server names
+- [x] Add tests for default-subscription validation, disabled subscriptions, retry behavior, and exclusion filtering
+- [x] Keep failure semantics aligned with legacy behavior: a failed default subscription aborts the run, non-default failures are logged and skipped
+- [x] Mark completed
 
 ### Task 5: Port VLESS parsing, node identity, and outbound group generation
 

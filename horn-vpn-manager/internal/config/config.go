@@ -32,6 +32,7 @@ type Subscription struct {
 	Exclude   []string           `json:"exclude"`
 	Interval  string             `json:"interval"`
 	Tolerance int                `json:"tolerance"`
+	Retries   *int               `json:"retries,omitempty"`
 	Route     *SubscriptionRoute `json:"route,omitempty"`
 }
 
@@ -104,6 +105,35 @@ func (c *Config) validate() error {
 	hasSubs := len(c.Subscriptions) > 0
 	if !hasRouting && !hasSubs {
 		return fmt.Errorf("config must have at least routing (domains.url or subnets.urls) or subscriptions configured")
+	}
+	return nil
+}
+
+// ValidateSubscriptions checks subscription-specific constraints required before
+// running the subscription pipeline:
+//   - at least one subscription must be defined
+//   - exactly one subscription must have "default": true
+//   - the default subscription must not be disabled
+func (c *Config) ValidateSubscriptions() error {
+	if len(c.Subscriptions) == 0 {
+		return fmt.Errorf("no subscriptions configured")
+	}
+	var defaultID string
+	var defaultCount int
+	for id, sub := range c.Subscriptions {
+		if sub.Default {
+			defaultCount++
+			defaultID = id
+		}
+	}
+	if defaultCount == 0 {
+		return fmt.Errorf("no default subscription defined (set \"default\": true on one subscription)")
+	}
+	if defaultCount > 1 {
+		return fmt.Errorf("multiple default subscriptions defined, only one allowed")
+	}
+	if !c.Subscriptions[defaultID].IsEnabled() {
+		return fmt.Errorf("default subscription %q cannot be disabled", defaultID)
 	}
 	return nil
 }

@@ -3,6 +3,7 @@ package subscription
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,18 +49,71 @@ func NewRunner(cfg *config.Config, applier Applier) *Runner {
 	}
 }
 
-func (r *Runner) fetchOpts() fetch.Options {
+// fetchOptsForSub returns fetch options for a subscription, using the per-subscription
+// retry count if set, otherwise falling back to the global config value.
+func (r *Runner) fetchOptsForSub(sub *config.Subscription) fetch.Options {
+	retries := r.Cfg.Fetch.Retries
+	if sub.Retries != nil {
+		retries = *sub.Retries
+	}
 	return fetch.Options{
-		Retries:     r.Cfg.Fetch.Retries,
+		Retries:     retries,
 		Timeout:     time.Duration(r.Cfg.Fetch.TimeoutSeconds) * time.Second,
 		Parallelism: r.Cfg.Fetch.Parallelism,
 	}
 }
 
+// extractNodeName returns the URL-decoded fragment (display name/label) from a VLESS URI.
+// Returns an empty string if no fragment is present.
+func extractNodeName(uri string) string {
+	if u, err := url.Parse(uri); err == nil && u.Fragment != "" {
+		return u.Fragment
+	}
+	if idx := strings.LastIndex(uri, "#"); idx >= 0 {
+		name := uri[idx+1:]
+		if unescaped, err := url.PathUnescape(name); err == nil {
+			return unescaped
+		}
+		return name
+	}
+	return ""
+}
+
+// filterExclude returns uris with any entry whose node name contains
+// one of the exclude patterns removed (case-insensitive substring match).
+func filterExclude(uris []string, patterns []string) []string {
+	if len(patterns) == 0 {
+		return uris
+	}
+	lower := make([]string, len(patterns))
+	for i, p := range patterns {
+		lower[i] = strings.ToLower(p)
+	}
+	out := uris[:0:0]
+	for _, uri := range uris {
+		name := strings.ToLower(extractNodeName(uri))
+		excluded := false
+		for _, pat := range lower {
+			if strings.Contains(name, pat) {
+				excluded = true
+				break
+			}
+		}
+		if !excluded {
+			out = append(out, uri)
+		}
+	}
+	return out
+}
+
 // Run downloads and processes all enabled subscriptions.
-// It returns an error only on fatal failures (e.g. context cancelled).
-// Per-subscription errors are logged and skipped.
+// It validates subscription config constraints, aborts if the default subscription
+// fails, and logs and skips non-default failures.
 func (r *Runner) Run(ctx context.Context) error {
+	if err := r.Cfg.ValidateSubscriptions(); err != nil {
+		return fmt.Errorf("subscription config invalid: %w", err)
+	}
+
 	if r.DryRun {
 		logx.Header("subscriptions dry-run")
 		logx.Dim("dry-run: no system actions will be taken")
@@ -67,7 +121,6 @@ func (r *Runner) Run(ctx context.Context) error {
 		logx.Header("subscriptions run")
 	}
 
-	opts := r.fetchOpts()
 	var processed int
 
 	for id, sub := range r.Cfg.Subscriptions {
@@ -83,19 +136,34 @@ func (r *Runner) Run(ctx context.Context) error {
 		logx.Info("Downloading subscription %s...", logx.Bold(id))
 		logx.Detail("  URL: %s", sub.URL)
 
+		opts := r.fetchOptsForSub(sub)
 		data, err := fetch.Download(ctx, sub.URL, opts)
 		if err != nil {
 			if ctx.Err() != nil {
 				return fmt.Errorf("interrupted: %w", ctx.Err())
 			}
 			logx.Err("Failed to download subscription %s: %v", id, err)
+			if sub.Default {
+				return fmt.Errorf("default subscription %q failed to download, aborting", id)
+			}
 			continue
 		}
 
 		uris, err := DecodePayload(data)
 		if err != nil {
 			logx.Err("Failed to decode subscription %s: %v", id, err)
+			if sub.Default {
+				return fmt.Errorf("default subscription %q failed to decode, aborting", id)
+			}
 			continue
+		}
+
+		if len(sub.Exclude) > 0 {
+			before := len(uris)
+			uris = filterExclude(uris, sub.Exclude)
+			if skipped := before - len(uris); skipped > 0 {
+				logx.Info("Subscription %s: excluded %d node(s) matching exclude patterns", id, skipped)
+			}
 		}
 
 		logx.OK("Subscription %s: %s node(s)", id, logx.Bold(fmt.Sprintf("%d", len(uris))))

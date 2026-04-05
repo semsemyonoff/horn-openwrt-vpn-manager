@@ -214,6 +214,62 @@ func TestLoad_subscription_route(t *testing.T) {
 	}
 }
 
+func TestValidateSubscriptions_no_subscriptions(t *testing.T) {
+	cfg := &Config{}
+	if err := cfg.ValidateSubscriptions(); err == nil {
+		t.Fatal("expected error for empty subscriptions")
+	}
+}
+
+func TestValidateSubscriptions_no_default(t *testing.T) {
+	cfg := &Config{
+		Subscriptions: map[string]*Subscription{
+			"s1": {Name: "S1", URL: "https://example.com/s1"},
+		},
+	}
+	if err := cfg.ValidateSubscriptions(); err == nil {
+		t.Fatal("expected error when no default subscription defined")
+	}
+}
+
+func TestValidateSubscriptions_multiple_defaults(t *testing.T) {
+	cfg := &Config{
+		Subscriptions: map[string]*Subscription{
+			"s1": {Name: "S1", URL: "https://example.com/s1", Default: true},
+			"s2": {Name: "S2", URL: "https://example.com/s2", Default: true},
+		},
+	}
+	if err := cfg.ValidateSubscriptions(); err == nil {
+		t.Fatal("expected error when multiple default subscriptions defined")
+	}
+}
+
+func TestValidateSubscriptions_disabled_default(t *testing.T) {
+	f := false
+	cfg := &Config{
+		Subscriptions: map[string]*Subscription{
+			"s1": {Name: "S1", URL: "https://example.com/s1", Default: true, Enabled: &f},
+		},
+	}
+	if err := cfg.ValidateSubscriptions(); err == nil {
+		t.Fatal("expected error when default subscription is disabled")
+	}
+}
+
+func TestValidateSubscriptions_valid(t *testing.T) {
+	t1 := true
+	f := false
+	cfg := &Config{
+		Subscriptions: map[string]*Subscription{
+			"main":     {Name: "Main", URL: "https://example.com/main", Default: true, Enabled: &t1},
+			"disabled": {Name: "Off", URL: "https://example.com/off", Enabled: &f},
+		},
+	}
+	if err := cfg.ValidateSubscriptions(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestLoad_missing_file(t *testing.T) {
 	_, err := Load("/nonexistent/config.json")
 	if err == nil {

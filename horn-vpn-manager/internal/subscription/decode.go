@@ -15,13 +15,13 @@ import (
 type Format int
 
 const (
-	FormatUnknown     Format = iota
-	FormatRaw                // plain vless:// lines
-	FormatGzip               // gzip-compressed raw payload
-	FormatBase64             // standard base64-encoded payload
-	FormatBase64URL          // URL-safe base64-encoded payload
-	FormatGzipBase64         // gzip-compressed payload wrapped in standard base64
-	FormatGzipBase64URL      // gzip-compressed payload wrapped in URL-safe base64
+	FormatUnknown       Format = iota
+	FormatRaw                  // plain vless:// lines
+	FormatGzip                 // gzip-compressed raw payload
+	FormatBase64               // standard base64-encoded payload
+	FormatBase64URL            // URL-safe base64-encoded payload
+	FormatGzipBase64           // gzip-compressed payload wrapped in standard base64
+	FormatGzipBase64URL        // gzip-compressed payload wrapped in URL-safe base64
 )
 
 func (f Format) String() string {
