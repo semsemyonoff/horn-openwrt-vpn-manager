@@ -157,12 +157,12 @@ The migrated Go implementation must cover both explicitly requested stages and t
 
 ### Task 6: Port per-subscription routing for manual domains and manual IP/CIDR entries
 
-- [ ] Add support for manual per-subscription routing rules from subscription config: `domains` and `ip` / `ip_cidrs`
-- [ ] Generate route rules only for non-default subscriptions, matching the current shell behavior
-- [ ] Preserve route-to-outbound mapping semantics for both single-node and multi-node subscriptions
-- [ ] Add tests for manual domain routing and manual IP/CIDR routing
-- [ ] Keep routing generation separate from payload download/parsing so the code remains composable
-- [ ] Mark completed
+- [x] Add support for manual per-subscription routing rules from subscription config: `domains` and `ip` / `ip_cidrs`
+- [x] Generate route rules only for non-default subscriptions, matching the current shell behavior
+- [x] Preserve route-to-outbound mapping semantics for both single-node and multi-node subscriptions
+- [x] Add tests for manual domain routing and manual IP/CIDR routing
+- [x] Keep routing generation separate from payload download/parsing so the code remains composable
+- [x] Mark completed
 
 ### Task 7: Port per-subscription domain and IP list downloads
 

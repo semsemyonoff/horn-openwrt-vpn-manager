@@ -36,6 +36,11 @@ type OutboundPlan struct {
 	// TagNames maps each generated tag to its display name. Useful for
 	// UI integration (e.g., future LuCI phase).
 	TagNames map[string]string
+
+	// RouteRule holds the sing-box route rule for this subscription's manual
+	// routing entries (domains and IP CIDRs). Nil for default subscriptions
+	// and for subscriptions with no route config.
+	RouteRule *RouteRule
 }
 
 // VLESSOutbound is a typed sing-box VLESS outbound configuration.

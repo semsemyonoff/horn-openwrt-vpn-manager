@@ -201,6 +201,16 @@ func (r *Runner) Run(ctx context.Context) error {
 			logx.Debug("  group(selector): %s", plan.SelectorGroup.Tag)
 		}
 
+		// Generate per-subscription route rules for non-default subscriptions only.
+		if !sub.Default && sub.Route != nil {
+			rule := BuildRouteRules(sub.Route, plan.FinalTag)
+			plan.RouteRule = rule
+			if rule != nil {
+				logx.Detail("  Subscription %s: route rule -> %s (%d domain(s), %d CIDR(s))",
+					id, plan.FinalTag, len(rule.DomainSuffix), len(rule.IPCIDR))
+			}
+		}
+
 		processed++
 	}
 
