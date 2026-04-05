@@ -146,14 +146,14 @@ The migrated Go implementation must cover both explicitly requested stages and t
 
 ### Task 5: Port VLESS parsing, node identity, and outbound group generation
 
-- [ ] Implement a dedicated VLESS parser package/module that converts URIs into typed Go models rather than shell-built JSON strings
-- [ ] Port the stable node hash logic so `<id>-node-<hash>` remains deterministic for the same connection parameters
-- [ ] Port single-node behavior: generate `<id>-single` directly when only one node remains after filtering
-- [ ] Port multi-node behavior: generate node outbounds, `<id>-auto` `urltest`, and `<id>-manual` `selector`
-- [ ] Preserve default outbound selection logic and keep the chosen final outbound explicit in the generated config model
-- [ ] Use official `sing-box` documentation as the source of truth for field names and shape, not the shell script alone
-- [ ] Add tests for parsing, stable hashes, single-node mode, multi-node mode, and tag generation
-- [ ] Mark completed
+- [x] Implement a dedicated VLESS parser package/module that converts URIs into typed Go models rather than shell-built JSON strings
+- [x] Port the stable node hash logic so `<id>-node-<hash>` remains deterministic for the same connection parameters
+- [x] Port single-node behavior: generate `<id>-single` directly when only one node remains after filtering
+- [x] Port multi-node behavior: generate node outbounds, `<id>-auto` `urltest`, and `<id>-manual` `selector`
+- [x] Preserve default outbound selection logic and keep the chosen final outbound explicit in the generated config model
+- [x] Use official `sing-box` documentation as the source of truth for field names and shape, not the shell script alone
+- [x] Add tests for parsing, stable hashes, single-node mode, multi-node mode, and tag generation
+- [x] Mark completed
 
 ### Task 6: Port per-subscription routing for manual domains and manual IP/CIDR entries
 

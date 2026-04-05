@@ -177,6 +177,30 @@ func (r *Runner) Run(ctx context.Context) error {
 			}
 		}
 
+		testURL := r.Cfg.Singbox.TestURL
+		if testURL == "" {
+			testURL = "https://www.gstatic.com/generate_204"
+		}
+		plan, err := BuildOutbounds(id, uris, sub.Interval, sub.Tolerance, testURL)
+		if err != nil {
+			logx.Err("Failed to build outbounds for %s: %v", id, err)
+			if sub.Default {
+				return fmt.Errorf("default subscription %q failed to build outbounds, aborting", id)
+			}
+			continue
+		}
+
+		logx.Detail("  Subscription %s: final outbound tag: %s", id, logx.Bold(plan.FinalTag))
+		for _, ob := range plan.NodeOutbounds {
+			logx.Debug("  node: %s (%s)", ob.Tag, plan.TagNames[ob.Tag])
+		}
+		if plan.URLTestGroup != nil {
+			logx.Debug("  group(urltest): %s", plan.URLTestGroup.Tag)
+		}
+		if plan.SelectorGroup != nil {
+			logx.Debug("  group(selector): %s", plan.SelectorGroup.Tag)
+		}
+
 		processed++
 	}
 
