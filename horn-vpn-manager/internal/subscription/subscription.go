@@ -203,7 +203,8 @@ func (r *Runner) Run(ctx context.Context) error {
 
 		// Generate per-subscription route rules for non-default subscriptions only.
 		if !sub.Default && sub.Route != nil {
-			rule := BuildRouteRules(sub.Route, plan.FinalTag)
+			mergedRoute := FetchRouteEntries(ctx, id, sub.Route, opts)
+			rule := BuildRouteRules(mergedRoute, plan.FinalTag)
 			plan.RouteRule = rule
 			if rule != nil {
 				logx.Detail("  Subscription %s: route rule -> %s (%d domain(s), %d CIDR(s))",

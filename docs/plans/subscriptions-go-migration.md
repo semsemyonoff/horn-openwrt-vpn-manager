@@ -166,13 +166,13 @@ The migrated Go implementation must cover both explicitly requested stages and t
 
 ### Task 7: Port per-subscription domain and IP list downloads
 
-- [ ] Implement download support for `domain_urls`
-- [ ] Implement download support for `ip_urls`
-- [ ] Port validation rules for downloaded domain lists and downloaded IP/CIDR lists
-- [ ] Port normalization and deduplication rules, including “manual entries win” semantics before merging downloaded entries
-- [ ] Add tests for list downloads, invalid downloaded entries, deduplication, and merge behavior
-- [ ] Reuse the shared fetch layer and bounded concurrency where useful, but do not introduce uncontrolled fan-out on router-class hardware
-- [ ] Mark completed
+- [x] Implement download support for `domain_urls`
+- [x] Implement download support for `ip_urls`
+- [x] Port validation rules for downloaded domain lists and downloaded IP/CIDR lists
+- [x] Port normalization and deduplication rules, including “manual entries win” semantics before merging downloaded entries
+- [x] Add tests for list downloads, invalid downloaded entries, deduplication, and merge behavior
+- [x] Reuse the shared fetch layer and bounded concurrency where useful, but do not introduce uncontrolled fan-out on router-class hardware
+- [x] Mark completed
 
 ### Task 8: Render final sing-box config, validate it, and apply it safely
 
