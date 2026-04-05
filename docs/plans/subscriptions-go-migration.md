@@ -118,12 +118,12 @@ The migrated Go implementation must cover both explicitly requested stages and t
 
 ### Task 2: Add base64 and base64url subscription decoding
 
-- [ ] Implement decoding for standard base64 subscription payloads
-- [ ] Implement decoding for URL-safe base64 payloads, because the legacy shell supports both
-- [ ] Keep decoding isolated from download/orchestration so the logic stays testable
-- [ ] Add tests covering valid base64, valid base64url, empty payloads, and malformed payloads
-- [ ] Preserve the current behavior of treating undecodable payloads as invalid subscription content rather than silently succeeding
-- [ ] Mark completed
+- [x] Implement decoding for standard base64 subscription payloads
+- [x] Implement decoding for URL-safe base64 payloads, because the legacy shell supports both
+- [x] Keep decoding isolated from download/orchestration so the logic stays testable
+- [x] Add tests covering valid base64, valid base64url, empty payloads, and malformed payloads
+- [x] Preserve the current behavior of treating undecodable payloads as invalid subscription content rather than silently succeeding
+- [x] Mark completed
 
 ### Task 3: Add gzip plus base64 handling and payload normalization
 
