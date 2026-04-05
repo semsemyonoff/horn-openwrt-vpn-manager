@@ -16,10 +16,11 @@ import (
 )
 
 type subsFlags struct {
-	configPath string
-	verbosity  int
-	debug      bool
-	noColor    bool
+	configPath   string
+	templatePath string
+	verbosity    int
+	debug        bool
+	noColor      bool
 }
 
 func parseSubsFlags(args []string) (subsFlags, error) {
@@ -32,6 +33,12 @@ func parseSubsFlags(args []string) (subsFlags, error) {
 			}
 			i++
 			f.configPath = args[i]
+		case args[i] == "-t" || args[i] == "--template":
+			if i+1 >= len(args) {
+				return f, fmt.Errorf("flag %s requires an argument", args[i])
+			}
+			i++
+			f.templatePath = args[i]
 		case args[i] == "--debug":
 			f.debug = true
 		case args[i] == "--no-color":
@@ -67,6 +74,7 @@ func subscriptionsRunCtx(ctx context.Context, args []string) error {
 
 	applier := system.NewOpenWrt()
 	runner := subscription.NewRunner(cfg, applier)
+	runner.TemplatePath = flags.templatePath
 
 	return runner.Run(ctx)
 }
@@ -92,6 +100,7 @@ func subscriptionsDryRun(args []string) error {
 
 	applier := subscription.NewDebugApplier()
 	runner := subscription.NewRunner(cfg, applier)
+	runner.TemplatePath = flags.templatePath
 	runner.DryRun = true
 
 	return runner.Run(ctx)
@@ -108,11 +117,22 @@ func subscriptionsRunDebug(flags subsFlags, dryRun bool) error {
 		cfgPath = filepath.Join(dir, "config.json")
 	}
 
+	templatePath := flags.templatePath
+	if templatePath == "" {
+		local := filepath.Join(dir, "sing-box.template.json")
+		if _, err := os.Stat(local); err == nil {
+			templatePath = local
+		} else {
+			templatePath = filepath.Join(dir, "sing-box.template.default.json")
+		}
+	}
+
 	outDir := filepath.Join(dir, "out")
 
 	logx.Info("Debug mode: using local files from %s", logx.Bold(dir))
 	logx.Dim("debug implies no system actions (sing-box)")
 	logx.Dim("config=%s", cfgPath)
+	logx.Dim("template=%s", templatePath)
 	logx.Dim("output=%s", outDir)
 
 	cfg, err := config.Load(cfgPath)
@@ -131,6 +151,7 @@ func subscriptionsRunDebug(flags subsFlags, dryRun bool) error {
 	runner := subscription.NewRunner(cfg, applier)
 	runner.OutDir = outDir
 	runner.ConfigDir = outDir
+	runner.TemplatePath = templatePath
 	runner.DryRun = dryRun
 
 	return runner.Run(ctx)

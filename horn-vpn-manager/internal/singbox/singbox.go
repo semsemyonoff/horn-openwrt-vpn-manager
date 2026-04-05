@@ -8,8 +8,8 @@ import (
 	"os"
 )
 
-// DefaultTemplatePath is the on-device path to the installed default template.
-const DefaultTemplatePath = "/usr/share/horn-vpn-manager/sing-box.template.default.json"
+// DefaultTemplatePath is the on-device path to the installed template.
+const DefaultTemplatePath = "/usr/share/horn-vpn-manager/sing-box.template.json"
 
 // SubsTagsFilename is the filename written alongside the config for LuCI tag-to-name lookup.
 const SubsTagsFilename = "subs-tags.json"

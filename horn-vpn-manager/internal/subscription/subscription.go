@@ -43,11 +43,12 @@ func (d *DebugApplier) ApplySingbox(stagingPath, finalPath string) error {
 
 // Runner executes the subscription pipeline.
 type Runner struct {
-	Cfg       *config.Config
-	Apply     Applier
-	OutDir    string
-	ConfigDir string
-	DryRun    bool
+	Cfg          *config.Config
+	Apply        Applier
+	OutDir       string
+	ConfigDir    string
+	TemplatePath string // overrides cfg.Singbox.Template when non-empty
+	DryRun       bool
 }
 
 // NewRunner returns a Runner using the provided config and applier.
@@ -281,7 +282,11 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 
 	// Render the final sing-box config from the template and all outbound plans.
-	templateData, err := singbox.LoadTemplate(r.Cfg.Singbox.Template)
+	templatePath := r.TemplatePath
+	if templatePath == "" {
+		templatePath = r.Cfg.Singbox.Template
+	}
+	templateData, err := singbox.LoadTemplate(templatePath)
 	if err != nil {
 		return fmt.Errorf("load template: %w", err)
 	}
