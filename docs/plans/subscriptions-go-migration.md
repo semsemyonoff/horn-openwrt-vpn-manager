@@ -176,15 +176,15 @@ The migrated Go implementation must cover both explicitly requested stages and t
 
 ### Task 8: Render final sing-box config, validate it, and apply it safely
 
-- [ ] Replace the shell placeholder/`awk` assembly with typed Go rendering of the final `sing-box` config
-- [ ] Support the configured `singbox.log_level`, `singbox.test_url`, and template path from the new unified config
-- [ ] Implement dry-run output so generated config can be inspected without replacing the live config or restarting services
-- [ ] Validate generated config with `sing-box check`
-- [ ] Apply the new config atomically, keep a backup if appropriate, and restart `sing-box`
-- [ ] Preserve or intentionally replace legacy side artifacts such as tag-name export; if `subs-tags.json` still provides value for the next LuCI phase, generate it from Go as part of apply
-- [ ] Explicitly review legacy-only artifacts such as `.needs-update` and keep them only if the new Go core still needs them
-- [ ] Add tests around rendering, dry-run behavior, and apply decision logic; use mocks/fakes for system commands
-- [ ] Mark completed
+- [x] Replace the shell placeholder/`awk` assembly with typed Go rendering of the final `sing-box` config
+- [x] Support the configured `singbox.log_level`, `singbox.test_url`, and template path from the new unified config
+- [x] Implement dry-run output so generated config can be inspected without replacing the live config or restarting services
+- [x] Validate generated config with `sing-box check`
+- [x] Apply the new config atomically, keep a backup if appropriate, and restart `sing-box`
+- [x] Preserve or intentionally replace legacy side artifacts such as tag-name export; if `subs-tags.json` still provides value for the next LuCI phase, generate it from Go as part of apply
+- [x] Explicitly review legacy-only artifacts such as `.needs-update` and keep them only if the new Go core still needs them
+- [x] Add tests around rendering, dry-run behavior, and apply decision logic; use mocks/fakes for system commands
+- [x] Mark completed
 
 ### Task 9: Finish integration, CLI polish, and regression coverage
 

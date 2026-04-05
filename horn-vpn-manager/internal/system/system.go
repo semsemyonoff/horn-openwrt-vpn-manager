@@ -55,6 +55,11 @@ func (d *DebugApplier) ApplyIPs(ipListFile string) error {
 	return nil
 }
 
+func (d *DebugApplier) ApplySingbox(configPath string) error {
+	logx.Dim("skipping sing-box apply in debug mode (config=%s)", configPath)
+	return nil
+}
+
 // ApplyDomains validates the domain list with dnsmasq --test, copies it
 // to the dnsmasq drop-in directory, and restarts dnsmasq.
 func (o *OpenWrt) ApplyDomains(cacheFile, dnsmasqDir string) error {
@@ -84,6 +89,24 @@ func (o *OpenWrt) ApplyDomains(cacheFile, dnsmasqDir string) error {
 		return fmt.Errorf("restart dnsmasq: %w", err)
 	}
 	logx.OK("dnsmasq restarted")
+	return nil
+}
+
+// ApplySingbox validates the new config with sing-box check and restarts sing-box.
+// configPath must be the path to the already-written new config file.
+func (o *OpenWrt) ApplySingbox(configPath string) error {
+	logx.Info("Validating sing-box config...")
+	out, err := o.Cmd.Run("sing-box", "check", "-c", configPath)
+	if err != nil {
+		return fmt.Errorf("sing-box check failed: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	logx.OK("sing-box config validation passed")
+
+	logx.Info("Restarting sing-box...")
+	if out, err := o.Cmd.Run("/etc/init.d/sing-box", "restart"); err != nil {
+		return fmt.Errorf("restart sing-box: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	logx.OK("sing-box restarted")
 	return nil
 }
 

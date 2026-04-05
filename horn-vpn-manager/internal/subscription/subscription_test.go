@@ -2,6 +2,7 @@ package subscription
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -269,6 +270,141 @@ func TestRunner_Run_per_subscription_retries(t *testing.T) {
 	// Per-subscription Retries=1 means exactly 1 HTTP attempt; global would have been 2
 	if got != 1 {
 		t.Errorf("expected 1 request with per-sub Retries=1, got %d (global would have been 2)", got)
+	}
+}
+
+func TestRunner_Run_apply_called_when_not_dryrun(t *testing.T) {
+	srv := newTestServer(t, rawPayload, http.StatusOK)
+	defer srv.Close()
+
+	cfg := &config.Config{
+		Fetch: config.Fetch{Retries: 1, TimeoutSeconds: 5, Parallelism: 1},
+		Subscriptions: map[string]*config.Subscription{
+			"main": {Name: "Main", URL: srv.URL, Default: true},
+		},
+	}
+
+	applier := &fakeApplier{}
+	runner := NewRunner(cfg, applier)
+	runner.OutDir = t.TempDir()
+	runner.DryRun = false
+
+	if err := runner.Run(context.Background()); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	if len(applier.applySingboxCalls) != 1 {
+		t.Errorf("expected ApplySingbox called once, got %d calls", len(applier.applySingboxCalls))
+	}
+}
+
+func TestRunner_Run_apply_not_called_when_dryrun(t *testing.T) {
+	srv := newTestServer(t, rawPayload, http.StatusOK)
+	defer srv.Close()
+
+	cfg := &config.Config{
+		Fetch: config.Fetch{Retries: 1, TimeoutSeconds: 5, Parallelism: 1},
+		Subscriptions: map[string]*config.Subscription{
+			"main": {Name: "Main", URL: srv.URL, Default: true},
+		},
+	}
+
+	applier := &fakeApplier{}
+	runner := NewRunner(cfg, applier)
+	runner.OutDir = t.TempDir()
+	runner.DryRun = true
+
+	if err := runner.Run(context.Background()); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	if len(applier.applySingboxCalls) != 0 {
+		t.Errorf("expected ApplySingbox not called in dry-run, got %d calls", len(applier.applySingboxCalls))
+	}
+}
+
+func TestRunner_Run_config_written_to_outdir(t *testing.T) {
+	srv := newTestServer(t, rawPayload, http.StatusOK)
+	defer srv.Close()
+
+	cfg := &config.Config{
+		Fetch: config.Fetch{Retries: 1, TimeoutSeconds: 5, Parallelism: 1},
+		Subscriptions: map[string]*config.Subscription{
+			"main": {Name: "Main", URL: srv.URL, Default: true},
+		},
+	}
+
+	outDir := t.TempDir()
+	runner := NewRunner(cfg, &fakeApplier{})
+	runner.OutDir = outDir
+	runner.DryRun = true
+
+	if err := runner.Run(context.Background()); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	// Config file should be written
+	configPath := filepath.Join(outDir, "config.json")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("config.json not written: %v", err)
+	}
+
+	// Should be valid JSON
+	var cfg2 map[string]interface{}
+	if err := json.Unmarshal(data, &cfg2); err != nil {
+		t.Fatalf("config.json is not valid JSON: %v", err)
+	}
+
+	// Should contain the outbound tag
+	outbounds, _ := cfg2["outbounds"].([]interface{})
+	found := false
+	for _, ob := range outbounds {
+		if m, ok := ob.(map[string]interface{}); ok {
+			if tag, _ := m["tag"].(string); strings.HasPrefix(tag, "main-") {
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected a main-* outbound in config.json, outbounds: %v", outbounds)
+	}
+}
+
+func TestRunner_Run_subs_tags_written(t *testing.T) {
+	srv := newTestServer(t, rawPayload, http.StatusOK)
+	defer srv.Close()
+
+	cfg := &config.Config{
+		Fetch: config.Fetch{Retries: 1, TimeoutSeconds: 5, Parallelism: 1},
+		Subscriptions: map[string]*config.Subscription{
+			"main": {Name: "Main", URL: srv.URL, Default: true},
+		},
+	}
+
+	outDir := t.TempDir()
+	runner := NewRunner(cfg, &fakeApplier{})
+	runner.OutDir = outDir
+	runner.DryRun = true
+
+	if err := runner.Run(context.Background()); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	tagsPath := filepath.Join(outDir, "subs-tags.json")
+	data, err := os.ReadFile(tagsPath)
+	if err != nil {
+		t.Fatalf("subs-tags.json not written: %v", err)
+	}
+
+	var tags map[string]string
+	if err := json.Unmarshal(data, &tags); err != nil {
+		t.Fatalf("subs-tags.json is not valid JSON: %v", err)
+	}
+
+	if len(tags) == 0 {
+		t.Error("subs-tags.json should have at least one tag entry")
 	}
 }
 

@@ -2,6 +2,7 @@ package subscription
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/config"
 	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/fetch"
 	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/logx"
+	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/singbox"
 )
 
 // DefaultOutDir is where generated sing-box config is written on-device.
@@ -106,9 +108,11 @@ func filterExclude(uris []string, patterns []string) []string {
 	return out
 }
 
-// Run downloads and processes all enabled subscriptions.
-// It validates subscription config constraints, aborts if the default subscription
-// fails, and logs and skips non-default failures.
+// Run downloads and processes all enabled subscriptions, renders the sing-box
+// config, writes it to OutDir/config.json, and calls the applier unless DryRun.
+//
+// Validates subscription config constraints before starting. Aborts if the
+// default subscription fails. Logs and skips non-default failures.
 func (r *Runner) Run(ctx context.Context) error {
 	if err := r.Cfg.ValidateSubscriptions(); err != nil {
 		return fmt.Errorf("subscription config invalid: %w", err)
@@ -116,12 +120,22 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	if r.DryRun {
 		logx.Header("subscriptions dry-run")
-		logx.Dim("dry-run: no system actions will be taken")
+		logx.Dim("dry-run: config will be rendered but not applied")
 	} else {
 		logx.Header("subscriptions run")
 	}
 
-	var processed int
+	testURL := r.Cfg.Singbox.TestURL
+	if testURL == "" {
+		testURL = "https://www.gstatic.com/generate_204"
+	}
+
+	var (
+		plans           []*OutboundPlan
+		defaultFinalTag string
+		tagNames        = make(map[string]string)
+		processed       int
+	)
 
 	for id, sub := range r.Cfg.Subscriptions {
 		if !sub.IsEnabled() {
@@ -177,10 +191,6 @@ func (r *Runner) Run(ctx context.Context) error {
 			}
 		}
 
-		testURL := r.Cfg.Singbox.TestURL
-		if testURL == "" {
-			testURL = "https://www.gstatic.com/generate_204"
-		}
 		plan, err := BuildOutbounds(id, uris, sub.Interval, sub.Tolerance, testURL)
 		if err != nil {
 			logx.Err("Failed to build outbounds for %s: %v", id, err)
@@ -212,15 +222,86 @@ func (r *Runner) Run(ctx context.Context) error {
 			}
 		}
 
+		if sub.Default {
+			defaultFinalTag = plan.FinalTag
+		}
+		for k, v := range plan.TagNames {
+			tagNames[k] = v
+		}
+		plans = append(plans, plan)
 		processed++
 	}
 
 	if processed == 0 && len(r.Cfg.Subscriptions) > 0 {
 		logx.Warn("No subscriptions were processed successfully")
+		return nil
+	}
+
+	// Render the final sing-box config from the template and all outbound plans.
+	templateData, err := singbox.LoadTemplate(r.Cfg.Singbox.Template)
+	if err != nil {
+		return fmt.Errorf("load template: %w", err)
+	}
+
+	outbounds, routeRules := collectSingboxParts(plans)
+
+	configData, err := singbox.RenderConfig(templateData, outbounds, routeRules, defaultFinalTag, r.Cfg.Singbox.LogLevel)
+	if err != nil {
+		return fmt.Errorf("render sing-box config: %w", err)
+	}
+
+	if err := os.MkdirAll(r.OutDir, 0o755); err != nil {
+		return fmt.Errorf("create output dir: %w", err)
+	}
+
+	configPath := filepath.Join(r.OutDir, "config.json")
+	if err := atomicWrite(configPath, configData); err != nil {
+		return fmt.Errorf("write sing-box config: %w", err)
+	}
+	logx.OK("sing-box config written: %s", configPath)
+
+	// Write subs-tags.json for future LuCI UI integration.
+	if len(tagNames) > 0 {
+		if tagsData, err := json.MarshalIndent(tagNames, "", "  "); err == nil {
+			tagsPath := filepath.Join(r.OutDir, singbox.SubsTagsFilename)
+			if err := atomicWrite(tagsPath, append(tagsData, '\n')); err != nil {
+				logx.Warn("Failed to write %s: %v", singbox.SubsTagsFilename, err)
+			} else {
+				logx.Detail("Tag names written: %s", tagsPath)
+			}
+		}
+	}
+
+	if r.DryRun {
+		logx.Dim("dry-run: skipping sing-box apply and restart")
+	} else {
+		if err := r.Apply.ApplySingbox(configPath); err != nil {
+			return fmt.Errorf("apply sing-box: %w", err)
+		}
 	}
 
 	logx.Header("done")
 	return nil
+}
+
+// collectSingboxParts flattens outbound plans into the two slices expected by
+// singbox.RenderConfig: all outbounds (nodes, urltest, selector) and all route rules.
+func collectSingboxParts(plans []*OutboundPlan) (outbounds []any, routeRules []any) {
+	for _, plan := range plans {
+		for _, ob := range plan.NodeOutbounds {
+			outbounds = append(outbounds, ob)
+		}
+		if plan.URLTestGroup != nil {
+			outbounds = append(outbounds, plan.URLTestGroup)
+		}
+		if plan.SelectorGroup != nil {
+			outbounds = append(outbounds, plan.SelectorGroup)
+		}
+		if plan.RouteRule != nil {
+			routeRules = append(routeRules, plan.RouteRule)
+		}
+	}
+	return outbounds, routeRules
 }
 
 // writeDryRunNodes writes extracted URIs to OutDir/<id>-nodes.txt for inspection.
@@ -231,4 +312,13 @@ func (r *Runner) writeDryRunNodes(id string, uris []string) error {
 	path := filepath.Join(r.OutDir, id+"-nodes.txt")
 	data := []byte(strings.Join(uris, "\n") + "\n")
 	return os.WriteFile(path, data, 0o644)
+}
+
+// atomicWrite writes data to path via a temp file and rename to prevent partial writes.
+func atomicWrite(path string, data []byte) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }

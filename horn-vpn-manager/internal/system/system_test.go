@@ -114,6 +114,80 @@ func TestApplyIPs_fw4(t *testing.T) {
 	}
 }
 
+func TestApplySingbox_success(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	writeFile(t, configPath, []byte(`{"log":{"level":"warn"}}`))
+
+	cmd := &fakeRunner{
+		runFunc: func(name string, _ ...string) ([]byte, error) {
+			return nil, nil // sing-box check and sing-box restart both succeed
+		},
+	}
+
+	o := &OpenWrt{Cmd: cmd}
+	if err := o.ApplySingbox(configPath); err != nil {
+		t.Fatalf("ApplySingbox: %v", err)
+	}
+
+	// Should have called sing-box check then sing-box restart
+	if len(cmd.calls) != 2 {
+		t.Fatalf("expected 2 commands (check + restart), got %d: %v", len(cmd.calls), cmd.calls)
+	}
+	if cmd.calls[0][0] != "sing-box" || cmd.calls[0][1] != "check" {
+		t.Errorf("first call = %v, want sing-box check", cmd.calls[0])
+	}
+	if cmd.calls[1][0] != "/etc/init.d/sing-box" || cmd.calls[1][1] != "restart" {
+		t.Errorf("second call = %v, want /etc/init.d/sing-box restart", cmd.calls[1])
+	}
+}
+
+func TestApplySingbox_check_failure(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	writeFile(t, configPath, []byte(`{}`))
+
+	cmd := &fakeRunner{
+		runFunc: func(name string, _ ...string) ([]byte, error) {
+			if name == "sing-box" {
+				return []byte("invalid config"), fmt.Errorf("exit 1")
+			}
+			return nil, nil
+		},
+	}
+
+	o := &OpenWrt{Cmd: cmd}
+	err := o.ApplySingbox(configPath)
+	if err == nil {
+		t.Fatal("expected error when sing-box check fails")
+	}
+	// Should not have called restart after check failure
+	for _, call := range cmd.calls {
+		if call[0] == "/etc/init.d/sing-box" {
+			t.Errorf("sing-box restart should not be called after check failure")
+		}
+	}
+}
+
+func TestApplySingbox_config_path_passed_to_check(t *testing.T) {
+	configPath := "/etc/sing-box/config.json"
+
+	var checkArgs []string
+	cmd := &fakeRunner{
+		runFunc: func(name string, args ...string) ([]byte, error) {
+			if name == "sing-box" {
+				checkArgs = args
+			}
+			return nil, nil
+		},
+	}
+
+	o := &OpenWrt{Cmd: cmd}
+	_ = o.ApplySingbox(configPath)
+
+	if len(checkArgs) < 2 || checkArgs[0] != "check" || checkArgs[1] != "-c" || checkArgs[2] != configPath {
+		t.Errorf("sing-box check args = %v, want [check -c %s]", checkArgs, configPath)
+	}
+}
+
 func TestApplyIPs_fallback_init(t *testing.T) {
 	cmd := &fakeRunner{
 		lookFunc: func(_ string) (string, error) {

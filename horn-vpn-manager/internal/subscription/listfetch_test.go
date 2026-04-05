@@ -55,8 +55,8 @@ func TestIsValidCIDR(t *testing.T) {
 		{"10.0.0.0/8", true},
 		{"192.168.1.0/24", true},
 		{"2001:db8::/32", true},
-		{"192.0.2.1", true},   // plain IP
-		{"::1", true},         // IPv6 plain
+		{"192.0.2.1", true}, // plain IP
+		{"::1", true},       // IPv6 plain
 		{"", false},
 		{"not-an-ip", false},
 		{"10.0.0.0/33", false}, // prefix too long

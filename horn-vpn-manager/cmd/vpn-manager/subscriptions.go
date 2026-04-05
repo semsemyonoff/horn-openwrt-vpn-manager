@@ -11,6 +11,7 @@ import (
 	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/config"
 	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/logx"
 	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/subscription"
+	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/system"
 )
 
 type subsFlags struct {
@@ -56,7 +57,7 @@ func subscriptionsRun(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	applier := subscription.NewDebugApplier() // TODO: replace with real applier once implemented
+	applier := system.NewOpenWrt()
 	runner := subscription.NewRunner(cfg, applier)
 
 	return runner.Run(ctx)
