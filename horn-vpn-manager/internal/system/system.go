@@ -95,6 +95,8 @@ func (o *OpenWrt) ApplyDomains(cacheFile, dnsmasqDir string) error {
 // ApplySingbox validates the config at stagingPath with sing-box check, then
 // atomically renames it to finalPath and restarts sing-box. On validation
 // failure the staging file is removed and finalPath is left untouched.
+// On restart failure, the previous config is restored from a backup so the
+// router is not left in an inconsistent state.
 func (o *OpenWrt) ApplySingbox(stagingPath, finalPath string) error {
 	logx.Info("Validating sing-box config...")
 	out, err := o.Cmd.Run("sing-box", "check", "-c", stagingPath)
@@ -104,6 +106,17 @@ func (o *OpenWrt) ApplySingbox(stagingPath, finalPath string) error {
 	}
 	logx.OK("sing-box config validation passed")
 
+	// Back up the existing config so we can restore it if restart fails.
+	backupPath := finalPath + ".bak"
+	hasBackup := false
+	if _, statErr := os.Stat(finalPath); statErr == nil {
+		if backupErr := copyFile(finalPath, backupPath); backupErr != nil {
+			_ = os.Remove(stagingPath)
+			return fmt.Errorf("back up existing config: %w", backupErr)
+		}
+		hasBackup = true
+	}
+
 	if err := os.Rename(stagingPath, finalPath); err != nil {
 		_ = os.Remove(stagingPath)
 		return fmt.Errorf("promote sing-box config: %w", err)
@@ -111,10 +124,37 @@ func (o *OpenWrt) ApplySingbox(stagingPath, finalPath string) error {
 
 	logx.Info("Restarting sing-box...")
 	if out, err := o.Cmd.Run("/etc/init.d/sing-box", "restart"); err != nil {
+		if hasBackup {
+			logx.Info("sing-box restart failed; restoring previous config...")
+			if restoreErr := os.Rename(backupPath, finalPath); restoreErr != nil {
+				logx.Dim("Warning: could not restore backup: %v", restoreErr)
+			} else {
+				logx.OK("Previous config restored")
+				// Attempt to bring sing-box back up with the restored config so
+				// the router is not left without a running proxy.
+				if _, startErr := o.Cmd.Run("/etc/init.d/sing-box", "start"); startErr != nil {
+					logx.Dim("Warning: could not start sing-box with restored config: %v", startErr)
+				} else {
+					logx.OK("sing-box started with previous config")
+				}
+			}
+		}
 		return fmt.Errorf("restart sing-box: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	if hasBackup {
+		_ = os.Remove(backupPath)
 	}
 	logx.OK("sing-box restarted")
 	return nil
+}
+
+// copyFile copies src to dst, creating or truncating dst.
+func copyFile(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, 0o644)
 }
 
 // ApplyIPs reloads the firewall so it picks up the updated IP list.

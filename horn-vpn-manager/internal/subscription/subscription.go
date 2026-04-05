@@ -238,11 +238,16 @@ func (r *Runner) Run(ctx context.Context) error {
 		// Generate per-subscription route rules for non-default subscriptions only.
 		if !sub.Default && sub.Route != nil {
 			mergedRoute := FetchRouteEntries(ctx, id, sub.Route, opts)
-			rule := BuildRouteRules(mergedRoute, plan.FinalTag)
-			plan.RouteRule = rule
-			if rule != nil {
-				logx.Detail("  Subscription %s: route rule -> %s (%d domain(s), %d CIDR(s))",
-					id, plan.FinalTag, len(rule.DomainSuffix), len(rule.IPCIDR))
+			rules := BuildRouteRules(mergedRoute, plan.FinalTag)
+			plan.RouteRules = rules
+			if len(rules) > 0 {
+				var nDomains, nCIDRs int
+				for _, r := range rules {
+					nDomains += len(r.DomainSuffix)
+					nCIDRs += len(r.IPCIDR)
+				}
+				logx.Detail("  Subscription %s: route rules -> %s (%d domain(s), %d CIDR(s))",
+					id, plan.FinalTag, nDomains, nCIDRs)
 			}
 		}
 
@@ -341,8 +346,8 @@ func collectSingboxParts(plans []*OutboundPlan) (outbounds []any, routeRules []a
 		if plan.SelectorGroup != nil {
 			outbounds = append(outbounds, plan.SelectorGroup)
 		}
-		if plan.RouteRule != nil {
-			routeRules = append(routeRules, plan.RouteRule)
+		for _, r := range plan.RouteRules {
+			routeRules = append(routeRules, r)
 		}
 	}
 	return outbounds, routeRules

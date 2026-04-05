@@ -38,10 +38,11 @@ type OutboundPlan struct {
 	// UI integration (e.g., future LuCI phase).
 	TagNames map[string]string
 
-	// RouteRule holds the sing-box route rule for this subscription's manual
+	// RouteRules holds the sing-box route rules for this subscription's manual
 	// routing entries (domains and IP CIDRs). Nil for default subscriptions
-	// and for subscriptions with no route config.
-	RouteRule *RouteRule
+	// and for subscriptions with no route config. Domains and IP CIDRs are
+	// stored as separate rules to preserve OR match semantics in sing-box.
+	RouteRules []*RouteRule
 }
 
 // VLESSOutbound is a typed sing-box VLESS outbound configuration.

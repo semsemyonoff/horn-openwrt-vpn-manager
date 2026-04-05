@@ -13,16 +13,16 @@ import (
 )
 
 func TestBuildRouteRules_NilRoute(t *testing.T) {
-	rule := subscription.BuildRouteRules(nil, "work-manual")
-	if rule != nil {
-		t.Errorf("expected nil for nil route, got %+v", rule)
+	rules := subscription.BuildRouteRules(nil, "work-manual")
+	if rules != nil {
+		t.Errorf("expected nil for nil route, got %+v", rules)
 	}
 }
 
 func TestBuildRouteRules_EmptyRoute(t *testing.T) {
-	rule := subscription.BuildRouteRules(&config.SubscriptionRoute{}, "work-manual")
-	if rule != nil {
-		t.Errorf("expected nil for empty route, got %+v", rule)
+	rules := subscription.BuildRouteRules(&config.SubscriptionRoute{}, "work-manual")
+	if len(rules) != 0 {
+		t.Errorf("expected empty rules for empty route, got %+v", rules)
 	}
 }
 
@@ -30,10 +30,11 @@ func TestBuildRouteRules_DomainsOnly(t *testing.T) {
 	route := &config.SubscriptionRoute{
 		Domains: []string{"jira.example.com", "confluence.example.com"},
 	}
-	rule := subscription.BuildRouteRules(route, "work-manual")
-	if rule == nil {
-		t.Fatal("expected non-nil rule")
+	rules := subscription.BuildRouteRules(route, "work-manual")
+	if len(rules) != 1 {
+		t.Fatalf("expected 1 rule, got %d", len(rules))
 	}
+	rule := rules[0]
 	if len(rule.DomainSuffix) != 2 {
 		t.Errorf("DomainSuffix len: got %d want 2", len(rule.DomainSuffix))
 	}
@@ -55,10 +56,11 @@ func TestBuildRouteRules_IPCIDRsOnly(t *testing.T) {
 	route := &config.SubscriptionRoute{
 		IPCIDRs: []string{"203.0.113.0/24", "198.51.100.0/24"},
 	}
-	rule := subscription.BuildRouteRules(route, "work-single")
-	if rule == nil {
-		t.Fatal("expected non-nil rule")
+	rules := subscription.BuildRouteRules(route, "work-single")
+	if len(rules) != 1 {
+		t.Fatalf("expected 1 rule, got %d", len(rules))
 	}
+	rule := rules[0]
 	if len(rule.IPCIDR) != 2 {
 		t.Errorf("IPCIDR len: got %d want 2", len(rule.IPCIDR))
 	}
@@ -73,23 +75,31 @@ func TestBuildRouteRules_IPCIDRsOnly(t *testing.T) {
 	}
 }
 
+// TestBuildRouteRules_DomainsAndCIDRs verifies that when both domains and IP CIDRs
+// are configured, two separate rules are generated (one per condition type). sing-box
+// applies AND semantics within a single rule, so combining them would break matching.
 func TestBuildRouteRules_DomainsAndCIDRs(t *testing.T) {
 	route := &config.SubscriptionRoute{
 		Domains: []string{"example.com"},
 		IPCIDRs: []string{"10.0.0.0/8"},
 	}
-	rule := subscription.BuildRouteRules(route, "corp-manual")
-	if rule == nil {
-		t.Fatal("expected non-nil rule")
+	rules := subscription.BuildRouteRules(route, "corp-manual")
+	if len(rules) != 2 {
+		t.Fatalf("expected 2 rules (one for domains, one for IPs), got %d", len(rules))
 	}
-	if len(rule.DomainSuffix) != 1 {
-		t.Errorf("DomainSuffix len: got %d want 1", len(rule.DomainSuffix))
+	// First rule: domains only.
+	if len(rules[0].DomainSuffix) != 1 || len(rules[0].IPCIDR) != 0 {
+		t.Errorf("rule[0] should have domain_suffix only: %+v", rules[0])
 	}
-	if len(rule.IPCIDR) != 1 {
-		t.Errorf("IPCIDR len: got %d want 1", len(rule.IPCIDR))
+	if rules[0].Outbound != "corp-manual" {
+		t.Errorf("rule[0] outbound: got %q want corp-manual", rules[0].Outbound)
 	}
-	if rule.Outbound != "corp-manual" {
-		t.Errorf("Outbound: got %q want %q", rule.Outbound, "corp-manual")
+	// Second rule: IPs only.
+	if len(rules[1].IPCIDR) != 1 || len(rules[1].DomainSuffix) != 0 {
+		t.Errorf("rule[1] should have ip_cidr only: %+v", rules[1])
+	}
+	if rules[1].Outbound != "corp-manual" {
+		t.Errorf("rule[1] outbound: got %q want corp-manual", rules[1].Outbound)
 	}
 }
 
@@ -99,12 +109,12 @@ func TestBuildRouteRules_SingleNodeOutbound(t *testing.T) {
 	route := &config.SubscriptionRoute{
 		Domains: []string{"work.example.com"},
 	}
-	rule := subscription.BuildRouteRules(route, "work-single")
-	if rule == nil {
-		t.Fatal("expected non-nil rule")
+	rules := subscription.BuildRouteRules(route, "work-single")
+	if len(rules) == 0 {
+		t.Fatal("expected non-empty rules")
 	}
-	if rule.Outbound != "work-single" {
-		t.Errorf("Outbound: got %q want %q", rule.Outbound, "work-single")
+	if rules[0].Outbound != "work-single" {
+		t.Errorf("Outbound: got %q want %q", rules[0].Outbound, "work-single")
 	}
 }
 
@@ -114,40 +124,61 @@ func TestBuildRouteRules_MultiNodeOutbound(t *testing.T) {
 	route := &config.SubscriptionRoute{
 		Domains: []string{"corp.example.com"},
 	}
-	rule := subscription.BuildRouteRules(route, "corp-manual")
-	if rule == nil {
-		t.Fatal("expected non-nil rule")
+	rules := subscription.BuildRouteRules(route, "corp-manual")
+	if len(rules) == 0 {
+		t.Fatal("expected non-empty rules")
 	}
-	if rule.Outbound != "corp-manual" {
-		t.Errorf("Outbound: got %q want %q", rule.Outbound, "corp-manual")
+	if rules[0].Outbound != "corp-manual" {
+		t.Errorf("Outbound: got %q want %q", rules[0].Outbound, "corp-manual")
 	}
 }
 
+// TestBuildRouteRules_JSONShape verifies that domain and IP rules have the
+// correct JSON structure and do not cross-contaminate fields.
 func TestBuildRouteRules_JSONShape(t *testing.T) {
 	route := &config.SubscriptionRoute{
 		Domains: []string{"example.com"},
 		IPCIDRs: []string{"192.0.2.0/24"},
 	}
-	rule := subscription.BuildRouteRules(route, "work-manual")
-	if rule == nil {
-		t.Fatal("expected non-nil rule")
+	rules := subscription.BuildRouteRules(route, "work-manual")
+	if len(rules) != 2 {
+		t.Fatalf("expected 2 rules, got %d", len(rules))
 	}
-	data, err := json.Marshal(rule)
+
+	domainData, err := json.Marshal(rules[0])
 	if err != nil {
-		t.Fatalf("marshal route rule: %v", err)
+		t.Fatalf("marshal domain rule: %v", err)
 	}
-	var m map[string]interface{}
-	if err := json.Unmarshal(data, &m); err != nil {
-		t.Fatalf("unmarshal route rule: %v", err)
+	var dm map[string]interface{}
+	if err := json.Unmarshal(domainData, &dm); err != nil {
+		t.Fatalf("unmarshal domain rule: %v", err)
 	}
-	if _, ok := m["domain_suffix"]; !ok {
-		t.Error("JSON missing domain_suffix field")
+	if _, ok := dm["domain_suffix"]; !ok {
+		t.Error("domain rule JSON missing domain_suffix field")
 	}
-	if _, ok := m["ip_cidr"]; !ok {
-		t.Error("JSON missing ip_cidr field")
+	if _, ok := dm["ip_cidr"]; ok {
+		t.Error("domain rule JSON must not have ip_cidr field")
 	}
-	if m["outbound"] != "work-manual" {
-		t.Errorf("JSON outbound: got %v want work-manual", m["outbound"])
+	if dm["outbound"] != "work-manual" {
+		t.Errorf("domain rule JSON outbound: got %v want work-manual", dm["outbound"])
+	}
+
+	ipData, err := json.Marshal(rules[1])
+	if err != nil {
+		t.Fatalf("marshal ip rule: %v", err)
+	}
+	var im map[string]interface{}
+	if err := json.Unmarshal(ipData, &im); err != nil {
+		t.Fatalf("unmarshal ip rule: %v", err)
+	}
+	if _, ok := im["ip_cidr"]; !ok {
+		t.Error("ip rule JSON missing ip_cidr field")
+	}
+	if _, ok := im["domain_suffix"]; ok {
+		t.Error("ip rule JSON must not have domain_suffix field")
+	}
+	if im["outbound"] != "work-manual" {
+		t.Errorf("ip rule JSON outbound: got %v want work-manual", im["outbound"])
 	}
 }
 
@@ -157,15 +188,15 @@ func TestBuildRouteRules_InputNotMutated(t *testing.T) {
 	domains := []string{"a.example.com"}
 	cidrs := []string{"10.0.0.0/8"}
 	route := &config.SubscriptionRoute{Domains: domains, IPCIDRs: cidrs}
-	rule := subscription.BuildRouteRules(route, "work-manual")
-	if rule == nil {
-		t.Fatal("expected non-nil rule")
+	rules := subscription.BuildRouteRules(route, "work-manual")
+	if len(rules) == 0 {
+		t.Fatal("expected non-empty rules")
 	}
-	rule.DomainSuffix[0] = "mutated"
+	rules[0].DomainSuffix[0] = "mutated"
 	if domains[0] != "a.example.com" {
 		t.Error("BuildRouteRules modified the original Domains slice")
 	}
-	rule.IPCIDR[0] = "mutated"
+	rules[1].IPCIDR[0] = "mutated"
 	if cidrs[0] != "10.0.0.0/8" {
 		t.Error("BuildRouteRules modified the original IPCIDRs slice")
 	}

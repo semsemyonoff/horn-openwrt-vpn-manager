@@ -17,24 +17,6 @@ const SubsTagsFilename = "subs-tags.json"
 //go:embed sing-box.template.default.json
 var embeddedTemplate []byte
 
-// rawConfig is the intermediate form used to unmarshal, merge, and re-marshal
-// the final sing-box configuration.
-type rawConfig struct {
-	Log          json.RawMessage   `json:"log,omitempty"`
-	DNS          json.RawMessage   `json:"dns,omitempty"`
-	NTP          json.RawMessage   `json:"ntp,omitempty"`
-	Inbounds     []json.RawMessage `json:"inbounds,omitempty"`
-	Outbounds    []json.RawMessage `json:"outbounds,omitempty"`
-	Route        *rawRoute         `json:"route,omitempty"`
-	Experimental json.RawMessage   `json:"experimental,omitempty"`
-}
-
-type rawRoute struct {
-	Rules               []json.RawMessage `json:"rules,omitempty"`
-	Final               string            `json:"final,omitempty"`
-	AutoDetectInterface bool              `json:"auto_detect_interface,omitempty"`
-}
-
 // LoadTemplate reads the template from path. If path is empty, the embedded
 // default template is returned.
 func LoadTemplate(path string) ([]byte, error) {
@@ -63,9 +45,14 @@ func RenderConfig(
 	defaultFinalTag string,
 	logLevel string,
 ) ([]byte, error) {
-	var tmpl rawConfig
-	if err := json.Unmarshal(templateData, &tmpl); err != nil {
+	// Parse the template into a top-level map so that any unknown top-level
+	// sing-box keys (certificate, endpoints, etc.) are preserved verbatim.
+	var topLevel map[string]json.RawMessage
+	if err := json.Unmarshal(templateData, &topLevel); err != nil {
 		return nil, fmt.Errorf("parse template: %w", err)
+	}
+	if topLevel == nil {
+		topLevel = make(map[string]json.RawMessage)
 	}
 
 	// Serialize generated outbounds.
@@ -81,47 +68,83 @@ func RenderConfig(
 	}
 
 	// Merge outbounds: generated first, then non-placeholder static outbounds.
-	merged := make([]json.RawMessage, 0, len(genOutbounds)+len(tmpl.Outbounds))
+	var staticOutbounds []json.RawMessage
+	if raw, ok := topLevel["outbounds"]; ok {
+		if err := json.Unmarshal(raw, &staticOutbounds); err != nil {
+			return nil, fmt.Errorf("parse template outbounds: expected array, got unexpected type: %w", err)
+		}
+	}
+	merged := make([]json.RawMessage, 0, len(genOutbounds)+len(staticOutbounds))
 	merged = append(merged, genOutbounds...)
-	for _, ob := range tmpl.Outbounds {
+	for _, ob := range staticOutbounds {
 		if !isPlaceholder(ob) {
 			merged = append(merged, ob)
 		}
 	}
-	tmpl.Outbounds = merged
-
-	// Merge route rules: generated first, then non-placeholder static rules.
-	if tmpl.Route == nil {
-		tmpl.Route = &rawRoute{}
+	if b, err := json.Marshal(merged); err != nil {
+		return nil, fmt.Errorf("marshal outbounds: %w", err)
+	} else {
+		topLevel["outbounds"] = b
 	}
-	mergedRules := make([]json.RawMessage, 0, len(genRules)+len(tmpl.Route.Rules))
+
+	// Merge route rules: decode the template route as a raw map to preserve
+	// any fields we do not model (geoip, geosite, etc.), then override only
+	// the fields we manage (rules, final).
+	routeMap := make(map[string]json.RawMessage)
+	if raw, ok := topLevel["route"]; ok && len(raw) > 0 {
+		if err := json.Unmarshal(raw, &routeMap); err != nil {
+			return nil, fmt.Errorf("parse template route: %w", err)
+		}
+		if routeMap == nil {
+			return nil, fmt.Errorf("parse template route: unexpected null value")
+		}
+	}
+
+	// Extract existing static rules from the map to merge with generated ones.
+	var staticRules []json.RawMessage
+	if raw, ok := routeMap["rules"]; ok {
+		if err := json.Unmarshal(raw, &staticRules); err != nil {
+			return nil, fmt.Errorf("parse template route.rules: expected array, got unexpected type: %w", err)
+		}
+	}
+	mergedRules := make([]json.RawMessage, 0, len(genRules)+len(staticRules))
 	mergedRules = append(mergedRules, genRules...)
-	for _, rule := range tmpl.Route.Rules {
+	for _, rule := range staticRules {
 		if !isPlaceholder(rule) {
 			mergedRules = append(mergedRules, rule)
 		}
 	}
-	tmpl.Route.Rules = mergedRules
 
-	// Set route.final to the default subscription's outbound tag.
-	tmpl.Route.Final = defaultFinalTag
+	// Write back the managed fields into the route map.
+	if b, err := json.Marshal(mergedRules); err == nil {
+		routeMap["rules"] = b
+	}
+	if b, err := json.Marshal(defaultFinalTag); err == nil {
+		routeMap["final"] = b
+	}
+
+	if b, err := json.Marshal(routeMap); err != nil {
+		return nil, fmt.Errorf("marshal route: %w", err)
+	} else {
+		topLevel["route"] = b
+	}
 
 	// Override log level when provided, preserving other log fields from the template.
 	if logLevel != "" {
 		var logMap map[string]any
-		if len(tmpl.Log) > 0 {
-			_ = json.Unmarshal(tmpl.Log, &logMap)
+		if raw, ok := topLevel["log"]; ok && len(raw) > 0 {
+			_ = json.Unmarshal(raw, &logMap)
 		}
 		if logMap == nil {
 			logMap = make(map[string]any)
 		}
 		logMap["level"] = logLevel
 		if b, err := json.Marshal(logMap); err == nil {
-			tmpl.Log = b
+			topLevel["log"] = b
 		}
 	}
 
-	return json.MarshalIndent(tmpl, "", "  ")
+	return json.MarshalIndent(topLevel, "", "  ")
 }
 
 // isPlaceholder reports whether a raw JSON value is a bare string (placeholder).

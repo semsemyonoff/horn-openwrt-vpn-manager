@@ -83,33 +83,40 @@ func TestIntegration_Run_with_route_rules(t *testing.T) {
 		t.Errorf("expected work-single outbound, got tags: %v", outboundTags)
 	}
 
-	// Route section must contain a rule pointing to work-single.
+	// Route section must contain two separate rules for work-single: one for
+	// domain_suffix and one for ip_cidr. sing-box AND semantics require them
+	// to be separate so traffic matching either condition is routed correctly.
 	routeSection, _ := generated["route"].(map[string]interface{})
 	if routeSection == nil {
 		t.Fatal("expected route section in generated config")
 	}
 	rules, _ := routeSection["rules"].([]interface{})
-	foundWorkRule := false
+	var workDomainRule, workIPRule bool
 	for _, rule := range rules {
 		ruleMap, ok := rule.(map[string]interface{})
 		if !ok {
 			continue
 		}
 		if outbound, _ := ruleMap["outbound"].(string); outbound == "work-single" {
-			foundWorkRule = true
-			domainSuffix, _ := ruleMap["domain_suffix"].([]interface{})
-			if len(domainSuffix) == 0 {
-				t.Error("expected domain_suffix entries in work route rule")
+			if ds, _ := ruleMap["domain_suffix"].([]interface{}); len(ds) > 0 {
+				workDomainRule = true
+				if _, hasIP := ruleMap["ip_cidr"]; hasIP {
+					t.Error("domain rule must not contain ip_cidr (AND semantics would break matching)")
+				}
 			}
-			ipCIDR, _ := ruleMap["ip_cidr"].([]interface{})
-			if len(ipCIDR) == 0 {
-				t.Error("expected ip_cidr entries in work route rule")
+			if ic, _ := ruleMap["ip_cidr"].([]interface{}); len(ic) > 0 {
+				workIPRule = true
+				if _, hasDomain := ruleMap["domain_suffix"]; hasDomain {
+					t.Error("ip rule must not contain domain_suffix (AND semantics would break matching)")
+				}
 			}
-			break
 		}
 	}
-	if !foundWorkRule {
-		t.Errorf("expected route rule for work-single, got rules: %v", rules)
+	if !workDomainRule {
+		t.Errorf("expected a domain_suffix route rule for work-single, got rules: %v", rules)
+	}
+	if !workIPRule {
+		t.Errorf("expected an ip_cidr route rule for work-single, got rules: %v", rules)
 	}
 
 	// route.final must point to the default subscription's final outbound.

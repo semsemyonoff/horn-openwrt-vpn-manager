@@ -328,6 +328,88 @@ func TestIsPlaceholder(t *testing.T) {
 	}
 }
 
+func TestRenderConfig_preserves_unknown_route_fields(t *testing.T) {
+	// A template with a route section containing fields we do not model
+	// (geoip, geosite, etc.) must survive the render pass unchanged.
+	tmpl := `{
+  "outbounds": [],
+  "route": {
+    "rules": [],
+    "final": "",
+    "auto_detect_interface": true,
+    "geoip": {"download_detour": "direct"},
+    "geosite": {"download_detour": "direct"}
+  }
+}`
+
+	data, err := RenderConfig([]byte(tmpl), nil, nil, "direct", "")
+	if err != nil {
+		t.Fatalf("RenderConfig error: %v", err)
+	}
+
+	var cfg map[string]any
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	route, _ := cfg["route"].(map[string]any)
+	if route["geoip"] == nil {
+		t.Error("route.geoip was dropped by RenderConfig; unknown route fields must be preserved")
+	}
+	if route["geosite"] == nil {
+		t.Error("route.geosite was dropped by RenderConfig; unknown route fields must be preserved")
+	}
+	if route["auto_detect_interface"] != true {
+		t.Errorf("route.auto_detect_interface = %v, want true", route["auto_detect_interface"])
+	}
+}
+
+func TestRenderConfig_preserves_unknown_top_level_fields(t *testing.T) {
+	// A template with top-level keys outside the set we manage must survive
+	// the render pass unchanged (e.g. certificate, endpoints, or any future
+	// sing-box top-level section).
+	tmpl := `{
+  "log": {"level": "info"},
+  "outbounds": [],
+  "route": {"rules": [], "final": ""},
+  "certificate": [{"certificate_path": "/etc/ssl/cert.pem"}],
+  "endpoints": [{"type": "wireguard", "tag": "wg-out"}]
+}`
+
+	data, err := RenderConfig([]byte(tmpl), nil, nil, "direct", "")
+	if err != nil {
+		t.Fatalf("RenderConfig error: %v", err)
+	}
+
+	var cfg map[string]any
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	if cfg["certificate"] == nil {
+		t.Error("top-level certificate was dropped; unknown top-level fields must be preserved")
+	}
+	if cfg["endpoints"] == nil {
+		t.Error("top-level endpoints was dropped; unknown top-level fields must be preserved")
+	}
+}
+
+func TestRenderConfig_rejects_non_array_outbounds(t *testing.T) {
+	tmpl := `{"outbounds": {"type": "direct"}, "route": {"rules": [], "final": "direct"}}`
+	_, err := RenderConfig([]byte(tmpl), nil, nil, "direct", "")
+	if err == nil {
+		t.Fatal("expected error when template outbounds is not an array, got nil")
+	}
+}
+
+func TestRenderConfig_rejects_non_array_route_rules(t *testing.T) {
+	tmpl := `{"outbounds": [], "route": {"rules": "not-an-array", "final": "direct"}}`
+	_, err := RenderConfig([]byte(tmpl), nil, nil, "direct", "")
+	if err == nil {
+		t.Fatal("expected error when template route.rules is not an array, got nil")
+	}
+}
+
 func TestRenderConfig_uses_embedded_template(t *testing.T) {
 	// Load empty path → should use embedded default template, which is valid JSON
 	tmplData, err := LoadTemplate("")

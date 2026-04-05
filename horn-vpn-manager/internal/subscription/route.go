@@ -11,28 +11,35 @@ type RouteRule struct {
 	Outbound     string   `json:"outbound"`
 }
 
-// BuildRouteRules produces a RouteRule for a subscription's manual routing
+// BuildRouteRules produces route rules for a subscription's manual routing
 // entries (domains and ip_cidrs from the route config block). Returns nil when
 // route is nil or has no actionable entries.
+//
+// Domains and IP CIDRs are emitted as separate rules because sing-box applies
+// AND semantics within a single rule: a rule with both domain_suffix and ip_cidr
+// would only match traffic satisfying both conditions simultaneously, which is
+// never the intended behaviour. Two rules with the same outbound correctly
+// implement OR semantics.
 //
 // Only non-default subscriptions should have route rules generated. The caller
 // is responsible for this check. finalTag must be the FinalTag from the
 // subscription's OutboundPlan so the rule points to the correct outbound.
-func BuildRouteRules(route *config.SubscriptionRoute, finalTag string) *RouteRule {
+func BuildRouteRules(route *config.SubscriptionRoute, finalTag string) []*RouteRule {
 	if route == nil {
 		return nil
 	}
-	rule := &RouteRule{Outbound: finalTag}
+	var rules []*RouteRule
 	if len(route.Domains) > 0 {
-		rule.DomainSuffix = make([]string, len(route.Domains))
-		copy(rule.DomainSuffix, route.Domains)
+		r := &RouteRule{Outbound: finalTag}
+		r.DomainSuffix = make([]string, len(route.Domains))
+		copy(r.DomainSuffix, route.Domains)
+		rules = append(rules, r)
 	}
 	if len(route.IPCIDRs) > 0 {
-		rule.IPCIDR = make([]string, len(route.IPCIDRs))
-		copy(rule.IPCIDR, route.IPCIDRs)
+		r := &RouteRule{Outbound: finalTag}
+		r.IPCIDR = make([]string, len(route.IPCIDRs))
+		copy(r.IPCIDR, route.IPCIDRs)
+		rules = append(rules, r)
 	}
-	if len(rule.DomainSuffix) == 0 && len(rule.IPCIDR) == 0 {
-		return nil
-	}
-	return rule
+	return rules
 }

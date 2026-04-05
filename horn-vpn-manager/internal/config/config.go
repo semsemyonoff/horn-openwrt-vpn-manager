@@ -122,6 +122,9 @@ func (c *Config) ValidateSubscriptions() error {
 	var defaultID string
 	var defaultCount int
 	for id, sub := range c.Subscriptions {
+		if sub == nil {
+			return fmt.Errorf("subscription %q is null; remove it or provide a valid config object", id)
+		}
 		if sub.Default {
 			defaultCount++
 			defaultID = id
