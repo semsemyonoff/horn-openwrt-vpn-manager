@@ -298,10 +298,21 @@ ssh root@192.168.1.1 "vpn-manager subscriptions run -v"
 
 После установки `horn-vpn-manager-luci` в меню появится `Services → VPN management`.
 
+Вкладки в порядке отображения:
+
+1. **Subscriptions** — редактирование подписок (`include`, `exclude`, `route.*` и т.д.)
+2. **Routing** — глобальные routing sources (`domains.url`, `subnets.urls`)
+3. **Sing-box template config** — редактирование шаблона sing-box (JSON merging, без плейсхолдеров)
+4. **Additional domains** — ручные домены и IP/CIDR списки
+5. **Sing-box logs** — просмотр логов sing-box
+6. **Test** — delay tests и проверка прокси
+
 Через LuCI можно:
 
-- редактировать `config.json`
-- запускать subscriptions/routing jobs и смотреть live log
+- редактировать `config.json` (subscriptions с полями `include` и `exclude`, routing, singbox settings)
+- экспортировать и импортировать конфиг (кнопки "Export config" / "Import config" на любой вкладке)
+- запускать подписки из вкладки **Run**: выбор `--cached-lists` / `--download-lists`, dry-run режим, live log
+- запускать routing из вкладки **Run**: флаг `--with-subscriptions`, live log
 - смотреть proxies из Clash API
 - переключать manual selector для multi-node подписок
 - запускать delay tests

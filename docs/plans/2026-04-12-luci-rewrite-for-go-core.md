@@ -172,8 +172,8 @@ The new Go core uses JSON merging (no `__PLACEHOLDER__` strings). Update the tem
 
 ### Task 11: Update README.md and CLAUDE.md
 
-- [ ] Update `README.md`: reflect new LuCI tab structure, import/export, `include` field, Run tab with command options
-- [ ] Update `CLAUDE.md`: update LuCI addon section to reflect new tab order, new RPC methods (`run_routing`, `get_routing_log`), removed methods (`run_getdomains`, `get_domains_log`), new UI concepts (Run tab, import/export)
+- [x] Update `README.md`: reflect new LuCI tab structure, import/export, `include` field, Run tab with command options
+- [x] Update `CLAUDE.md`: update LuCI addon section to reflect new tab order, new RPC methods (`run_routing`, `get_routing_log`), removed methods (`run_getdomains`, `get_domains_log`), new UI concepts (Run tab, import/export)
 
 ---
 
