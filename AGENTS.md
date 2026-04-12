@@ -12,7 +12,7 @@ Current state:
 - The CLI supports running subscriptions and routing updates independently.
 - Both pipelines can be placed on separate cron schedules.
 - Runtime dependencies on `jq`, `curl`, `awk`, `sed`, `grep`, `base64`, `md5sum`, and `gzip` have been removed from the core path.
-- `horn-vpn-manager-luci` is not being adapted yet; LuCI compatibility is a later phase.
+- `horn-vpn-manager-luci` has been rewritten to work with the new Go core.
 
 ## Project Structure & Module Organization
 
@@ -52,17 +52,38 @@ Internal package split:
 
 ### `horn-vpn-manager-luci` (LuCI addon)
 
-`horn-vpn-manager-luci` is intentionally out of scope for the current phase. Do not reshape the Go core around LuCI compatibility constraints unless the task explicitly says otherwise.
+`horn-vpn-manager-luci` has been rewritten for the Go core. The rpcd backend and frontend now speak the new `config.json` format.
 
-Current package contents:
+Package contents:
 
 - `horn-vpn-manager-luci/Makefile` — LuCI package definition
-- `horn-vpn-manager-luci/root/usr/libexec/rpcd/horn-vpn-manager` — rpcd backend
+- `horn-vpn-manager-luci/root/usr/libexec/rpcd/horn-vpn-manager` — rpcd backend (reads/writes `config.json`, calls `vpn-manager` binary)
 - `horn-vpn-manager-luci/root/www/luci-static/resources/view/horn-vpn-manager/config.js` — main LuCI view
 - `horn-vpn-manager-luci/root/www/luci-static/resources/horn-vpn-manager/style.css` — frontend styles
-- `horn-vpn-manager-luci/root/usr/share/rpcd/acl.d/horn-vpn-manager.json` — ACL
+- `horn-vpn-manager-luci/root/usr/share/rpcd/acl.d/horn-vpn-manager.json` — ubus ACL
 - `horn-vpn-manager-luci/root/usr/share/luci/menu.d/horn-vpn-manager.json` — menu entry
 - `horn-vpn-manager-luci/po/{en,ru}/horn-vpn-manager.po` — translations
+
+Tab order: Subscriptions → Routing → Sing-box template config → Additional domains → Sing-box logs → Test
+
+UI features:
+- Import/export config buttons available on all tabs
+- Subscription cards include `include` field (same shape as `exclude`)
+- Run tab replaces old Update tab; has independent Subscriptions and Routing sections with per-command flag options and live log polling
+
+rpcd methods (current):
+- `get_config` / `set_config` — reads/writes `config.json` (subscriptions + singbox settings)
+- `get_template` / `set_template` / `reset_template` — manage sing-box template
+- `get_domains_config` / `set_domains_config` — read/write `config.json → routing` section
+- `get_manual_ips` / `set_manual_ips` — manual IP/CIDR list
+- `get_manual_domains` / `set_manual_domains` — manual domain list
+- `run_script` — run `vpn-manager subscriptions run` (supports `--cached-lists`, `--download-lists`, dry-run)
+- `run_routing` — run `vpn-manager routing run` (supports `--with-subscriptions`)
+- `get_log` — read `/tmp/horn-vpn-manager-subscriptions.log`
+- `get_routing_log` — read `/tmp/horn-vpn-manager-routing.log`
+- `get_sb_status`, `set_proxy`, `test_delays`, `test_url`, `get_syslog`, `get_sync_status` — sing-box/proxy helpers
+
+Removed methods (replaced): `run_getdomains`, `get_domains_log`
 
 ## Config Model
 
