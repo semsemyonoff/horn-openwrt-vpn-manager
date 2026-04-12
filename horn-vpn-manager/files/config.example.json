@@ -2,7 +2,7 @@
   "singbox": {
     "log_level": "warn",
     "test_url": "https://www.gstatic.com/generate_204",
-    "template": "/etc/horn-vpn-manager/sing-box.template.json"
+    "template": ""
   },
   "fetch": {
     "retries": 3,

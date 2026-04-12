@@ -20,7 +20,7 @@ sync_sources() {
   fi
 }
 
-# Run defconfig (always re-run after source sync to pick up Makefile changes)
+# Run defconfig
 setup_config() {
   cd "$SDK_DIR"
   echo ">> Running make defconfig..."
@@ -48,20 +48,7 @@ collect_output() {
   fi
 }
 
-case "${1:-all}" in
-  all)
-    sync_sources
-    setup_config
-    build_package horn-vpn-manager
-    build_package horn-vpn-manager-luci
-    collect_output
-    ;;
-  core)
-    sync_sources
-    setup_config
-    build_package horn-vpn-manager
-    collect_output
-    ;;
+case "${1:-luci}" in
   luci)
     sync_sources
     setup_config
@@ -71,11 +58,11 @@ case "${1:-all}" in
   shell)
     sync_sources
     echo ">> SDK shell — packages synced to ${PKG_CORE} and ${PKG_LUCI}"
-    echo ">> Build with: make package/horn-vpn-manager/compile V=s"
+    echo ">> Build with: make package/horn-vpn-manager-luci/compile V=s"
     exec /bin/bash
     ;;
   *)
-    echo "Usage: entrypoint.sh {all|core|luci|shell}"
+    echo "Usage: entrypoint.sh {luci|shell}"
     exit 1
     ;;
 esac

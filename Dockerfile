@@ -1,12 +1,13 @@
-FROM debian:bookworm-slim
+ARG BUILDPLATFORM=linux/amd64
+FROM --platform=${BUILDPLATFORM} debian:bookworm-slim
 
-ARG SDK_BASE_URL=https://downloads.openwrt.org/snapshots/targets/x86/64
+ARG SDK_BASE_URL=https://downloads.openwrt.org/snapshots/targets/mediatek/filogic
 
 # Build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential ca-certificates curl file gawk gettext \
-    git libncurses-dev libssl-dev python3 python3-setuptools \
-    rsync unzip wget xz-utils zstd && \
+    git libncurses-dev libssl-dev python3 python3-dev python3-setuptools \
+    rsync swig unzip wget xz-utils zstd && \
     rm -rf /var/lib/apt/lists/*
 
 # OpenWrt SDK requires a non-root user

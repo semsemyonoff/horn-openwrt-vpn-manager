@@ -1,17 +1,77 @@
-DOCKER_IMAGE ?= horn-vpn-manager-builder
-OUTPUT_DIR   ?= bin
+DOCKER_IMAGE    ?= horn-vpn-manager-builder
+OUTPUT_DIR      ?= bin
+
+# OpenWrt target in target/subtarget format
+TARGET          ?= mediatek/filogic
 
 # OpenWrt release for ipk builds (23.05.5, 24.10.0, etc.)
 OPENWRT_RELEASE ?= 23.05.5
 
-SDK_URL_APK = https://downloads.openwrt.org/snapshots/targets/x86/64
-SDK_URL_IPK = https://downloads.openwrt.org/releases/$(OPENWRT_RELEASE)/targets/x86/64
+# Go cross-compilation settings (auto-detected from TARGET, can be overridden)
+#   arm64 : mediatek/*, rockchip/*, sunxi/*, mvebu/*, ipq807x/*, bcm27xx/bcm2710
+#   mipsle: ramips/*  (softfloat)
+#   mips  : ath79/*   (softfloat)
+#   arm   : ipq40xx/*, bcm27xx/bcm2709  (ARMv7)
+#   amd64 : x86/64
+#   386   : x86/generic
+ifneq ($(filter mediatek/% rockchip/% sunxi/% mvebu/% ipq807x/% bcm27xx/bcm2710,$(TARGET)),)
+  GOARCH ?= arm64
+else ifneq ($(filter ramips/%,$(TARGET)),)
+  GOARCH ?= mipsle
+  GOMIPS ?= softfloat
+else ifneq ($(filter ath79/%,$(TARGET)),)
+  GOARCH ?= mips
+  GOMIPS ?= softfloat
+else ifneq ($(filter ipq40xx/% bcm27xx/bcm2709,$(TARGET)),)
+  GOARCH ?= arm
+  GOARM  ?= 7
+else ifeq ($(TARGET),x86/64)
+  GOARCH ?= amd64
+else ifeq ($(TARGET),x86/generic)
+  GOARCH ?= 386
+else
+  GOARCH ?= arm64
+endif
 
-SHELL_SCRIPTS = \
-	horn-vpn-manager/files/vpn-manager.sh \
-	horn-vpn-manager/files/subs.sh \
-	horn-vpn-manager/files/getdomains.sh \
-	horn-vpn-manager-luci/root/usr/libexec/rpcd/horn-vpn-manager
+GOARM  ?=
+GOMIPS ?=
+
+# OpenWrt package architecture (for .ipk/.apk metadata)
+ifeq ($(GOARCH),arm64)
+  PKG_ARCH ?= aarch64_cortex-a53
+else ifeq ($(GOARCH),amd64)
+  PKG_ARCH ?= x86_64
+else ifeq ($(GOARCH),386)
+  PKG_ARCH ?= i386_pentium4
+else ifeq ($(GOARCH),mipsle)
+  PKG_ARCH ?= mipsel_24kc
+else ifeq ($(GOARCH),mips)
+  PKG_ARCH ?= mips_24kc
+else ifeq ($(GOARCH),arm)
+  PKG_ARCH ?= arm_cortex-a7_neon-vfpv4
+else
+  PKG_ARCH ?= all
+endif
+
+# Platform label for filenames (e.g. linux-arm64, linux-mipsle-softfloat)
+ifeq ($(GOARCH),arm)
+  PKG_PLATFORM ?= linux-armv$(GOARM)
+else ifneq ($(GOMIPS),)
+  PKG_PLATFORM ?= linux-$(GOARCH)-$(GOMIPS)
+else
+  PKG_PLATFORM ?= linux-$(GOARCH)
+endif
+
+PKG_VERSION ?= 2.0.0
+PKG_RELEASE ?= 1
+
+TARGET_TAG       = $(subst /,-,$(TARGET))
+
+SDK_URL_APK = https://downloads.openwrt.org/snapshots/targets/$(TARGET)
+SDK_URL_IPK = https://downloads.openwrt.org/releases/$(OPENWRT_RELEASE)/targets/$(TARGET)
+
+IMAGE_APK = $(DOCKER_IMAGE)-$(TARGET_TAG):apk
+IMAGE_IPK = $(DOCKER_IMAGE)-$(TARGET_TAG):ipk
 
 GO_PKG_DIR = horn-vpn-manager
 GO_BIN     = vpn-manager
@@ -20,69 +80,130 @@ VOLUMES = \
 	-v $(CURDIR)/horn-vpn-manager:/src/horn-vpn-manager:ro \
 	-v $(CURDIR)/horn-vpn-manager-luci:/src/horn-vpn-manager-luci:ro
 
-.PHONY: help docker-apk docker-ipk build build-ipk shell shell-ipk lint clean \
-	go-build go-test go-lint go-fmt
+DOCKER_BUILD = docker build --platform linux/amd64
+
+DOCKER_RUN = docker run --rm --platform linux/amd64 \
+	$(VOLUMES) -v $(CURDIR)/$(OUTPUT_DIR):/out
+
+# All platforms to build: GOARCH,GOARM,GOMIPS,PKG_ARCH,PLATFORM_LABEL
+ALL_PLATFORMS = \
+	arm64,,,aarch64_cortex-a53,linux-arm64 \
+	amd64,,,x86_64,linux-amd64 \
+	mipsle,,softfloat,mipsel_24kc,linux-mipsle-softfloat \
+	mips,,softfloat,mips_24kc,linux-mips-softfloat \
+	arm,7,,arm_cortex-a7_neon-vfpv4,linux-armv7
+
+.PHONY: help build build-core build-ipk-core build-all build-ipk-all \
+	build-luci build-ipk-luci build-ipk \
+	docker-apk docker-ipk shell shell-ipk \
+	lint go-build go-test go-lint go-fmt clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
-		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
+	@echo ""
+	@echo "  TARGET=$(TARGET)  GOARCH=$(GOARCH)  PKG_PLATFORM=$(PKG_PLATFORM)"
+	@echo "  Override: TARGET=ath79/generic make build-core"
 
-# ── Docker images ─────────────────────────────────────────────
+# ── Core package (Go cross-compile + local packaging) ────────
+
+define go-cross-compile
+	@mkdir -p $(OUTPUT_DIR)
+	cd $(GO_PKG_DIR) && GOOS=linux GOARCH=$(GOARCH) GOARM=$(GOARM) GOMIPS=$(GOMIPS) \
+		go build -trimpath -ldflags='-s -w' -o ../$(OUTPUT_DIR)/$(GO_BIN) ./cmd/vpn-manager
+endef
+
+build-core: ## Build horn-vpn-manager .apk (single platform)
+	$(go-cross-compile)
+	PKG_VERSION=$(PKG_VERSION) PKG_RELEASE=$(PKG_RELEASE) PKG_ARCH=$(PKG_ARCH) PKG_PLATFORM=$(PKG_PLATFORM) \
+		./scripts/package-apk.sh $(OUTPUT_DIR)/$(GO_BIN) $(GO_PKG_DIR)/files $(OUTPUT_DIR)
+	@rm -f $(OUTPUT_DIR)/$(GO_BIN)
+
+build-ipk-core: ## Build horn-vpn-manager .ipk (single platform)
+	$(go-cross-compile)
+	PKG_VERSION=$(PKG_VERSION) PKG_RELEASE=$(PKG_RELEASE) PKG_ARCH=$(PKG_ARCH) PKG_PLATFORM=$(PKG_PLATFORM) \
+		./scripts/package-ipk.sh $(OUTPUT_DIR)/$(GO_BIN) $(GO_PKG_DIR)/files $(OUTPUT_DIR)
+	@rm -f $(OUTPUT_DIR)/$(GO_BIN)
+
+# ── Multi-platform core builds ──────────────────────────────
+
+build-all: ## Build horn-vpn-manager .apk for all platforms
+	@mkdir -p $(OUTPUT_DIR)
+	@for plat in $(ALL_PLATFORMS); do \
+		goarch=$$(echo "$$plat" | cut -d, -f1); \
+		goarm=$$(echo "$$plat" | cut -d, -f2); \
+		gomips=$$(echo "$$plat" | cut -d, -f3); \
+		pkgarch=$$(echo "$$plat" | cut -d, -f4); \
+		label=$$(echo "$$plat" | cut -d, -f5); \
+		echo ""; \
+		echo "========== $$label =========="; \
+		(cd $(GO_PKG_DIR) && GOOS=linux GOARCH=$$goarch GOARM=$$goarm GOMIPS=$$gomips \
+			go build -trimpath -ldflags='-s -w' -o ../$(OUTPUT_DIR)/$(GO_BIN) ./cmd/vpn-manager) && \
+		PKG_VERSION=$(PKG_VERSION) PKG_RELEASE=$(PKG_RELEASE) PKG_ARCH=$$pkgarch PKG_PLATFORM=$$label \
+			./scripts/package-apk.sh $(OUTPUT_DIR)/$(GO_BIN) $(GO_PKG_DIR)/files $(OUTPUT_DIR) && \
+		rm -f $(OUTPUT_DIR)/$(GO_BIN) || exit 1; \
+	done
+	@echo ""
+	@echo ">> All platforms built:"
+	@ls -lh $(OUTPUT_DIR)/horn-vpn-manager-*.apk
+
+build-ipk-all: ## Build horn-vpn-manager .ipk for all platforms
+	@mkdir -p $(OUTPUT_DIR)
+	@for plat in $(ALL_PLATFORMS); do \
+		goarch=$$(echo "$$plat" | cut -d, -f1); \
+		goarm=$$(echo "$$plat" | cut -d, -f2); \
+		gomips=$$(echo "$$plat" | cut -d, -f3); \
+		pkgarch=$$(echo "$$plat" | cut -d, -f4); \
+		label=$$(echo "$$plat" | cut -d, -f5); \
+		echo ""; \
+		echo "========== $$label =========="; \
+		(cd $(GO_PKG_DIR) && GOOS=linux GOARCH=$$goarch GOARM=$$goarm GOMIPS=$$gomips \
+			go build -trimpath -ldflags='-s -w' -o ../$(OUTPUT_DIR)/$(GO_BIN) ./cmd/vpn-manager) && \
+		PKG_VERSION=$(PKG_VERSION) PKG_RELEASE=$(PKG_RELEASE) PKG_ARCH=$$pkgarch PKG_PLATFORM=$$label \
+			./scripts/package-ipk.sh $(OUTPUT_DIR)/$(GO_BIN) $(GO_PKG_DIR)/files $(OUTPUT_DIR) && \
+		rm -f $(OUTPUT_DIR)/$(GO_BIN) || exit 1; \
+	done
+	@echo ""
+	@echo ">> All platforms built:"
+	@ls -lh $(OUTPUT_DIR)/horn-vpn-manager_*.ipk
+
+# ── LuCI package (Docker SDK) ───────────────────────────────
 
 docker-apk: ## Build Docker image with OpenWrt SNAPSHOT SDK (apk)
-	docker build --build-arg SDK_BASE_URL=$(SDK_URL_APK) \
-		-t $(DOCKER_IMAGE):apk .
+	$(DOCKER_BUILD) --build-arg SDK_BASE_URL=$(SDK_URL_APK) -t $(IMAGE_APK) .
 
 docker-ipk: ## Build Docker image with OpenWrt release SDK (ipk)
-	docker build --build-arg SDK_BASE_URL=$(SDK_URL_IPK) \
-		-t $(DOCKER_IMAGE):ipk .
+	$(DOCKER_BUILD) --build-arg SDK_BASE_URL=$(SDK_URL_IPK) -t $(IMAGE_IPK) .
 
-# ── Build packages ────────────────────────────────────────────
-
-build: docker-apk ## Build .apk packages (OpenWrt 25 / SNAPSHOT)
+build-luci: docker-apk ## Build horn-vpn-manager-luci .apk (Docker SDK)
 	@mkdir -p $(OUTPUT_DIR)
-	docker run --rm $(VOLUMES) -v $(CURDIR)/$(OUTPUT_DIR):/out \
-		$(DOCKER_IMAGE):apk all
+	$(DOCKER_RUN) $(IMAGE_APK) luci
 
-build-ipk: docker-ipk ## Build .ipk packages (OpenWrt release, OPENWRT_RELEASE=23.05.5)
+build-ipk-luci: docker-ipk ## Build horn-vpn-manager-luci .ipk (Docker SDK)
 	@mkdir -p $(OUTPUT_DIR)
-	docker run --rm $(VOLUMES) -v $(CURDIR)/$(OUTPUT_DIR):/out \
-		$(DOCKER_IMAGE):ipk all
+	$(DOCKER_RUN) $(IMAGE_IPK) luci
+
+# ── Aggregates ───────────────────────────────────────────────
+
+build: build-core build-luci ## Build .apk packages (core + luci)
+
+build-ipk: build-ipk-core build-ipk-luci ## Build .ipk packages (core + luci)
 
 # ── Interactive shell ─────────────────────────────────────────
 
 shell: docker-apk ## Shell inside SNAPSHOT SDK
-	docker run --rm -it $(VOLUMES) $(DOCKER_IMAGE):apk shell
+	docker run --rm -it --platform linux/amd64 $(VOLUMES) $(IMAGE_APK) shell
 
 shell-ipk: docker-ipk ## Shell inside release SDK
-	docker run --rm -it $(VOLUMES) $(DOCKER_IMAGE):ipk shell
+	docker run --rm -it --platform linux/amd64 $(VOLUMES) $(IMAGE_IPK) shell
 
 # ── Lint ──────────────────────────────────────────────────────
 
-lint: go-fmt go-lint ## Run all checks (Go + shell + JSON)
-	@echo ">> Syntax check (sh -n)..."
-	@for f in $(SHELL_SCRIPTS); do sh -n "$$f" && echo "   $$f: ok"; done
-	@echo ">> Shellcheck..."
-	@if command -v shellcheck >/dev/null 2>&1; then \
-		shellcheck -s sh -S warning $(SHELL_SCRIPTS); \
-		echo "   shellcheck: ok"; \
-	else \
-		echo "   shellcheck not found, skipping (install: brew install shellcheck)"; \
-	fi
-	@echo ">> JSON validation..."
-	@for f in \
-		horn-vpn-manager/files/config.template.json \
-		horn-vpn-manager/files/config.example.json \
-		horn-vpn-manager/files/subs.example.json \
-		horn-vpn-manager/files/domains.example.json \
-		horn-vpn-manager-luci/root/usr/share/rpcd/acl.d/horn-vpn-manager.json \
-		horn-vpn-manager-luci/root/usr/share/luci/menu.d/horn-vpn-manager.json; \
-	do jq . "$$f" > /dev/null && echo "   $$f: ok"; done
-	@echo ">> All checks passed"
+lint: go-fmt go-lint ## Run all checks (Go)
 
 # ── Go development ───────────────────────────────────────────
 
-go-build: ## Build vpn-manager binary to bin/
+go-build: ## Build vpn-manager binary to bin/ (native)
 	@mkdir -p $(OUTPUT_DIR)
 	cd $(GO_PKG_DIR) && go build -trimpath -ldflags='-s -w' -o ../$(OUTPUT_DIR)/$(GO_BIN) ./cmd/vpn-manager
 
