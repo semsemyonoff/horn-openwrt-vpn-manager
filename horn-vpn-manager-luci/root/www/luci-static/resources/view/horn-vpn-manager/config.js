@@ -1865,12 +1865,14 @@ return view.extend({
             sub.ip_urls || [],
             "https://raw.githubusercontent.com/.../subnets.lst",
         );
+        var includeW = dynList(sub.include || [], _("keyword"));
         var excludeW = dynList(sub.exclude || [], _("Russia"));
         self._widgets[idx] = {
             domains: domainsW,
             domain_urls: domainUrlsW,
             ip: ipW,
             ip_urls: ipUrlsW,
+            include: includeW,
             exclude: excludeW,
         };
 
@@ -2094,6 +2096,15 @@ return view.extend({
         children.push(ipUrlsRow);
         children.push(
             formRow(
+                _("Include filters"),
+                includeW.node,
+                _(
+                    "Only servers whose names contain at least one of these strings will be used (leave empty to include all)",
+                ),
+            ),
+        );
+        children.push(
+            formRow(
                 _("Exclude filters"),
                 excludeW.node,
                 _(
@@ -2140,6 +2151,7 @@ return view.extend({
                 var domainUrls = w.domain_urls ? w.domain_urls.getValue() : [];
                 var ip = w.ip ? w.ip.getValue() : [];
                 var ipUrls = w.ip_urls ? w.ip_urls.getValue() : [];
+                var include = w.include ? w.include.getValue() : [];
                 var exclude = w.exclude ? w.exclude.getValue() : [];
 
                 var intervalEl = card.querySelector(".vpnsub-sub-interval");
@@ -2154,6 +2166,7 @@ return view.extend({
                 if (domainUrls.length) sub.domain_urls = domainUrls;
                 if (ip.length) sub.ip = ip;
                 if (ipUrls.length) sub.ip_urls = ipUrls;
+                if (include.length) sub.include = include;
                 if (exclude.length) sub.exclude = exclude;
                 if (interval) sub.interval = interval;
                 if (toleranceRaw !== "") {
@@ -2184,11 +2197,14 @@ return view.extend({
     },
 
     _validate: function () {
+        var self = this;
         var valid = true;
 
         Array.prototype.forEach.call(
             document.querySelectorAll(".vpnsub-sub-card"),
             function (card) {
+                var idx = parseInt(card.getAttribute("data-idx"));
+                var w = self._widgets[idx] || {};
                 var nameEl = card.querySelector(".vpnsub-sub-name");
                 var idEl = card.querySelector(".vpnsub-sub-id");
                 var urlEl = card.querySelector(".vpnsub-sub-url");
@@ -2221,6 +2237,22 @@ return view.extend({
                 } else if (!isValidUrl(url)) {
                     setError(urlEl, _("Enter a valid URL (https://...)"));
                     valid = false;
+                }
+
+                // Reject empty-string include/exclude patterns
+                if (w.include) {
+                    var includeVals = w.include.getValue();
+                    if (includeVals.some(function (v) { return v.trim() === ""; })) {
+                        ui.addNotification(null, E("p", _("Include filters cannot contain empty entries")), "warning");
+                        valid = false;
+                    }
+                }
+                if (w.exclude) {
+                    var excludeVals = w.exclude.getValue();
+                    if (excludeVals.some(function (v) { return v.trim() === ""; })) {
+                        ui.addNotification(null, E("p", _("Exclude filters cannot contain empty entries")), "warning");
+                        valid = false;
+                    }
                 }
             },
         );

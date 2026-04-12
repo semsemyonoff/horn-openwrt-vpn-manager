@@ -95,10 +95,10 @@ The backend currently calls old shell scripts. Must call `vpn-manager` binary wi
 
 ### Task 4: Update config.js — subscriptions include field
 
-- [ ] Add `include` dynlist field to `makeSubscriptionCard()` immediately above `exclude` field (same widget structure: label + dynamic list of string inputs)
-- [ ] Update `_collectConfig()` to read `include` values from subscription cards and include in JSON payload
-- [ ] Update rendering path: when loading existing config, populate `include` inputs from subscription data
-- [ ] Update `_validate()` to reject empty-string include patterns (same rule as exclude)
+- [x] Add `include` dynlist field to `makeSubscriptionCard()` immediately above `exclude` field (same widget structure: label + dynamic list of string inputs)
+- [x] Update `_collectConfig()` to read `include` values from subscription cards and include in JSON payload
+- [x] Update rendering path: when loading existing config, populate `include` inputs from subscription data
+- [x] Update `_validate()` to reject empty-string include patterns (same rule as exclude)
 
 ---
 
