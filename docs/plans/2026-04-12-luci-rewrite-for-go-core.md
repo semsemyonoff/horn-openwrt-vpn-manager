@@ -179,12 +179,12 @@ The new Go core uses JSON merging (no `__PLACEHOLDER__` strings). Update the tem
 
 ### Task 12: Final verification
 
-- [ ] Verify all tab names match required order (Subscriptions → Routing → Sing-box template config → Additional domains → Sing-box logs → Test)
-- [ ] Verify `include` field is present in subscription cards
-- [ ] Verify import/export buttons are present on all tabs
-- [ ] Verify Run tab has both sections with correct default checkbox states
-- [ ] Verify rpcd `list` method accurately reflects all exposed methods
-- [ ] Verify ACL covers all methods used by config.js
+- [x] Verify all tab names match required order (Subscriptions → Routing → Sing-box template config → Additional domains → Sing-box logs → Test)
+- [x] Verify `include` field is present in subscription cards
+- [x] Verify import/export buttons are present on all tabs
+- [x] Verify Run tab has both sections with correct default checkbox states
+- [x] Verify rpcd `list` method accurately reflects all exposed methods
+- [x] Verify ACL covers all methods used by config.js
 
 ---
 
