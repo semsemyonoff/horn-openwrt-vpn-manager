@@ -64,7 +64,7 @@ Package contents:
 - `horn-vpn-manager-luci/root/usr/share/luci/menu.d/horn-vpn-manager.json` — menu entry
 - `horn-vpn-manager-luci/po/{en,ru}/horn-vpn-manager.po` — translations
 
-Tab order: Subscriptions → Routing → Sing-box template config → Additional domains → Sing-box logs → Test
+Tab order: Subscriptions → Routing → Sing-box template config → Additional domains → Sing-box logs → Test → Run
 
 UI features:
 - Import/export config buttons available on all tabs
@@ -148,7 +148,7 @@ Design constraints:
 - Main config: `/etc/horn-vpn-manager/config.json`
 - List/cache dir: `/etc/horn-vpn-manager/lists/`
 - Generated `sing-box` config: `/etc/sing-box/config.json`
-- Default template: `/usr/share/horn-vpn-manager/sing-box.template.default.json`
+- Default template: `/usr/share/horn-vpn-manager/sing-box.template.json`
 - Config example: `/usr/share/horn-vpn-manager/config.example.json`
 - Logs: `/tmp/horn-vpn-manager-subscriptions.log`, `/tmp/horn-vpn-manager-routing.log`
 

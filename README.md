@@ -41,7 +41,7 @@ Init script `/etc/init.d/horn-vpn-manager` ждёт доступ в интерн
 | `/etc/horn-vpn-manager/config.json` | основной конфиг |
 | `/etc/horn-vpn-manager/lists/` | кэш domain/subnet lists |
 | `/etc/horn-vpn-manager/lists/manual-ip.lst` | ручной список IP/CIDR |
-| `/usr/share/horn-vpn-manager/sing-box.template.default.json` | шаблон sing-box по умолчанию |
+| `/usr/share/horn-vpn-manager/sing-box.template.json` | шаблон sing-box по умолчанию |
 | `/usr/share/horn-vpn-manager/config.example.json` | пример конфига |
 | `/etc/sing-box/config.json` | сгенерированный sing-box config |
 | `/tmp/horn-vpn-manager-subscriptions.log` | лог subscriptions |
@@ -158,12 +158,12 @@ Init script `/etc/init.d/horn-vpn-manager` ждёт доступ в интерн
 
 ## Шаблон sing-box
 
-Пакет поставляет шаблон по умолчанию `/usr/share/horn-vpn-manager/sing-box.template.default.json`.
+Пакет поставляет шаблон по умолчанию `/usr/share/horn-vpn-manager/sing-box.template.json`.
 
 Скопируйте его и кастомизируйте под себя:
 
 ```sh
-cp /usr/share/horn-vpn-manager/sing-box.template.default.json /etc/horn-vpn-manager/sing-box.template.json
+cp /usr/share/horn-vpn-manager/sing-box.template.json /etc/horn-vpn-manager/sing-box.template.json
 ```
 
 Укажите путь в `config.json` (`singbox.template`).
@@ -259,7 +259,7 @@ ssh root@192.168.1.1 "cp /usr/share/horn-vpn-manager/config.example.json /etc/ho
 Опционально кастомизируйте шаблон sing-box:
 
 ```sh
-ssh root@192.168.1.1 "cp /usr/share/horn-vpn-manager/sing-box.template.default.json /etc/horn-vpn-manager/sing-box.template.json"
+ssh root@192.168.1.1 "cp /usr/share/horn-vpn-manager/sing-box.template.json /etc/horn-vpn-manager/sing-box.template.json"
 ```
 
 ### 4. Проверить без применения
@@ -306,6 +306,7 @@ ssh root@192.168.1.1 "vpn-manager subscriptions run -v"
 4. **Additional domains** — ручные домены и IP/CIDR списки
 5. **Sing-box logs** — просмотр логов sing-box
 6. **Test** — delay tests и проверка прокси
+7. **Run** — запуск подписок и routing с выбором флагов (`--cached-lists`, `--download-lists`, `--with-subscriptions`), dry-run режим, live log
 
 Через LuCI можно:
 
@@ -329,8 +330,8 @@ make shell-ipk
 
 `make lint` выполняет:
 
-- `golangci-lint run` для Go кода
-- `sh -n` / `shellcheck` для shell-скриптов
+- `gofmt` — проверка форматирования Go кода
+- `golangci-lint run` — статический анализ Go кода
 
 Для отладки без роутера используйте `--debug`:
 

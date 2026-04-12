@@ -855,6 +855,7 @@ return view.extend({
         var tagNames = sbData && sbData.tag_names ? sbData.tag_names : {};
 
         self._widgets = {};
+        self._singboxTemplate = (cfg.singbox || {}).template || "";
         var subKeys = Object.keys(cfg.subscriptions || {});
         self._subIdx = subKeys.length;
 
@@ -866,7 +867,7 @@ return view.extend({
         ["trace", "debug", "info", "warn", "error", "fatal", "panic"].forEach(
             function (l) {
                 var o = E("option", { value: l }, l);
-                if (l === (cfg.log_level || "warn")) o.selected = true;
+                if (l === ((cfg.singbox || {}).log_level || "warn")) o.selected = true;
                 logLevelSel.appendChild(o);
             },
         );
@@ -875,18 +876,8 @@ return view.extend({
             type: "text",
             class: "cbi-input-text",
             id: "vpnsub-test-url-setting",
-            value: cfg.test_url || "https://www.gstatic.com/generate_204",
+            value: (cfg.singbox || {}).test_url || "https://www.gstatic.com/generate_204",
             placeholder: "https://www.gstatic.com/generate_204",
-        });
-
-        var globalRetriesInput = E("input", {
-            type: "number",
-            class: "cbi-input-text",
-            id: "vpnsub-retries",
-            value: cfg.retries != null ? String(cfg.retries) : "3",
-            placeholder: "3",
-            min: "0",
-            max: "10",
         });
 
         var globalSection = E("div", { class: "cbi-section" }, [
@@ -900,11 +891,6 @@ return view.extend({
                 _("URL test"),
                 testUrlSettingInput,
                 _("URL used by urltest groups to measure latency"),
-            ),
-            formRow(
-                _("Retries"),
-                globalRetriesInput,
-                _("Number of download retries per subscription on failure"),
             ),
         ]);
 
@@ -1344,18 +1330,18 @@ return view.extend({
         var domainsCfg =
             domainsData && domainsData.config
                 ? domainsData.config
-                : { domains_url: "", subnet_urls: [] };
+                : { domains: {}, subnets: {} };
         var domainsUrlInput = E("input", {
             type: "text",
             class: "cbi-input-text",
             id: "vpnsub-domains-url",
-            value: domainsCfg.domains_url || "",
+            value: (domainsCfg.domains || {}).url || "",
             placeholder:
                 "https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Russia/inside-dnsmasq-nfset.lst",
         });
 
         var subnetW = dynList(
-            domainsCfg.subnet_urls || [],
+            (domainsCfg.subnets || {}).urls || [],
             "https://raw.githubusercontent.com/itdoginfo/allow-domains/refs/heads/main/Subnets/IPv4/telegram.lst",
         );
 
@@ -1884,14 +1870,15 @@ return view.extend({
         var self = this;
         var cardId = "vpnsub-sub-" + idx;
 
-        var domainsW = dynList(sub.domains || [], _("example.com"));
+        var subRoute = sub.route || {};
+        var domainsW = dynList(subRoute.domains || [], _("example.com"));
         var domainUrlsW = dynList(
-            sub.domain_urls || [],
+            subRoute.domain_urls || [],
             "https://raw.githubusercontent.com/.../domains.lst",
         );
-        var ipW = dynList(sub.ip || [], "192.168.0.0/16");
+        var ipW = dynList(subRoute.ip_cidrs || [], "192.168.0.0/16");
         var ipUrlsW = dynList(
-            sub.ip_urls || [],
+            subRoute.ip_urls || [],
             "https://raw.githubusercontent.com/.../subnets.lst",
         );
         var includeW = dynList(sub.include || [], _("keyword"));
@@ -2191,10 +2178,12 @@ return view.extend({
                 var sub = { name: name, url: url };
                 if (isDef) sub.default = true;
                 if (!isEnabled) sub.enabled = false;
-                if (domains.length) sub.domains = domains;
-                if (domainUrls.length) sub.domain_urls = domainUrls;
-                if (ip.length) sub.ip = ip;
-                if (ipUrls.length) sub.ip_urls = ipUrls;
+                var route = {};
+                if (domains.length) route.domains = domains;
+                if (domainUrls.length) route.domain_urls = domainUrls;
+                if (ip.length) route.ip_cidrs = ip;
+                if (ipUrls.length) route.ip_urls = ipUrls;
+                if (Object.keys(route).length) sub.route = route;
                 if (include.length) sub.include = include;
                 if (exclude.length) sub.exclude = exclude;
                 if (interval) sub.interval = interval;
@@ -2212,15 +2201,8 @@ return view.extend({
             },
         );
 
-        var globalRetriesRaw = document
-            .getElementById("vpnsub-retries")
-            .value.trim();
-        var globalRetries =
-            globalRetriesRaw !== "" ? parseInt(globalRetriesRaw, 10) : 3;
         return {
-            log_level: level,
-            test_url: testUrl,
-            retries: globalRetries,
+            singbox: { log_level: level, test_url: testUrl, template: this._singboxTemplate || "" },
             subscriptions: subs,
         };
     },
@@ -2488,7 +2470,7 @@ return view.extend({
         var domainsUrl = urlInput.value.trim();
         var subnetUrls = subnetWidget.getValue();
 
-        var cfg = { domains_url: domainsUrl, subnet_urls: subnetUrls };
+        var cfg = { domains: { url: domainsUrl }, subnets: { urls: subnetUrls } };
 
         if (btn) btn.disabled = true;
         Promise.all([callSetDomainsConfig(cfg)])
