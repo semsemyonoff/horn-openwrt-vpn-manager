@@ -3,11 +3,14 @@ package subscription
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -116,7 +119,7 @@ func extractNodeName(uri string) string {
 // filterExclude returns uris split into kept and excluded slices.
 // An entry is excluded if its node name contains one of the patterns
 // (case-insensitive substring match).
-func filterExclude(uris []string, patterns []string) (kept, excluded []string) {
+func filterExclude(uris, patterns []string) (kept, excluded []string) {
 	if len(patterns) == 0 {
 		return uris, nil
 	}
@@ -147,7 +150,7 @@ func filterExclude(uris []string, patterns []string) (kept, excluded []string) {
 //
 // Validates subscription config constraints before starting. Aborts if the
 // default subscription fails. Logs and skips non-default failures.
-func (r *Runner) Run(ctx context.Context) error {
+func (r *Runner) Run(ctx context.Context) error { //nolint:gocognit,gocyclo // orchestration function, splitting would hurt readability
 	if err := r.Cfg.ValidateSubscriptions(); err != nil {
 		return fmt.Errorf("subscription config invalid: %w", err)
 	}
@@ -229,14 +232,14 @@ func (r *Runner) Run(ctx context.Context) error {
 			}
 		}
 
-		logx.OK("Subscription %s: %s node(s)", id, logx.Bold(fmt.Sprintf("%d", len(uris))))
+		logx.OK("Subscription %s: %s node(s)", id, logx.Bold(strconv.Itoa(len(uris))))
 		for _, uri := range uris {
 			logx.Debug("  %s", uri)
 		}
 
 		if r.DryRun {
-			if err := r.writeDryRunNodes(id, uris); err != nil {
-				logx.Err("Failed to write dry-run output for %s: %v", id, err)
+			if writeErr := r.writeDryRunNodes(id, uris); writeErr != nil {
+				logx.Err("Failed to write dry-run output for %s: %v", id, writeErr)
 			}
 		}
 
@@ -280,19 +283,17 @@ func (r *Runner) Run(ctx context.Context) error {
 		if sub.Default {
 			defaultFinalTag = plan.FinalTag
 		}
-		for k, v := range plan.TagNames {
-			tagNames[k] = v
-		}
+		maps.Copy(tagNames, plan.TagNames)
 		plans = append(plans, plan)
 		processed++
 	}
 
 	if processed == 0 && len(r.Cfg.Subscriptions) > 0 {
-		return fmt.Errorf("no subscriptions were processed successfully")
+		return errors.New("no subscriptions were processed successfully")
 	}
 
 	if defaultFinalTag == "" {
-		return fmt.Errorf("default subscription produced no outbound tag; check that the default subscription has a URL configured")
+		return errors.New("default subscription produced no outbound tag; check that the default subscription has a URL configured")
 	}
 
 	// Render the final sing-box config from the template and all outbound plans.
@@ -364,7 +365,7 @@ func (r *Runner) Run(ctx context.Context) error {
 
 // collectSingboxParts flattens outbound plans into the two slices expected by
 // singbox.RenderConfig: all outbounds (nodes, urltest, selector) and all route rules.
-func collectSingboxParts(plans []*OutboundPlan) (outbounds []any, routeRules []any) {
+func collectSingboxParts(plans []*OutboundPlan) (outbounds, routeRules []any) {
 	for _, plan := range plans {
 		for _, ob := range plan.NodeOutbounds {
 			outbounds = append(outbounds, ob)

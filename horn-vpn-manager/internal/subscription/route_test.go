@@ -149,9 +149,9 @@ func TestBuildRouteRules_JSONShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal domain rule: %v", err)
 	}
-	var dm map[string]interface{}
-	if err := json.Unmarshal(domainData, &dm); err != nil {
-		t.Fatalf("unmarshal domain rule: %v", err)
+	var dm map[string]any
+	if unmarshalErr := json.Unmarshal(domainData, &dm); unmarshalErr != nil {
+		t.Fatalf("unmarshal domain rule: %v", unmarshalErr)
 	}
 	if _, ok := dm["domain_suffix"]; !ok {
 		t.Error("domain rule JSON missing domain_suffix field")
@@ -167,7 +167,7 @@ func TestBuildRouteRules_JSONShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal ip rule: %v", err)
 	}
-	var im map[string]interface{}
+	var im map[string]any
 	if err := json.Unmarshal(ipData, &im); err != nil {
 		t.Fatalf("unmarshal ip rule: %v", err)
 	}

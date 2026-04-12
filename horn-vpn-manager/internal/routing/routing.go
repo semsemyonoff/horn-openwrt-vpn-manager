@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -79,7 +80,7 @@ func (r *Runner) Run(ctx context.Context) error {
 			if err := atomicWrite(r.domainsCachePath(), data); err != nil {
 				return fmt.Errorf("write domains cache: %w", err)
 			}
-			logx.Info("Domain list cached: %s lines -> %s", logx.Bold(fmt.Sprintf("%d", countLines(data))), r.domainsCachePath())
+			logx.Info("Domain list cached: %s lines -> %s", logx.Bold(strconv.Itoa(countLines(data))), r.domainsCachePath())
 			domainsUpdated = true
 		}
 	} else {
@@ -88,7 +89,7 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	// Download subnets
 	if urls := r.Cfg.Routing.Subnets.URLs; len(urls) > 0 {
-		logx.Info("Downloading %s subnet list(s)...", logx.Bold(fmt.Sprintf("%d", len(urls))))
+		logx.Info("Downloading %s subnet list(s)...", logx.Bold(strconv.Itoa(len(urls))))
 		results := fetch.DownloadAll(ctx, urls, opts)
 
 		var allLines []string
@@ -100,7 +101,7 @@ func (r *Runner) Run(ctx context.Context) error {
 			}
 			anySucceeded = true
 			lines := ParseLines(res.Data)
-			logx.Detail("  [%d/%d] %s entries from %s", i+1, len(urls), logx.Bold(fmt.Sprintf("%d", len(lines))), lastPathSegment(res.URL))
+			logx.Detail("  [%d/%d] %s entries from %s", i+1, len(urls), logx.Bold(strconv.Itoa(len(lines))), lastPathSegment(res.URL))
 			allLines = append(allLines, lines...)
 		}
 
@@ -110,7 +111,7 @@ func (r *Runner) Run(ctx context.Context) error {
 			if err := atomicWrite(r.subnetsCachePath(), data); err != nil {
 				return fmt.Errorf("write subnets cache: %w", err)
 			}
-			logx.Info("Subnet cache: %s unique entries -> %s", logx.Bold(fmt.Sprintf("%d", len(deduped))), r.subnetsCachePath())
+			logx.Info("Subnet cache: %s unique entries -> %s", logx.Bold(strconv.Itoa(len(deduped))), r.subnetsCachePath())
 			subnetsUpdated = true
 		} else {
 			logx.Warn("All subnet downloads failed; keeping existing cache")
@@ -135,11 +136,11 @@ func (r *Runner) Run(ctx context.Context) error {
 			path := filepath.Join(r.ListsDir, VPNIPListFile)
 			// Only write and reload the firewall when content actually changed.
 			existing, _ := os.ReadFile(path)
-			if string(existing) != string(data) {
+			if !bytes.Equal(existing, data) {
 				if err := atomicWrite(path, data); err != nil {
 					return fmt.Errorf("write vpn-ip-list: %w", err)
 				}
-				logx.Info("IP list updated: %s entries -> %s", logx.Bold(fmt.Sprintf("%d", len(ipList))), path)
+				logx.Info("IP list updated: %s entries -> %s", logx.Bold(strconv.Itoa(len(ipList))), path)
 				if err := r.Applier.ApplyIPs(path); err != nil {
 					return fmt.Errorf("apply IPs: %w", err)
 				}
@@ -185,7 +186,7 @@ func (r *Runner) Restore() error {
 			if err := atomicWrite(path, data); err != nil {
 				return fmt.Errorf("write vpn-ip-list: %w", err)
 			}
-			logx.Info("IP list updated: %s entries -> %s", logx.Bold(fmt.Sprintf("%d", len(ipList))), path)
+			logx.Info("IP list updated: %s entries -> %s", logx.Bold(strconv.Itoa(len(ipList))), path)
 			if err := r.Applier.ApplyIPs(path); err != nil {
 				logx.Err("Failed to apply IPs: %v", err)
 			} else {

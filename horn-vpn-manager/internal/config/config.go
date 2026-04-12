@@ -3,8 +3,10 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"time"
 )
 
@@ -105,7 +107,7 @@ func (c *Config) validate() error {
 	hasRouting := c.Routing.Domains.URL != "" || len(c.Routing.Subnets.URLs) > 0
 	hasSubs := len(c.Subscriptions) > 0
 	if !hasRouting && !hasSubs {
-		return fmt.Errorf("config must have at least routing (domains.url or subnets.urls) or subscriptions configured")
+		return errors.New("config must have at least routing (domains.url or subnets.urls) or subscriptions configured")
 	}
 	return nil
 }
@@ -118,7 +120,7 @@ func (c *Config) validate() error {
 //   - no subscription may have an empty string in its exclude list
 func (c *Config) ValidateSubscriptions() error {
 	if len(c.Subscriptions) == 0 {
-		return fmt.Errorf("no subscriptions configured")
+		return errors.New("no subscriptions configured")
 	}
 	var defaultID string
 	var defaultCount int
@@ -130,10 +132,8 @@ func (c *Config) ValidateSubscriptions() error {
 			defaultCount++
 			defaultID = id
 		}
-		for _, pat := range sub.Exclude {
-			if pat == "" {
-				return fmt.Errorf("subscription %q has an empty exclude pattern: remove it or provide a non-empty pattern", id)
-			}
+		if slices.Contains(sub.Exclude, "") {
+			return fmt.Errorf("subscription %q has an empty exclude pattern: remove it or provide a non-empty pattern", id)
 		}
 		if sub.Interval != "" {
 			if _, err := time.ParseDuration(sub.Interval); err != nil {
@@ -142,10 +142,10 @@ func (c *Config) ValidateSubscriptions() error {
 		}
 	}
 	if defaultCount == 0 {
-		return fmt.Errorf("no default subscription defined (set \"default\": true on one subscription)")
+		return errors.New("no default subscription defined (set \"default\": true on one subscription)")
 	}
 	if defaultCount > 1 {
-		return fmt.Errorf("multiple default subscriptions defined, only one allowed")
+		return errors.New("multiple default subscriptions defined, only one allowed")
 	}
 	if !c.Subscriptions[defaultID].IsEnabled() {
 		return fmt.Errorf("default subscription %q cannot be disabled", defaultID)

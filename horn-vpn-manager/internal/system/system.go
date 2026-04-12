@@ -71,8 +71,8 @@ func (o *OpenWrt) ApplyDomains(cacheFile, dnsmasqDir string) error {
 	logx.OK("dnsmasq syntax check passed")
 
 	// Copy to dnsmasq drop-in directory
-	if err := os.MkdirAll(dnsmasqDir, 0o755); err != nil {
-		return fmt.Errorf("create dnsmasq dir: %w", err)
+	if mkdirErr := os.MkdirAll(dnsmasqDir, 0o755); mkdirErr != nil {
+		return fmt.Errorf("create dnsmasq dir: %w", mkdirErr)
 	}
 	data, err := os.ReadFile(cacheFile)
 	if err != nil {

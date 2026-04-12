@@ -86,25 +86,25 @@ func TestIntegration_Run_with_route_rules(t *testing.T) {
 	// Route section must contain two separate rules for work-single: one for
 	// domain_suffix and one for ip_cidr. sing-box AND semantics require them
 	// to be separate so traffic matching either condition is routed correctly.
-	routeSection, _ := generated["route"].(map[string]interface{})
+	routeSection, _ := generated["route"].(map[string]any)
 	if routeSection == nil {
 		t.Fatal("expected route section in generated config")
 	}
-	rules, _ := routeSection["rules"].([]interface{})
+	rules, _ := routeSection["rules"].([]any)
 	var workDomainRule, workIPRule bool
 	for _, rule := range rules {
-		ruleMap, ok := rule.(map[string]interface{})
+		ruleMap, ok := rule.(map[string]any)
 		if !ok {
 			continue
 		}
 		if outbound, _ := ruleMap["outbound"].(string); outbound == "work-single" {
-			if ds, _ := ruleMap["domain_suffix"].([]interface{}); len(ds) > 0 {
+			if ds, _ := ruleMap["domain_suffix"].([]any); len(ds) > 0 {
 				workDomainRule = true
 				if _, hasIP := ruleMap["ip_cidr"]; hasIP {
 					t.Error("domain rule must not contain ip_cidr (AND semantics would break matching)")
 				}
 			}
-			if ic, _ := ruleMap["ip_cidr"].([]interface{}); len(ic) > 0 {
+			if ic, _ := ruleMap["ip_cidr"].([]any); len(ic) > 0 {
 				workIPRule = true
 				if _, hasDomain := ruleMap["domain_suffix"]; hasDomain {
 					t.Error("ip rule must not contain domain_suffix (AND semantics would break matching)")
@@ -249,11 +249,11 @@ func TestIntegration_RoutingAndSubscriptions_coexist(t *testing.T) {
 }
 
 // collectOutboundTags returns a set of outbound tags from a parsed sing-box config.
-func collectOutboundTags(cfg map[string]interface{}) map[string]bool {
+func collectOutboundTags(cfg map[string]any) map[string]bool {
 	tags := make(map[string]bool)
-	outbounds, _ := cfg["outbounds"].([]interface{})
+	outbounds, _ := cfg["outbounds"].([]any)
 	for _, ob := range outbounds {
-		if m, ok := ob.(map[string]interface{}); ok {
+		if m, ok := ob.(map[string]any); ok {
 			if tag, ok := m["tag"].(string); ok {
 				tags[tag] = true
 			}
@@ -263,13 +263,13 @@ func collectOutboundTags(cfg map[string]interface{}) map[string]bool {
 }
 
 // readConfig reads and parses a JSON config file, failing the test on error.
-func readConfig(t *testing.T, path string) map[string]interface{} {
+func readConfig(t *testing.T, path string) map[string]any {
 	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
-	var m map[string]interface{}
+	var m map[string]any
 	if err := json.Unmarshal(data, &m); err != nil {
 		t.Fatalf("parse %s: %v", path, err)
 	}

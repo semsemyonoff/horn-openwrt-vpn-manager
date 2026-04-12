@@ -3,6 +3,8 @@ package vless
 
 import (
 	"crypto/md5"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -42,7 +44,7 @@ type Node struct {
 // The URI must start with "vless://".
 func Parse(rawURI string) (*Node, error) {
 	if !strings.HasPrefix(rawURI, "vless://") {
-		return nil, fmt.Errorf("not a vless URI")
+		return nil, errors.New("not a vless URI")
 	}
 
 	u, err := url.Parse(rawURI)
@@ -51,21 +53,21 @@ func Parse(rawURI string) (*Node, error) {
 	}
 
 	if u.User == nil {
-		return nil, fmt.Errorf("missing UUID in VLESS URI")
+		return nil, errors.New("missing UUID in VLESS URI")
 	}
 	uuid := u.User.Username()
 	if uuid == "" {
-		return nil, fmt.Errorf("empty UUID in VLESS URI")
+		return nil, errors.New("empty UUID in VLESS URI")
 	}
 
 	server := u.Hostname()
 	if server == "" {
-		return nil, fmt.Errorf("missing server in VLESS URI")
+		return nil, errors.New("missing server in VLESS URI")
 	}
 
 	portStr := u.Port()
 	if portStr == "" {
-		return nil, fmt.Errorf("missing port in VLESS URI")
+		return nil, errors.New("missing port in VLESS URI")
 	}
 	port, err := strconv.Atoi(portStr)
 	if err != nil || port <= 0 || port > 65535 {
@@ -77,7 +79,7 @@ func Parse(rawURI string) (*Node, error) {
 	alpnRaw := q.Get("alpn")
 	var alpn []string
 	if alpnRaw != "" {
-		for _, a := range strings.Split(alpnRaw, ",") {
+		for a := range strings.SplitSeq(alpnRaw, ",") {
 			if a = strings.TrimSpace(a); a != "" {
 				alpn = append(alpn, a)
 			}
@@ -127,5 +129,5 @@ func StableHash(n *Node) string {
 		n.TransportType, n.Path, n.Host, n.ServiceName,
 	)
 	sum := md5.Sum([]byte(input))
-	return fmt.Sprintf("%x", sum)[:8]
+	return hex.EncodeToString(sum[:])[:8]
 }

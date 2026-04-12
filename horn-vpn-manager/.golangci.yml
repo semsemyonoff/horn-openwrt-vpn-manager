@@ -1,0 +1,105 @@
+version: "2"
+
+linters:
+  default: all
+  disable:
+    # Too noisy / not useful for this project
+    - depguard        # no dependency policy needed
+    - exhaustruct     # not all struct fields need explicit init
+    - ireturn         # returning interfaces is fine
+    - nlreturn        # blank line style is subjective
+    - varnamelen      # short names are idiomatic Go
+    - wsl             # whitespace style is subjective
+    - wsl_v5          # whitespace style is subjective (v2)
+    - godox           # TODO/FIXME comments are acceptable
+    - funlen          # function length is managed by review
+    - cyclop          # cyclomatic complexity — gocognit is enough
+    - maintidx        # maintainability index — too noisy
+    - lll             # line length — editor handles this
+    - wrapcheck       # wrapping every error is excessive for internal code
+    - testpackage     # white-box tests (_test in same package) are fine
+    - paralleltest    # not all tests benefit from t.Parallel
+    - tparallel       # same as above
+    - exhaustive      # not every switch needs all cases
+    - mnd             # magic numbers are fine in tests and configs
+    - tagliatelle     # json tag style is project-specific
+    - nonamedreturns  # named returns are acceptable when clear
+    - interfacebloat  # interfaces are kept small by design
+    - gochecknoglobals # some globals (version, defaults) are fine
+    - forcetypeassert # type assertions are used carefully
+    - noinlineerr    # inline if err := ...; is idiomatic Go
+    - recvcheck      # mixed receiver types are acceptable here
+    - contextcheck   # debug helpers intentionally skip context
+    - dogsled        # multiple blanks in runtime.Caller are fine
+    - nestif         # nesting complexity is covered by gocognit
+    - noctx          # CommandRunner interface deliberately omits context
+    - forbidigo      # fmt.Print is fine for CLI help output
+    - funcorder      # method ordering is managed by review
+    - goprintffuncname # logx functions use short names intentionally
+
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment  # struct field reordering is too disruptive
+    errcheck:
+      check-type-assertions: false
+      check-blank: false
+    gocognit:
+      min-complexity: 45
+    nestif:
+      min-complexity: 6
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+        - opinionated
+    perfsprint:
+      strconcat: false
+    revive:
+      rules:
+        - name: unexported-return
+          disabled: true
+
+  exclusions:
+    presets:
+      - std-error-handling
+    rules:
+      - linters: [goerr113, err113]
+        text: "do not define dynamic errors"
+      - linters: [dupl]
+        path: "_test\\.go"
+      - linters: [gosec]
+        path: "_test\\.go"
+      - linters: [goconst]
+        path: "_test\\.go"
+      - linters: [revive]
+        text: "unused-parameter"
+        path: "_test\\.go"
+      - linters: [errcheck]
+        path: "_test\\.go"
+      # OpenWrt dirs need 0755; file paths come from trusted config
+      - linters: [gosec]
+        text: "G301|G304|G306|G703"
+      # md5 is used for stable node hashing, not security
+      - linters: [gosec]
+        text: "G401|G501"
+      # exec.Command args come from trusted config/init
+      - linters: [gosec]
+        text: "G204"
+      - linters: [goconst]
+        path: "cmd/"
+      - linters: [gocognit]
+        path: "_test\\.go"
+      - linters: [perfsprint]
+        path: "_test\\.go"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

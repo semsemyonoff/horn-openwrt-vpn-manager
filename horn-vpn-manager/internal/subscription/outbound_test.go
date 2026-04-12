@@ -254,7 +254,7 @@ func TestBuildOutbounds_WSTransport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal transport: %v", err)
 	}
-	var m map[string]interface{}
+	var m map[string]any
 	if err := json.Unmarshal(data, &m); err != nil {
 		t.Fatalf("unmarshal transport: %v", err)
 	}
@@ -264,7 +264,7 @@ func TestBuildOutbounds_WSTransport(t *testing.T) {
 	if m["path"] != "/ws" {
 		t.Errorf("transport path: got %v want /ws", m["path"])
 	}
-	headers, ok := m["headers"].(map[string]interface{})
+	headers, ok := m["headers"].(map[string]any)
 	if !ok {
 		t.Fatal("transport headers should be a JSON object")
 	}
@@ -289,7 +289,7 @@ func TestBuildOutbounds_GRPCTransport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal transport: %v", err)
 	}
-	var m map[string]interface{}
+	var m map[string]any
 	_ = json.Unmarshal(data, &m)
 	if m["type"] != "grpc" {
 		t.Errorf("transport type: got %v want grpc", m["type"])
@@ -342,7 +342,7 @@ func TestBuildOutbounds_JSONMarshal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal outbound: %v", err)
 	}
-	var m map[string]interface{}
+	var m map[string]any
 	if err := json.Unmarshal(data, &m); err != nil {
 		t.Fatalf("unmarshal outbound: %v", err)
 	}

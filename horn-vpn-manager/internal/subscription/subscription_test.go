@@ -40,8 +40,6 @@ func newTestServer(t *testing.T, body string, status int) *httptest.Server {
 	}))
 }
 
-func boolPtr(b bool) *bool { return &b }
-
 func TestRunner_Run_raw_debug(t *testing.T) {
 	srv := newTestServer(t, rawPayload, http.StatusOK)
 	defer srv.Close()
@@ -76,7 +74,7 @@ func TestRunner_Run_raw_debug(t *testing.T) {
 		t.Fatalf("nodes file not written: %v", err)
 	}
 	content := string(data)
-	if len(content) == 0 {
+	if content == "" {
 		t.Error("nodes file is empty")
 	}
 	// Should contain both node URIs
@@ -97,7 +95,7 @@ func TestRunner_Run_disabled_subscription_skipped(t *testing.T) {
 			// default enabled subscription (required for validation)
 			"main": {Name: "Main", URL: srv.URL, Default: true},
 			// non-default disabled subscription
-			"disabled": {Name: "Disabled", URL: srv.URL, Enabled: boolPtr(false)},
+			"disabled": {Name: "Disabled", URL: srv.URL, Enabled: new(bool)},
 		},
 	}
 
@@ -357,16 +355,16 @@ func TestRunner_Run_config_written_to_outdir(t *testing.T) {
 	}
 
 	// Should be valid JSON
-	var cfg2 map[string]interface{}
+	var cfg2 map[string]any
 	if err := json.Unmarshal(data, &cfg2); err != nil {
 		t.Fatalf("config.json is not valid JSON: %v", err)
 	}
 
 	// Should contain the outbound tag
-	outbounds, _ := cfg2["outbounds"].([]interface{})
+	outbounds, _ := cfg2["outbounds"].([]any)
 	found := false
 	for _, ob := range outbounds {
-		if m, ok := ob.(map[string]interface{}); ok {
+		if m, ok := ob.(map[string]any); ok {
 			if tag, _ := m["tag"].(string); strings.HasPrefix(tag, "main-") {
 				found = true
 				break

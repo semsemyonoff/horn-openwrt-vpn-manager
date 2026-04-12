@@ -85,7 +85,7 @@ func (l *Logger) c(code, text string) string {
 	return code + text + cReset
 }
 
-// Header prints a prominent section header: === text ===
+// Header prints a prominent section header: === text ===.
 func Header(text string) {
 	std.printf("%s %s", std.c(cBold+cGreen, fmt.Sprintf("[%s]", timestamp())), std.c(cBold, fmt.Sprintf("=== %s ===", text)))
 }

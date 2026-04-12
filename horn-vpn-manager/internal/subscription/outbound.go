@@ -12,6 +12,7 @@ const (
 	defaultInterval  = "5m"
 	defaultTolerance = 100
 	packetEncoding   = "xudp"
+	transportHTTP    = "http"
 )
 
 // OutboundPlan holds the sing-box outbound configuration generated for a single
@@ -107,7 +108,7 @@ type OutboundTransport struct {
 
 // MarshalJSON emits transport JSON in the shape sing-box expects per transport type.
 func (t *OutboundTransport) MarshalJSON() ([]byte, error) {
-	m := map[string]interface{}{"type": t.Type}
+	m := map[string]any{"type": t.Type}
 	switch t.Type {
 	case "ws":
 		if t.WSPath != "" {
@@ -116,7 +117,7 @@ func (t *OutboundTransport) MarshalJSON() ([]byte, error) {
 		if len(t.WSHeaders) > 0 {
 			m["headers"] = t.WSHeaders
 		}
-	case "http":
+	case transportHTTP:
 		if len(t.HTTPHosts) > 0 {
 			m["host"] = t.HTTPHosts
 		}
@@ -300,12 +301,12 @@ func nodeToOutbound(n *vless.Node, tag string) *VLESSOutbound {
 func buildTransport(n *vless.Node) *OutboundTransport {
 	// Determine effective transport type, matching legacy shell logic.
 	effType := n.TransportType
-	if n.TransportType == "tcp" && n.HeaderType == "http" {
-		effType = "http"
+	if n.TransportType == "tcp" && n.HeaderType == transportHTTP {
+		effType = transportHTTP
 	}
 	// h2 is an alias for http transport.
 	if n.TransportType == "h2" {
-		effType = "http"
+		effType = transportHTTP
 	}
 
 	switch effType {
@@ -315,8 +316,8 @@ func buildTransport(n *vless.Node) *OutboundTransport {
 			t.WSHeaders = map[string]string{"Host": n.Host}
 		}
 		return t
-	case "http":
-		t := &OutboundTransport{Type: "http", HTTPPath: n.Path}
+	case transportHTTP:
+		t := &OutboundTransport{Type: transportHTTP, HTTPPath: n.Path}
 		if n.Host != "" {
 			t.HTTPHosts = []string{n.Host}
 		}

@@ -6,7 +6,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/base64"
-	"fmt"
+	"errors"
 	"io"
 	"strings"
 
@@ -50,7 +50,7 @@ func (f Format) String() string {
 // Returns an error if the payload cannot be decoded into any known format.
 func DecodePayload(data []byte) ([]string, error) {
 	if len(data) == 0 {
-		return nil, fmt.Errorf("empty subscription payload")
+		return nil, errors.New("empty subscription payload")
 	}
 
 	if uris, format := tryRaw(data); format == FormatRaw {
@@ -69,7 +69,7 @@ func DecodePayload(data []byte) ([]string, error) {
 		return uris, nil
 	}
 
-	return nil, fmt.Errorf("unrecognized subscription payload: no vless:// lines found and no supported encoding detected")
+	return nil, errors.New("unrecognized subscription payload: no vless:// lines found and no supported encoding detected")
 }
 
 // tryRaw attempts to extract vless:// URIs from raw (unencoded) payload data.

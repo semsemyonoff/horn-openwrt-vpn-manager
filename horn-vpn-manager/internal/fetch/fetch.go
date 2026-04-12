@@ -32,7 +32,7 @@ func Download(ctx context.Context, url string, opts Options) ([]byte, error) {
 	for attempt := 1; attempt <= opts.Retries; attempt++ {
 		logx.Trace("fetch %s (attempt %d/%d)", url, attempt, opts.Retries)
 
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 		if err != nil {
 			return nil, fmt.Errorf("create request: %w", err)
 		}
@@ -101,15 +101,13 @@ func DownloadAll(ctx context.Context, urls []string, opts Options) []Result {
 	close(work)
 
 	var wg sync.WaitGroup
-	for w := 0; w < parallelism; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range parallelism {
+		wg.Go(func() {
 			for item := range work {
 				data, err := Download(ctx, item.url, opts)
 				results[item.idx] = Result{URL: item.url, Data: data, Err: err}
 			}
-		}()
+		})
 	}
 
 	wg.Wait()

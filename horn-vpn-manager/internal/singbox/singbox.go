@@ -4,6 +4,7 @@ package singbox
 import (
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 )
@@ -96,7 +97,7 @@ func RenderConfig(
 			return nil, fmt.Errorf("parse template route: %w", err)
 		}
 		if routeMap == nil {
-			return nil, fmt.Errorf("parse template route: unexpected null value")
+			return nil, errors.New("parse template route: unexpected null value")
 		}
 	}
 

@@ -32,8 +32,8 @@ func FetchRouteEntries(ctx context.Context, subID string, route *config.Subscrip
 	merged := &config.SubscriptionRoute{}
 
 	// Domains: manual entries first, then downloaded (manual wins in dedup).
-	domains := make([]string, len(route.Domains))
-	copy(domains, route.Domains)
+	domains := make([]string, 0, len(route.Domains))
+	domains = append(domains, route.Domains...)
 
 	if len(route.DomainURLs) > 0 {
 		logx.Info("Subscription %s: downloading %d domain list URL(s)...", subID, len(route.DomainURLs))
@@ -45,8 +45,8 @@ func FetchRouteEntries(ctx context.Context, subID string, route *config.Subscrip
 	merged.Domains = routing.Dedup(domains)
 
 	// IP/CIDRs: manual entries first, then downloaded (manual wins in dedup).
-	cidrs := make([]string, len(route.IPCIDRs))
-	copy(cidrs, route.IPCIDRs)
+	cidrs := make([]string, 0, len(route.IPCIDRs))
+	cidrs = append(cidrs, route.IPCIDRs...)
 
 	if len(route.IPURLs) > 0 {
 		logx.Info("Subscription %s: downloading %d IP list URL(s)...", subID, len(route.IPURLs))
@@ -150,8 +150,7 @@ func IsValidDomain(s string) bool {
 	if s == "" {
 		return false
 	}
-	labels := strings.Split(s, ".")
-	for _, label := range labels {
+	for label := range strings.SplitSeq(s, ".") {
 		if !isValidDomainLabel(label) {
 			return false
 		}
