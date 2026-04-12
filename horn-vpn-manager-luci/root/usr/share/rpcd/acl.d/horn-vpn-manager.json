@@ -11,7 +11,7 @@
           "get_template",
           "get_domains_config",
           "get_manual_ips",
-          "get_domains_log",
+          "get_routing_log",
           "get_manual_domains",
           "get_sync_status"
         ]
@@ -29,7 +29,7 @@
           "reset_template",
           "set_domains_config",
           "set_manual_ips",
-          "run_getdomains",
+          "run_routing",
           "set_manual_domains"
         ]
       }

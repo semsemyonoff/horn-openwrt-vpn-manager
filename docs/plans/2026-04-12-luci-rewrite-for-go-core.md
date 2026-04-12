@@ -87,9 +87,9 @@ The backend currently calls old shell scripts. Must call `vpn-manager` binary wi
 
 ### Task 3: Update ACL
 
-- [ ] Add `run_routing`, `get_routing_log` to write/read groups in `acl.d/horn-vpn-manager.json`
-- [ ] Remove `run_getdomains`, `get_domains_log` entries (replaced)
-- [ ] Verify all remaining method names match updated rpcd backend
+- [x] Add `run_routing`, `get_routing_log` to write/read groups in `acl.d/horn-vpn-manager.json`
+- [x] Remove `run_getdomains`, `get_domains_log` entries (replaced)
+- [x] Verify all remaining method names match updated rpcd backend
 
 ---
 
