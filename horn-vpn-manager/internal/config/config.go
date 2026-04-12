@@ -82,8 +82,10 @@ func Load(path string) (*Config, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
+	// Capture whether manual_file was explicitly set before applyDefaults fills it in.
+	hasExplicitManualFile := cfg.Routing.Subnets.ManualFile != ""
 	cfg.applyDefaults()
-	if err := cfg.validate(); err != nil {
+	if err := cfg.validate(hasExplicitManualFile); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 	return &cfg, nil
@@ -104,11 +106,11 @@ func (c *Config) applyDefaults() {
 	}
 }
 
-func (c *Config) validate() error {
-	hasRouting := c.Routing.Domains.URL != "" || len(c.Routing.Subnets.URLs) > 0
+func (c *Config) validate(hasExplicitManualFile bool) error {
+	hasRouting := c.Routing.Domains.URL != "" || len(c.Routing.Subnets.URLs) > 0 || hasExplicitManualFile
 	hasSubs := len(c.Subscriptions) > 0
 	if !hasRouting && !hasSubs {
-		return errors.New("config must have at least routing (domains.url or subnets.urls) or subscriptions configured")
+		return errors.New("config must have at least routing (domains.url, subnets.urls, or subnets.manual_file) or subscriptions configured")
 	}
 	return nil
 }

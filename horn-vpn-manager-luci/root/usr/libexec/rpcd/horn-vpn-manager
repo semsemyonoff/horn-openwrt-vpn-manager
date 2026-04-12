@@ -11,13 +11,14 @@ PID_FILE="/tmp/horn-vpn-manager.pid"
 ROUTING_LOG="/tmp/horn-vpn-manager-routing.log"
 ROUTING_PID="/tmp/horn-vpn-manager-routing.pid"
 
-UNSYNC_FLAG="${CONF_DIR}/.needs-update"
+UNSYNC_SUBS_FLAG="${CONF_DIR}/.needs-update-subs"
+UNSYNC_ROUTING_FLAG="${CONF_DIR}/.needs-update-routing"
 
 MANUAL_IPS_DEFAULT="${CONF_DIR}/lists/manual-ip.lst"
 
 case "$1" in
     list)
-        echo '{"get_config":{},"set_config":{"config":"Object"},"run_script":{"dry_run":"Boolean","cached_lists":"Boolean","download_lists":"Boolean"},"get_log":{},"get_syslog":{"lines":"Number"},"test_url":{"url":"String"},"get_sb_status":{},"set_proxy":{"proxy":"String","selected":"String"},"test_delays":{"tags":"Array","url":"String"},"get_template":{},"set_template":{"template":"String"},"reset_template":{},"get_domains_config":{},"set_domains_config":{"config":"Object"},"get_manual_ips":{},"set_manual_ips":{"ips":"String"},"run_routing":{"with_subscriptions":"Boolean"},"get_routing_log":{},"get_manual_domains":{},"set_manual_domains":{"domains":"Array"},"get_sync_status":{}}'
+        echo '{"get_config":{},"set_config":{"config":"Object"},"set_full_config":{"config":"Object","template_contents":"String"},"run_script":{"dry_run":"Boolean","cached_lists":"Boolean","download_lists":"Boolean"},"get_log":{},"get_syslog":{"lines":"Number"},"test_url":{"url":"String"},"get_sb_status":{},"set_proxy":{"proxy":"String","selected":"String"},"test_delays":{"tags":"Array","url":"String"},"get_template":{},"set_template":{"template":"String"},"reset_template":{},"get_domains_config":{},"set_domains_config":{"config":"Object"},"get_manual_ips":{},"set_manual_ips":{"ips":"String"},"run_routing":{"with_subscriptions":"Boolean"},"get_routing_log":{},"get_manual_domains":{},"set_manual_domains":{"domains":"Array"},"get_sync_status":{}}'
         ;;
     call)
         case "$2" in
@@ -26,6 +27,7 @@ case "$1" in
                     # Return singbox settings and the full subscriptions keyed object
                     result=$(jq '{
                         singbox: (.singbox // {}),
+                        fetch: (.fetch // {}),
                         subscriptions: (.subscriptions // {})
                     }' "$CONFIG_FILE" 2>/dev/null)
                     if [ -n "$result" ]; then
@@ -34,7 +36,7 @@ case "$1" in
                         printf '{"error":"Failed to parse config.json"}'
                     fi
                 else
-                    printf '{"config":{"singbox":{"log_level":"warn","test_url":"https://www.gstatic.com/generate_204","template":""},"subscriptions":{}}}'
+                    printf '{"config":{"singbox":{"log_level":"warn","test_url":"https://www.gstatic.com/generate_204","template":""},"fetch":{},"subscriptions":{}}}'
                 fi
                 ;;
 
@@ -45,6 +47,13 @@ case "$1" in
                     exit 0
                 fi
                 new_config=$(echo "$input" | jq '.config')
+
+                # Validate: subscriptions must be an object, not an array
+                sub_type=$(echo "$new_config" | jq -r '(.subscriptions) | type')
+                if [ "$sub_type" != "object" ]; then
+                    printf '{"error":"subscriptions must be a keyed object, not an array"}'
+                    exit 0
+                fi
 
                 # Validate: subscriptions must be a non-empty object
                 sub_count=$(echo "$new_config" | jq '(.subscriptions // {}) | length')
@@ -71,7 +80,7 @@ case "$1" in
                     exit 0
                 fi
 
-                # Merge: preserve existing fetch and routing sections; replace singbox and subscriptions
+                # Merge: preserve existing routing section; replace singbox, fetch (if provided), and subscriptions
                 if [ -f "$CONFIG_FILE" ]; then
                     existing=$(cat "$CONFIG_FILE")
                 else
@@ -85,6 +94,7 @@ case "$1" in
                     ($ex.singbox // {}) as $esb |
                     $ex + {
                         singbox: ($esb + $isb + {template: (if (($isb.template // "") != "") then $isb.template else ($esb.template // "") end)}),
+                        fetch: (if ($inp | has("fetch")) then ($inp.fetch // {}) else ($ex.fetch // {}) end),
                         subscriptions: ($inp.subscriptions // {})
                     }')
                 if [ -z "$merged" ]; then
@@ -93,7 +103,122 @@ case "$1" in
                 fi
                 mkdir -p "$CONF_DIR"
                 printf '%s\n' "$merged" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
-                touch "$UNSYNC_FLAG"
+                touch "$UNSYNC_SUBS_FLAG"
+                printf '{"result":"ok"}'
+                ;;
+
+            set_full_config)
+                read -r input
+                if ! echo "$input" | jq -e '.config' > /dev/null 2>&1; then
+                    printf '{"error":"Invalid config JSON"}'
+                    exit 0
+                fi
+                new_config=$(echo "$input" | jq '.config')
+
+                # Validate template contents before any writes
+                tmpl_contents=$(echo "$input" | jq -r '.template_contents // ""')
+                if [ -n "$tmpl_contents" ]; then
+                    if ! echo "$tmpl_contents" | jq -e '.' > /dev/null 2>&1; then
+                        printf '{"error":"Invalid template JSON"}'
+                        exit 0
+                    fi
+                fi
+
+                # Validate: subscriptions must be an object, not an array
+                sub_type=$(echo "$new_config" | jq -r '(.subscriptions) | type')
+                if [ "$sub_type" != "object" ]; then
+                    printf '{"error":"subscriptions must be a keyed object, not an array"}'
+                    exit 0
+                fi
+
+                # Validate: subscriptions must be a non-empty object
+                sub_count=$(echo "$new_config" | jq '(.subscriptions // {}) | length')
+                if [ "$sub_count" -eq 0 ]; then
+                    printf '{"error":"At least one subscription is required"}'
+                    exit 0
+                fi
+
+                # Validate: exactly one default subscription
+                def_count=$(echo "$new_config" | jq '[(.subscriptions // {})[] | select(.default == true)] | length')
+                if [ "$def_count" -eq 0 ]; then
+                    printf '{"error":"At least one enabled default subscription is required"}'
+                    exit 0
+                fi
+                if [ "$def_count" -gt 1 ]; then
+                    printf '{"error":"Only one default subscription is allowed"}'
+                    exit 0
+                fi
+
+                # Validate: default subscription must not be disabled
+                def_disabled=$(echo "$new_config" | jq '[(.subscriptions // {})[] | select(.default == true and .enabled == false)] | length')
+                if [ "$def_disabled" -gt 0 ]; then
+                    printf '{"error":"Default subscription cannot be disabled"}'
+                    exit 0
+                fi
+
+                # Validate: all subscriptions must have non-empty string name and url
+                invalid_fields=$(echo "$new_config" | jq '[(.subscriptions // {}) | to_entries[] | select((.value.name | type) != "string" or (.value.url | type) != "string" or (.value.name // "") == "" or (.value.url // "") == "")] | length')
+                if [ "$invalid_fields" -gt 0 ]; then
+                    printf '{"error":"All subscriptions must have a non-empty string name and url"}'
+                    exit 0
+                fi
+
+                # Validate: include and exclude must be arrays of strings if present
+                invalid_filter_type=$(echo "$new_config" | jq '[(.subscriptions // {})[] | select((.include != null and (.include | type) != "array") or (.exclude != null and (.exclude | type) != "array"))] | length')
+                if [ "$invalid_filter_type" -gt 0 ]; then
+                    printf '{"error":"Include and exclude filters must be arrays"}'
+                    exit 0
+                fi
+
+                # Validate: include and exclude filter entries must be non-empty strings
+                invalid_filter_entries=$(echo "$new_config" | jq '[(.subscriptions // {})[] | ((.include // []) + (.exclude // []))[] | select(type != "string" or . == "")] | length')
+                if [ "$invalid_filter_entries" -gt 0 ]; then
+                    printf '{"error":"Include and exclude filter entries must be non-empty strings"}'
+                    exit 0
+                fi
+
+                # All validation passed — apply template path update to config before merge
+                if [ -n "$tmpl_contents" ]; then
+                    new_config=$(echo "$new_config" | jq --arg p "$CUSTOM_TEMPLATE" '.singbox.template = $p')
+                fi
+
+                # Build merged config
+                if [ -f "$CONFIG_FILE" ]; then
+                    existing=$(cat "$CONFIG_FILE")
+                else
+                    existing='{"singbox":{},"fetch":{},"routing":{},"subscriptions":{}}'
+                fi
+                merged=$(jq -n \
+                    --argjson ex "$existing" \
+                    --argjson inp "$new_config" \
+                    '
+                    ($inp.singbox // {}) as $isb |
+                    ($ex.singbox // {}) as $esb |
+                    {
+                        singbox: ($esb + $isb + {template: ($isb.template // "")}),
+                        fetch: (if ($inp | has("fetch")) then ($inp.fetch // {}) else ($ex.fetch // {}) end),
+                        routing: (if ($inp | has("routing")) then ($inp.routing // {}) else ($ex.routing // {}) end),
+                        subscriptions: ($inp.subscriptions // {})
+                    }')
+                if [ -z "$merged" ]; then
+                    printf '{"error":"Failed to merge config"}'
+                    exit 0
+                fi
+
+                # Write template first (only after all validation passed)
+                mkdir -p "$CONF_DIR"
+                if [ -n "$tmpl_contents" ]; then
+                    if ! { printf '%s' "$tmpl_contents" > "${CUSTOM_TEMPLATE}.tmp" && mv "${CUSTOM_TEMPLATE}.tmp" "$CUSTOM_TEMPLATE"; }; then
+                        printf '{"error":"Failed to write template file"}'
+                        exit 0
+                    fi
+                fi
+                if ! { printf '%s\n' "$merged" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"; }; then
+                    printf '{"error":"Failed to write config file"}'
+                    exit 0
+                fi
+                touch "$UNSYNC_SUBS_FLAG"
+                touch "$UNSYNC_ROUTING_FLAG"
                 printf '{"result":"ok"}'
                 ;;
 
@@ -122,7 +247,11 @@ case "$1" in
                 # Truncate log so the frontend sees only the current run
                 : > "$LOG_FILE"
                 # shellcheck disable=SC2086
-                (vpn-manager $args >> "$LOG_FILE" 2>&1; [ $? -eq 0 ] && rm -f "$UNSYNC_FLAG") &
+                if [ "$dry_run" = "true" ]; then
+                    (vpn-manager $args >> "$LOG_FILE" 2>&1) &
+                else
+                    (vpn-manager $args >> "$LOG_FILE" 2>&1; [ $? -eq 0 ] && rm -f "$UNSYNC_SUBS_FLAG") &
+                fi
                 echo $! > "$PID_FILE"
                 printf '{"result":"started"}'
                 ;;
@@ -161,7 +290,7 @@ case "$1" in
 
                 : > "$ROUTING_LOG"
                 # shellcheck disable=SC2086
-                (vpn-manager $args >> "$ROUTING_LOG" 2>&1; [ $? -eq 0 ] && rm -f "$UNSYNC_FLAG") &
+                (vpn-manager $args >> "$ROUTING_LOG" 2>&1; [ $? -eq 0 ] && rm -f "$UNSYNC_ROUTING_FLAG") &
                 echo $! > "$ROUTING_PID"
                 printf '{"result":"started"}'
                 ;;
@@ -357,7 +486,7 @@ TAGEOF
                 fi
                 updated=$(printf '%s' "$existing_cfg" | jq --arg p "$CUSTOM_TEMPLATE" '.singbox.template = $p')
                 printf '%s\n' "$updated" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
-                touch "$UNSYNC_FLAG"
+                touch "$UNSYNC_SUBS_FLAG"
                 printf '{"result":"ok"}'
                 ;;
 
@@ -372,7 +501,7 @@ TAGEOF
                     fi
                     printf '%s\n' "$updated" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
                 fi
-                touch "$UNSYNC_FLAG"
+                touch "$UNSYNC_SUBS_FLAG"
                 # Return the default template content for display
                 if [ -f "$DEFAULT_TEMPLATE_FILE" ]; then
                     printf '{"template":%s}' "$(jq -Rs '.' "$DEFAULT_TEMPLATE_FILE")"
@@ -406,10 +535,11 @@ TAGEOF
                 merged=$(jq -n \
                     --argjson ex "$existing" \
                     --argjson r "$new_routing" \
-                    '$ex + {routing: $r}')
+                    '$ex + {routing: (($ex.routing // {}) + $r + {subnets: (($ex.routing.subnets // {}) + ($r.subnets // {}))})}' \
+                )
                 mkdir -p "$CONF_DIR"
                 printf '%s\n' "$merged" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
-                touch "$UNSYNC_FLAG"
+                touch "$UNSYNC_ROUTING_FLAG"
                 printf '{"result":"ok"}'
                 ;;
 
@@ -512,10 +642,14 @@ TAGEOF
                 ;;
 
             get_sync_status)
-                if [ -f "$UNSYNC_FLAG" ]; then
-                    printf '{"synced":false}'
+                subs_pending=false
+                routing_pending=false
+                [ -f "$UNSYNC_SUBS_FLAG" ] && subs_pending=true
+                [ -f "$UNSYNC_ROUTING_FLAG" ] && routing_pending=true
+                if [ "$subs_pending" = "true" ] || [ "$routing_pending" = "true" ]; then
+                    printf '{"synced":false,"subs_pending":%s,"routing_pending":%s}' "$subs_pending" "$routing_pending"
                 else
-                    printf '{"synced":true}'
+                    printf '{"synced":true,"subs_pending":false,"routing_pending":false}'
                 fi
                 ;;
 

@@ -281,6 +281,26 @@ func TestValidateSubscriptions_valid(t *testing.T) {
 	}
 }
 
+func TestLoad_manual_file_only_routing(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	writeFile(t, path, `{
+		"routing": {
+			"subnets": {
+				"manual_file": "/etc/horn-vpn-manager/lists/manual-ip.lst"
+			}
+		}
+	}`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error for manual_file-only routing: %v", err)
+	}
+	if cfg.Routing.Subnets.ManualFile != "/etc/horn-vpn-manager/lists/manual-ip.lst" {
+		t.Errorf("manual_file = %q", cfg.Routing.Subnets.ManualFile)
+	}
+}
+
 func TestLoad_missing_file(t *testing.T) {
 	_, err := Load("/nonexistent/config.json")
 	if err == nil {

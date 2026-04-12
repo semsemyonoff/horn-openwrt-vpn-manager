@@ -21,6 +21,7 @@
       "ubus": {
         "horn-vpn-manager": [
           "set_config",
+          "set_full_config",
           "run_script",
           "test_url",
           "set_proxy",

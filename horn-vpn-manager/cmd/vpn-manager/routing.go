@@ -167,6 +167,10 @@ func routingRestore(args []string) error {
 	}
 	logx.Setup(!flags.noColor, flags.verbosity, flags.debug)
 
+	if flags.debug {
+		return routingRestoreDebug(flags)
+	}
+
 	cfg, err := config.Load(flags.configPath)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -174,6 +178,36 @@ func routingRestore(args []string) error {
 
 	applier := system.NewOpenWrt()
 	runner := routing.NewRunner(cfg, applier)
+
+	return runner.Restore()
+}
+
+func routingRestoreDebug(flags routingFlags) error {
+	dir, err := binDir()
+	if err != nil {
+		return err
+	}
+
+	cfgPath := flags.configPath
+	if cfgPath == config.DefaultPath {
+		cfgPath = filepath.Join(dir, "config.json")
+	}
+
+	outDir := filepath.Join(dir, "out")
+
+	logx.Info("Debug mode: using local files from %s", logx.Bold(dir))
+	logx.Dim("debug implies no system actions (dnsmasq, firewall)")
+	logx.Dim("config=%s", cfgPath)
+	logx.Dim("output=%s", outDir)
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	applier := system.NewDebugApplier()
+	runner := routing.NewRunner(cfg, applier)
+	runner.ListsDir = outDir
 
 	return runner.Restore()
 }

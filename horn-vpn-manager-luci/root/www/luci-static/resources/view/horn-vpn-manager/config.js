@@ -87,6 +87,11 @@ var callSetDomainsConfig = rpc.declare({
     method: "set_domains_config",
     params: ["config"],
 });
+var callSetFullConfig = rpc.declare({
+    object: "horn-vpn-manager",
+    method: "set_full_config",
+    params: ["config", "template_contents"],
+});
 var callGetManualIps = rpc.declare({
     object: "horn-vpn-manager",
     method: "get_manual_ips",
@@ -94,6 +99,11 @@ var callGetManualIps = rpc.declare({
 var callGetManualDomains = rpc.declare({
     object: "horn-vpn-manager",
     method: "get_manual_domains",
+});
+var callSetManualIps = rpc.declare({
+    object: "horn-vpn-manager",
+    method: "set_manual_ips",
+    params: ["ips"],
 });
 var callSetManualDomains = rpc.declare({
     object: "horn-vpn-manager",
@@ -942,6 +952,11 @@ return view.extend({
         self._settingsDirtyEl = settingsDirtyEl;
 
         var hasPendingChanges = !!(syncData && syncData.synced === false);
+        var unsyncBannerMsg = E(
+            "p",
+            {},
+            _("Settings have been saved but not yet applied to sing-box. Go to the Run tab and run subscriptions to apply changes."),
+        );
         var unsyncBanner = E(
             "div",
             {
@@ -950,72 +965,11 @@ return view.extend({
             },
             [
                 E("h4", {}, _("Configuration not applied")),
-                E(
-                    "p",
-                    {},
-                    _(
-                        "Settings have been saved but not yet applied to sing-box. Go to the Run tab and run subscriptions to apply changes.",
-                    ),
-                ),
+                unsyncBannerMsg,
             ],
         );
         self._unsyncBanner = unsyncBanner;
-
-        var subsExportBtn = E(
-            "button",
-            {
-                type: "button",
-                class: "cbi-button",
-                click: function () {
-                    callGetConfig().then(function (res) {
-                        var cfg = res && res.config ? res.config : {};
-                        downloadJson(cfg, "horn-vpn-manager-config.json");
-                    });
-                },
-            },
-            _("Export"),
-        );
-
-        var subsImportBtn = E(
-            "button",
-            {
-                type: "button",
-                class: "cbi-button",
-                click: function () {
-                    importJson(".json")
-                        .then(function (data) {
-                            if (
-                                !data ||
-                                typeof data !== "object" ||
-                                !data.subscriptions
-                            ) {
-                                throw new Error(
-                                    _("Invalid config: missing subscriptions"),
-                                );
-                            }
-                            return callSetConfig(data);
-                        })
-                        .then(function (res) {
-                            if (res && res.error) throw new Error(res.error);
-                            ui.addNotification(
-                                null,
-                                E("p", _("Config imported")),
-                                "info",
-                            );
-                            window.location.reload();
-                        })
-                        .catch(function (err) {
-                            if (err && err.message)
-                                ui.addNotification(
-                                    null,
-                                    E("p", _("Error: ") + err.message),
-                                    "error",
-                                );
-                        });
-                },
-            },
-            _("Import"),
-        );
+        self._unsyncBannerMsg = unsyncBannerMsg;
 
         var settingsPane = E("div", { class: "vpnsub-tab-pane" }, [
             globalSection,
@@ -1029,10 +983,6 @@ return view.extend({
                 ),
             ]),
             E("div", { class: "cbi-page-actions" }, [
-                subsExportBtn,
-                "\u00a0",
-                subsImportBtn,
-                "\u00a0\u00a0",
                 settingsDirtyEl,
                 "\u00a0\u00a0",
                 saveBtn,
@@ -1729,10 +1679,56 @@ return view.extend({
         var exportBtn = E("button", {
             class: "btn cbi-button cbi-button-neutral",
             click: function () {
-                callGetConfig()
-                    .then(function (res) {
-                        if (res && res.config) {
-                            downloadJson(res.config, "horn-vpn-manager-config.json");
+                var exportWarnings = [];
+                Promise.all([
+                    callGetConfig(),
+                    callGetDomainsConfig().catch(function () { exportWarnings.push(_("routing config")); return null; }),
+                    callGetManualIps().catch(function () { exportWarnings.push(_("manual IPs")); return null; }),
+                    callGetManualDomains().catch(function () { exportWarnings.push(_("manual domains")); return null; }),
+                ])
+                    .then(function (results) {
+                        var configRes = results[0];
+                        var domainsRes = results[1];
+                        var manualIpsRes = results[2];
+                        var manualDomainsRes = results[3];
+                        if (configRes && configRes.config) {
+                            var exported = Object.assign({}, configRes.config);
+                            if (domainsRes && domainsRes.config) {
+                                exported.routing = domainsRes.config;
+                            }
+                            if (manualIpsRes && manualIpsRes.ips != null) {
+                                exported._manual_ips = manualIpsRes.ips;
+                            }
+                            if (manualDomainsRes && manualDomainsRes.domains != null) {
+                                exported._manual_domains = manualDomainsRes.domains;
+                            }
+                            // If a custom template is configured, embed its contents so
+                            // the file can be restored on import to another router.
+                            if (exported.singbox && exported.singbox.template) {
+                                return callGetTemplate().then(function (tmplRes) {
+                                    if (tmplRes && tmplRes.error) {
+                                        exportWarnings.push(_("sing-box template"));
+                                    } else if (tmplRes && tmplRes.template) {
+                                        exported._template_contents = tmplRes.template;
+                                    }
+                                    if (exportWarnings.length > 0) {
+                                        ui.addNotification(
+                                            null,
+                                            E("p", _("Export incomplete — the following data could not be read and was omitted: ") + exportWarnings.join(", ")),
+                                            "warning",
+                                        );
+                                    }
+                                    downloadJson(exported, "horn-vpn-manager-config.json");
+                                });
+                            }
+                            if (exportWarnings.length > 0) {
+                                ui.addNotification(
+                                    null,
+                                    E("p", _("Export incomplete — the following data could not be read and was omitted: ") + exportWarnings.join(", ")),
+                                    "warning",
+                                );
+                            }
+                            downloadJson(exported, "horn-vpn-manager-config.json");
                         } else {
                             ui.addNotification(
                                 null,
@@ -1764,7 +1760,7 @@ return view.extend({
                             );
                             return;
                         }
-                        if (!data.subscriptions || typeof data.subscriptions !== "object") {
+                        if (!data.subscriptions || typeof data.subscriptions !== "object" || Array.isArray(data.subscriptions)) {
                             ui.addNotification(
                                 null,
                                 E("p", _("Invalid config: missing subscriptions")),
@@ -1772,17 +1768,58 @@ return view.extend({
                             );
                             return;
                         }
-                        return callSetConfig(data)
+
+                        var templateContents = data._template_contents || null;
+                        var manualIps = data._manual_ips != null ? data._manual_ips : null;
+                        var manualDomains = Array.isArray(data._manual_domains) ? data._manual_domains : null;
+                        var configData = Object.assign({}, data);
+                        delete configData._template_contents;
+                        delete configData._manual_ips;
+                        delete configData._manual_domains;
+
+                        // If template contents were not exported but config references a
+                        // custom template path, clear the path so the embedded default is
+                        // used instead of pointing at a non-existent file.
+                        if (!templateContents && configData.singbox && configData.singbox.template) {
+                            configData.singbox = Object.assign({}, configData.singbox);
+                            delete configData.singbox.template;
+                        }
+
+                        return callSetFullConfig(configData, templateContents || "")
                             .then(function (res) {
                                 if (res && res.error) throw new Error(res.error);
-                                ui.addNotification(
-                                    null,
-                                    E("p", _("Config imported — reloading…")),
-                                    "info",
-                                );
-                                setTimeout(function () {
-                                    location.reload();
-                                }, 1500);
+                                var afterCalls = [];
+                                if (manualIps !== null) {
+                                    afterCalls.push(
+                                        callSetManualIps(manualIps).then(function (r) {
+                                            if (r && r.error) throw new Error(r.error);
+                                        })
+                                    );
+                                }
+                                if (manualDomains !== null) {
+                                    afterCalls.push(
+                                        callSetManualDomains(manualDomains).then(function (r) {
+                                            if (r && r.error) throw new Error(r.error);
+                                        })
+                                    );
+                                }
+                                return Promise.all(afterCalls)
+                                    .then(function () {
+                                        ui.addNotification(
+                                            null,
+                                            E("p", _("Config imported — reloading…")),
+                                            "info",
+                                        );
+                                        setTimeout(function () { location.reload(); }, 1500);
+                                    })
+                                    .catch(function (err) {
+                                        ui.addNotification(
+                                            null,
+                                            E("p", _("Config and template were saved, but some auxiliary data failed to restore: ") + (err.message || String(err)) + _(". Manual IPs/domains may need to be re-imported.")),
+                                            "warning",
+                                        );
+                                        setTimeout(function () { location.reload(); }, 2000);
+                                    });
                             });
                     })
                     .catch(function (err) {
@@ -2469,7 +2506,21 @@ return view.extend({
         var self = this;
         return callGetSyncStatus()
             .then(function (res) {
-                self._showUnsync(!!(res && res.synced === false));
+                var show = !!(res && res.synced === false);
+                self._showUnsync(show);
+                if (show && self._unsyncBannerMsg) {
+                    var subsP = !!(res && res.subs_pending);
+                    var routingP = !!(res && res.routing_pending);
+                    var msg;
+                    if (subsP && routingP) {
+                        msg = _("Settings have been saved but not yet applied. Go to the Run tab and run both subscriptions and routing to apply changes.");
+                    } else if (routingP) {
+                        msg = _("Routing settings have been saved but not yet applied. Go to the Run tab and run routing to apply changes.");
+                    } else {
+                        msg = _("Settings have been saved but not yet applied to sing-box. Go to the Run tab and run subscriptions to apply changes.");
+                    }
+                    self._unsyncBannerMsg.textContent = msg;
+                }
                 return res;
             })
             .catch(function () {
