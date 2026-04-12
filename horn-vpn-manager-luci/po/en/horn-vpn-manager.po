@@ -321,8 +321,8 @@ msgstr "JSON error: "
 msgid "Domain list"
 msgstr "Domain list"
 
-msgid "Configure domain and subnet lists downloaded by the getdomains script, and static IP routes"
-msgstr "Configure domain and subnet lists downloaded by the getdomains script, and static IP routes"
+msgid "Configure domain and subnet lists for routing, and static IP routes"
+msgstr "Configure domain and subnet lists for routing, and static IP routes"
 
 msgid "Domains URL"
 msgstr "Domains URL"
@@ -482,3 +482,15 @@ msgstr "Config imported — reloading…"
 
 msgid "Import error: "
 msgstr "Import error: "
+
+msgid "Run subscriptions or routing updates with per-command options and live log output"
+msgstr "Run subscriptions or routing updates with per-command options and live log output"
+
+msgid "Two or more subscriptions have the same ID. Each subscription must have a unique ID."
+msgstr "Two or more subscriptions have the same ID. Each subscription must have a unique ID."
+
+msgid "This appears to be a full config file. Use the global Import button instead."
+msgstr "This appears to be a full config file. Use the global Import button instead."
+
+msgid "keyword"
+msgstr "keyword"

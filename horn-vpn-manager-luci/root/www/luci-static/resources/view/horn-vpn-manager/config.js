@@ -2575,6 +2575,7 @@ return view.extend({
                             clearInterval(self._routingPollTimer);
                             self._routingPollTimer = null;
                             if (btn) btn.disabled = false;
+                            self._refreshSyncStatus();
                         }
                     });
                 }, 2000);

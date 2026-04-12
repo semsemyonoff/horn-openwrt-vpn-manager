@@ -321,8 +321,8 @@ msgstr "Ошибка JSON: "
 msgid "Domain list"
 msgstr "Список доменов"
 
-msgid "Configure domain and subnet lists downloaded by the getdomains script, and static IP routes"
-msgstr "Настройка списков доменов и подсетей, загружаемых скриптом getdomains, и статических IP-маршрутов"
+msgid "Configure domain and subnet lists for routing, and static IP routes"
+msgstr "Настройка списков доменов и подсетей для маршрутизации и статических IP-маршрутов"
 
 msgid "Domains URL"
 msgstr "URL списка доменов"
@@ -482,3 +482,15 @@ msgstr "Конфигурация импортирована — перезагр
 
 msgid "Import error: "
 msgstr "Ошибка импорта: "
+
+msgid "Run subscriptions or routing updates with per-command options and live log output"
+msgstr "Запуск обновления подписок или маршрутизации с параметрами команды и выводом лога в реальном времени"
+
+msgid "Two or more subscriptions have the same ID. Each subscription must have a unique ID."
+msgstr "Две или более подписок имеют одинаковый ID. Каждая подписка должна иметь уникальный ID."
+
+msgid "This appears to be a full config file. Use the global Import button instead."
+msgstr "Это похоже на полный файл конфигурации. Используйте кнопку «Импорт» вверху страницы."
+
+msgid "keyword"
+msgstr "ключевое слово"

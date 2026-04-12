@@ -122,7 +122,7 @@ case "$1" in
                 # Truncate log so the frontend sees only the current run
                 : > "$LOG_FILE"
                 # shellcheck disable=SC2086
-                vpn-manager $args >> "$LOG_FILE" 2>&1 &
+                (vpn-manager $args >> "$LOG_FILE" 2>&1; [ $? -eq 0 ] && rm -f "$UNSYNC_FLAG") &
                 echo $! > "$PID_FILE"
                 printf '{"result":"started"}'
                 ;;
@@ -161,7 +161,7 @@ case "$1" in
 
                 : > "$ROUTING_LOG"
                 # shellcheck disable=SC2086
-                vpn-manager $args >> "$ROUTING_LOG" 2>&1 &
+                (vpn-manager $args >> "$ROUTING_LOG" 2>&1; [ $? -eq 0 ] && rm -f "$UNSYNC_FLAG") &
                 echo $! > "$ROUTING_PID"
                 printf '{"result":"started"}'
                 ;;
