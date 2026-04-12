@@ -205,7 +205,7 @@ vpn-manager run [-c config]
 - `--debug` — debug режим: конфиг/шаблон из директории бинарника, вывод в `./out`, без системных действий
 - `--with-subscriptions` — для `routing run`: после routing скачать также списки для subscription route rules
 - `--download-lists` — для `subscriptions run`: всегда скачивать свежие списки и кэшировать
-- `--cached-lists` — для `subscriptions run`: использовать кэш (скачивать только при промахе)
+- `--cached-lists` — для `subscriptions run`: использовать кэш (скачивать только при отсутвии кеша)
 
 ## Установка на роутер
 
