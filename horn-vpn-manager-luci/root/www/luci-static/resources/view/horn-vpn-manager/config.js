@@ -1311,59 +1311,16 @@ return view.extend({
             _("Reset to default"),
         );
 
-        var PLACEHOLDERS = [
-            {
-                name: "__LOG_LEVEL__",
-                type: _("string"),
-                desc: _(
-                    "Log verbosity level from global settings (e.g. warn, debug)",
-                ),
-            },
-            {
-                name: "__VLESS_OUTBOUNDS__",
-                type: _("array elements"),
-                desc: _(
-                    "Individual VLESS proxy outbound objects, comma-separated",
-                ),
-            },
-            {
-                name: "__GROUP_OUTBOUNDS__",
-                type: _("array elements"),
-                desc: _(
-                    "urltest (auto) and selector (manual) group outbound objects",
-                ),
-            },
-            {
-                name: "__ROUTE_RULES__",
-                type: _("array elements"),
-                desc: _(
-                    "Domain and IP routing rules generated from subscription settings",
-                ),
-            },
-            {
-                name: "__DEFAULT_TAG__",
-                type: _("string"),
-                desc: _("Outbound tag of the subscription marked as default"),
-            },
-        ];
-
-        var refRows = PLACEHOLDERS.map(function (p) {
-            return E("tr", {}, [
-                E("td", { class: "vpnsub-tpl-ref-name" }, p.name),
-                E("td", { class: "vpnsub-tpl-ref-type" }, p.type),
-                E("td", { class: "vpnsub-tpl-ref-desc" }, p.desc),
-            ]);
-        });
-
-        var refTable = E("table", { class: "vpnsub-tpl-ref-table" }, [
-            E("thead", {}, [
-                E("tr", {}, [
-                    E("th", {}, _("Placeholder")),
-                    E("th", {}, _("Type")),
-                    E("th", {}, _("Description")),
-                ]),
+        var templateMergeNote = E("div", { class: "cbi-section" }, [
+            E("legend", {}, _("How template merging works")),
+            E("ul", { class: "vpnsub-tpl-merge-notes" }, [
+                E("li", {}, _("Generated proxy outbounds are prepended before the template outbounds array.")),
+                E("li", {}, _("Generated route rules are prepended before the template route.rules array.")),
+                E("li", {}, _("Bare string entries in outbounds and route.rules arrays are stripped from the template.")),
+                E("li", {}, _("log.level is always set from the Log level setting above.")),
+                E("li", {}, _("route.final is always set to the default subscription proxy tag.")),
+                E("li", {}, _("No placeholder strings are needed — the template is plain JSON.")),
             ]),
-            E("tbody", {}, refRows),
         ]);
 
         var templatePane = E("div", { class: "vpnsub-tab-pane" }, [
@@ -1380,10 +1337,7 @@ return view.extend({
                 templateWrap,
                 templateStatusEl,
             ]),
-            E("div", { class: "cbi-section" }, [
-                E("legend", {}, _("Placeholders")),
-                refTable,
-            ]),
+            templateMergeNote,
         ]);
 
         // ── Tab 6: Domains ────────────────────────────────────────────────────

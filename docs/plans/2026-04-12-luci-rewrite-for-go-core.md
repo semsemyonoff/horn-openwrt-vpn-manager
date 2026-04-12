@@ -132,10 +132,10 @@ Remove "Update" tab, rename tabs, add "Run" tab with two sections.
 
 The new Go core uses JSON merging (no `__PLACEHOLDER__` strings). Update the template editor UI to reflect this.
 
-- [ ] Remove the old placeholder legend/documentation panel from the template tab (the `__LOG_LEVEL__`, `__VLESS_OUTBOUNDS__` etc. legend)
-- [ ] Add a description note explaining the new merging behavior: generated outbounds/rules are prepended to the template's arrays; bare string entries in `outbounds`/`route.rules` are stripped; `log.level` and `route.final` are always overridden by config
-- [ ] Verify `get_template` / `set_template` / `reset_template` RPC calls in JS use the updated rpcd methods correctly
-- [ ] Update the default template file `horn-vpn-manager-luci/root/www/luci-static/resources/horn-vpn-manager/sing-box.template.default.json` if it exists (or remove if redundant — the Go binary ships the authoritative default)
+- [x] Remove the old placeholder legend/documentation panel from the template tab (the `__LOG_LEVEL__`, `__VLESS_OUTBOUNDS__` etc. legend)
+- [x] Add a description note explaining the new merging behavior: generated outbounds/rules are prepended to the template's arrays; bare string entries in `outbounds`/`route.rules` are stripped; `log.level` and `route.final` are always overridden by config
+- [x] Verify `get_template` / `set_template` / `reset_template` RPC calls in JS use the updated rpcd methods correctly
+- [x] Update the default template file `horn-vpn-manager-luci/root/www/luci-static/resources/horn-vpn-manager/sing-box.template.default.json` if it exists (or remove if redundant — the Go binary ships the authoritative default)
 
 ---
 
