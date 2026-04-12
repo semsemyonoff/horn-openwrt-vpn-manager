@@ -196,6 +196,95 @@ func TestRunner_Run_default_failure_aborts(t *testing.T) {
 	}
 }
 
+func TestRunner_Run_include_filtering(t *testing.T) {
+	payload := "vless://uuid1@h1.example.com:443?encryption=none#Germany-Frankfurt\n" +
+		"vless://uuid2@h2.example.com:443?encryption=none#Russia-Moscow\n" +
+		"vless://uuid3@h3.example.com:443?encryption=none#Germany-Berlin\n"
+	srv := newTestServer(t, payload, http.StatusOK)
+	defer srv.Close()
+
+	cfg := &config.Config{
+		Fetch: config.Fetch{Retries: 1, TimeoutSeconds: 5, Parallelism: 1},
+		Subscriptions: map[string]*config.Subscription{
+			"main": {
+				Name:    "Main",
+				URL:     srv.URL,
+				Default: true,
+				Include: []string{"Germany"},
+			},
+		},
+	}
+
+	runner := NewRunner(cfg, &fakeApplier{})
+	runner.OutDir = t.TempDir()
+	runner.DryRun = true
+
+	if err := runner.Run(context.Background()); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(runner.OutDir, "main-nodes.txt"))
+	if err != nil {
+		t.Fatalf("nodes file not written: %v", err)
+	}
+	content := string(data)
+
+	if !strings.Contains(content, "Germany-Frankfurt") {
+		t.Error("expected Germany-Frankfurt node to be present after include filtering")
+	}
+	if !strings.Contains(content, "Germany-Berlin") {
+		t.Error("expected Germany-Berlin node to be present after include filtering")
+	}
+	if strings.Contains(content, "Russia") {
+		t.Error("expected Russia node to be excluded by include filter")
+	}
+}
+
+func TestRunner_Run_include_then_exclude_filtering(t *testing.T) {
+	payload := "vless://uuid1@h1.example.com:443?encryption=none#Germany-Frankfurt\n" +
+		"vless://uuid2@h2.example.com:443?encryption=none#Russia-Moscow\n" +
+		"vless://uuid3@h3.example.com:443?encryption=none#Germany-relay\n"
+	srv := newTestServer(t, payload, http.StatusOK)
+	defer srv.Close()
+
+	cfg := &config.Config{
+		Fetch: config.Fetch{Retries: 1, TimeoutSeconds: 5, Parallelism: 1},
+		Subscriptions: map[string]*config.Subscription{
+			"main": {
+				Name:    "Main",
+				URL:     srv.URL,
+				Default: true,
+				Include: []string{"Germany"},
+				Exclude: []string{"relay"},
+			},
+		},
+	}
+
+	runner := NewRunner(cfg, &fakeApplier{})
+	runner.OutDir = t.TempDir()
+	runner.DryRun = true
+
+	if err := runner.Run(context.Background()); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(runner.OutDir, "main-nodes.txt"))
+	if err != nil {
+		t.Fatalf("nodes file not written: %v", err)
+	}
+	content := string(data)
+
+	if !strings.Contains(content, "Germany-Frankfurt") {
+		t.Error("expected Germany-Frankfurt to survive include+exclude")
+	}
+	if strings.Contains(content, "relay") {
+		t.Error("expected relay node to be excluded after include then exclude")
+	}
+	if strings.Contains(content, "Russia") {
+		t.Error("expected Russia to be dropped by include filter")
+	}
+}
+
 func TestRunner_Run_exclude_filtering(t *testing.T) {
 	payload := "vless://uuid1@h1.example.com:443?encryption=none#Russia-Moscow\n" +
 		"vless://uuid2@h2.example.com:443?encryption=none#Germany\n" +
@@ -413,6 +502,42 @@ func TestRunner_Run_subs_tags_written(t *testing.T) {
 	}
 }
 
+func TestRunner_Run_shared_url_downloaded_once(t *testing.T) {
+	var mu sync.Mutex
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests++
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(rawPayload))
+	}))
+	defer srv.Close()
+
+	cfg := &config.Config{
+		Fetch: config.Fetch{Retries: 1, TimeoutSeconds: 5, Parallelism: 1},
+		Subscriptions: map[string]*config.Subscription{
+			"main":  {Name: "Main", URL: srv.URL, Default: true},
+			"extra": {Name: "Extra", URL: srv.URL}, // same URL
+		},
+	}
+
+	runner := NewRunner(cfg, &fakeApplier{})
+	runner.OutDir = t.TempDir()
+	runner.DryRun = true
+
+	if err := runner.Run(context.Background()); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	mu.Lock()
+	got := requests
+	mu.Unlock()
+	if got != 1 {
+		t.Errorf("expected 1 HTTP request for shared URL, got %d", got)
+	}
+}
+
 func TestRunner_Run_invalid_config_returns_error(t *testing.T) {
 	// No subscriptions → ValidateSubscriptions should fail
 	cfg := &config.Config{
@@ -425,6 +550,49 @@ func TestRunner_Run_invalid_config_returns_error(t *testing.T) {
 
 	if err := runner.Run(context.Background()); err == nil {
 		t.Fatal("expected error for invalid subscription config")
+	}
+}
+
+func TestFilterInclude(t *testing.T) {
+	uris := []string{
+		"vless://id1@h1.example.com:443#Germany-Frankfurt",
+		"vless://id2@h2.example.com:443#Russia-Moscow",
+		"vless://id3@h3.example.com:443#germany-berlin",
+		"vless://id4@h4.example.com:443#Japan",
+	}
+
+	got := filterInclude(uris, []string{"germany"})
+	if len(got) != 2 {
+		t.Fatalf("expected 2 uris after include filter, got %d: %v", len(got), got)
+	}
+	for _, uri := range got {
+		name := strings.ToLower(extractNodeName(uri))
+		if !strings.Contains(name, "germany") {
+			t.Errorf("included URI does not match pattern: %s", uri)
+		}
+	}
+}
+
+func TestFilterInclude_empty_patterns(t *testing.T) {
+	uris := []string{
+		"vless://id1@h1.example.com:443#Node1",
+		"vless://id2@h2.example.com:443#Node2",
+	}
+	got := filterInclude(uris, nil)
+	if len(got) != 2 {
+		t.Fatalf("expected all uris when no patterns, got %d", len(got))
+	}
+}
+
+func TestFilterInclude_multiple_patterns(t *testing.T) {
+	uris := []string{
+		"vless://id1@h1.example.com:443#Germany",
+		"vless://id2@h2.example.com:443#Japan",
+		"vless://id3@h3.example.com:443#Russia",
+	}
+	got := filterInclude(uris, []string{"germany", "japan"})
+	if len(got) != 2 {
+		t.Fatalf("expected 2 uris for two patterns, got %d: %v", len(got), got)
 	}
 }
 

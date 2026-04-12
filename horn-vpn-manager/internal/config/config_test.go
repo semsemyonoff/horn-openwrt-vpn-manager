@@ -214,6 +214,17 @@ func TestLoad_subscription_route(t *testing.T) {
 	}
 }
 
+func TestValidateSubscriptions_empty_include_pattern(t *testing.T) {
+	cfg := &Config{
+		Subscriptions: map[string]*Subscription{
+			"s1": {Name: "S1", URL: "https://example.com/s1", Default: true, Include: []string{""}},
+		},
+	}
+	if err := cfg.ValidateSubscriptions(); err == nil {
+		t.Fatal("expected error for empty include pattern")
+	}
+}
+
 func TestValidateSubscriptions_no_subscriptions(t *testing.T) {
 	cfg := &Config{}
 	if err := cfg.ValidateSubscriptions(); err == nil {

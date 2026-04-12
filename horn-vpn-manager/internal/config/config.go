@@ -32,6 +32,7 @@ type Subscription struct {
 	URL       string             `json:"url"`
 	Default   bool               `json:"default"`
 	Enabled   *bool              `json:"enabled"`
+	Include   []string           `json:"include"`
 	Exclude   []string           `json:"exclude"`
 	Interval  string             `json:"interval"`
 	Tolerance int                `json:"tolerance"`
@@ -131,6 +132,9 @@ func (c *Config) ValidateSubscriptions() error {
 		if sub.Default {
 			defaultCount++
 			defaultID = id
+		}
+		if slices.Contains(sub.Include, "") {
+			return fmt.Errorf("subscription %q has an empty include pattern: remove it or provide a non-empty pattern", id)
 		}
 		if slices.Contains(sub.Exclude, "") {
 			return fmt.Errorf("subscription %q has an empty exclude pattern: remove it or provide a non-empty pattern", id)

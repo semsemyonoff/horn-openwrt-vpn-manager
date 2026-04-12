@@ -116,6 +116,30 @@ func extractNodeName(uri string) string {
 	return ""
 }
 
+// filterInclude returns only the uris whose node name contains at least one of
+// the patterns (case-insensitive substring match). When patterns is empty, all
+// uris are returned unchanged.
+func filterInclude(uris, patterns []string) []string {
+	if len(patterns) == 0 {
+		return uris
+	}
+	lower := make([]string, len(patterns))
+	for i, p := range patterns {
+		lower[i] = strings.ToLower(p)
+	}
+	kept := make([]string, 0, len(uris))
+	for _, uri := range uris {
+		name := strings.ToLower(extractNodeName(uri))
+		for _, pat := range lower {
+			if strings.Contains(name, pat) {
+				kept = append(kept, uri)
+				break
+			}
+		}
+	}
+	return kept
+}
+
 // filterExclude returns uris split into kept and excluded slices.
 // An entry is excluded if its node name contains one of the patterns
 // (case-insensitive substring match).
@@ -175,6 +199,7 @@ func (r *Runner) Run(ctx context.Context) error { //nolint:gocognit,gocyclo // o
 		tagNames        = make(map[string]string)
 		processed       int
 		failedSubs      []string
+		urlCache        = make(map[string][]string) // url → decoded URIs, avoids re-downloading shared URLs
 	)
 
 	subIDs := make([]string, 0, len(r.Cfg.Subscriptions))
@@ -194,31 +219,49 @@ func (r *Runner) Run(ctx context.Context) error { //nolint:gocognit,gocyclo // o
 			continue
 		}
 
-		logx.Info("Downloading subscription %s...", logx.Bold(id))
-		logx.Detail("  URL: %s", urlHost(sub.URL))
-
 		opts := r.fetchOptsForSub(sub)
-		data, err := fetch.Download(ctx, sub.URL, opts)
-		if err != nil {
-			if ctx.Err() != nil {
-				return fmt.Errorf("interrupted: %w", ctx.Err())
+
+		var uris []string
+		if cached, ok := urlCache[sub.URL]; ok {
+			logx.Info("Subscription %s: reusing cached nodes from %s", logx.Bold(id), urlHost(sub.URL))
+			uris = cached
+		} else {
+			logx.Info("Downloading subscription %s...", logx.Bold(id))
+			logx.Detail("  URL: %s", urlHost(sub.URL))
+			data, err := fetch.Download(ctx, sub.URL, opts)
+			if err != nil {
+				if ctx.Err() != nil {
+					return fmt.Errorf("interrupted: %w", ctx.Err())
+				}
+				logx.Err("Failed to download subscription %s: %v", id, err)
+				if sub.Default {
+					return fmt.Errorf("default subscription %q failed to download, aborting", id)
+				}
+				failedSubs = append(failedSubs, id)
+				continue
 			}
-			logx.Err("Failed to download subscription %s: %v", id, err)
-			if sub.Default {
-				return fmt.Errorf("default subscription %q failed to download, aborting", id)
+
+			decoded, err := DecodePayload(data)
+			if err != nil {
+				logx.Err("Failed to decode subscription %s: %v", id, err)
+				if sub.Default {
+					return fmt.Errorf("default subscription %q failed to decode, aborting", id)
+				}
+				failedSubs = append(failedSubs, id)
+				continue
 			}
-			failedSubs = append(failedSubs, id)
-			continue
+
+			urlCache[sub.URL] = decoded
+			uris = decoded
 		}
 
-		uris, err := DecodePayload(data)
-		if err != nil {
-			logx.Err("Failed to decode subscription %s: %v", id, err)
-			if sub.Default {
-				return fmt.Errorf("default subscription %q failed to decode, aborting", id)
+		if len(sub.Include) > 0 {
+			before := len(uris)
+			uris = filterInclude(uris, sub.Include)
+			logx.Info("Subscription %s: include filter matched %d/%d node(s)", id, len(uris), before)
+			for _, uri := range uris {
+				logx.Debug("  included: %s", extractNodeName(uri))
 			}
-			failedSubs = append(failedSubs, id)
-			continue
 		}
 
 		if len(sub.Exclude) > 0 {
