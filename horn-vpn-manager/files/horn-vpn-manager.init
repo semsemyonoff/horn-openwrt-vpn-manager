@@ -24,8 +24,8 @@ start() {
 
   if wait_for_internet; then
     logger -t horn-vpn-manager "Internet available, updating routing and subscriptions"
-    vpn-manager routing run --no-color
-    vpn-manager subscriptions run --no-color
+    vpn-manager routing run --with-subscriptions --no-color
+    vpn-manager subscriptions run --cached-lists --no-color
   else
     logger -t horn-vpn-manager "No internet after ${MAX_WAIT}s, restoring routing from cache"
     vpn-manager routing restore --no-color
