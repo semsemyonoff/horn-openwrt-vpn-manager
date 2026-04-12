@@ -141,7 +141,7 @@ The new Go core uses JSON merging (no `__PLACEHOLDER__` strings). Update the tem
 
 ### Task 8: Update i18n (.po files)
 
-- [ ] Add/update strings in both `po/en/horn-vpn-manager.po` and `po/ru/horn-vpn-manager.po`:
+- [x] Add/update strings in both `po/en/horn-vpn-manager.po` and `po/ru/horn-vpn-manager.po`:
   - "Run" (new tab title)
   - "Export config", "Import config" (button labels)
   - "Include filters" (subscription field label)
@@ -149,7 +149,7 @@ The new Go core uses JSON merging (no `__PLACEHOLDER__` strings). Update the tem
   - "--cached-lists", "--download-lists", "--with-subscriptions" option labels (or descriptive UI labels)
   - "Run subscriptions", "Run routing" section headings in Run tab
   - Any removed strings: "Update" tab title, old "Domain list" references, old "Script output" label
-- [ ] Ensure Russian translations cover all new strings
+- [x] Ensure Russian translations cover all new strings
 
 ---
 

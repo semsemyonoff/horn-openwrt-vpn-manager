@@ -389,3 +389,96 @@ msgstr "Invalid JSON file"
 
 msgid "Invalid config: missing subscriptions"
 msgstr "Invalid config: missing subscriptions"
+
+msgid "Routing"
+msgstr "Routing"
+
+msgid "Run subscriptions"
+msgstr "Run subscriptions"
+
+msgid "Run routing"
+msgstr "Run routing"
+
+msgid "Export config"
+msgstr "Export config"
+
+msgid "Import config"
+msgstr "Import config"
+
+msgid "Include filters"
+msgstr "Include filters"
+
+msgid "Only servers whose names contain at least one of these strings will be used (leave empty to include all)"
+msgstr "Only servers whose names contain at least one of these strings will be used (leave empty to include all)"
+
+msgid "--cached-lists"
+msgstr "--cached-lists"
+
+msgid "--download-lists"
+msgstr "--download-lists"
+
+msgid "--with-subscriptions"
+msgstr "--with-subscriptions"
+
+msgid "No log yet. Run subscriptions to see output."
+msgstr "No log yet. Run subscriptions to see output."
+
+msgid "No log yet. Run routing to see output."
+msgstr "No log yet. Run routing to see output."
+
+msgid "Settings have been saved but not yet applied to sing-box. Go to the Run tab and run subscriptions to apply changes."
+msgstr "Settings have been saved but not yet applied to sing-box. Go to the Run tab and run subscriptions to apply changes."
+
+msgid "Include filters cannot contain empty entries"
+msgstr "Include filters cannot contain empty entries"
+
+msgid "Exclude filters cannot contain empty entries"
+msgstr "Exclude filters cannot contain empty entries"
+
+msgid "How template merging works"
+msgstr "How template merging works"
+
+msgid "Generated proxy outbounds are prepended before the template outbounds array."
+msgstr "Generated proxy outbounds are prepended before the template outbounds array."
+
+msgid "Generated route rules are prepended before the template route.rules array."
+msgstr "Generated route rules are prepended before the template route.rules array."
+
+msgid "Bare string entries in outbounds and route.rules arrays are stripped from the template."
+msgstr "Bare string entries in outbounds and route.rules arrays are stripped from the template."
+
+msgid "log.level is always set from the Log level setting above."
+msgstr "log.level is always set from the Log level setting above."
+
+msgid "route.final is always set to the default subscription proxy tag."
+msgstr "route.final is always set to the default subscription proxy tag."
+
+msgid "No placeholder strings are needed — the template is plain JSON."
+msgstr "No placeholder strings are needed — the template is plain JSON."
+
+msgid "Domain list URLs"
+msgstr "Domain list URLs"
+
+msgid "URLs to download domain lists from (one domain per line); downloaded domains are merged and deduplicated with manual entries"
+msgstr "URLs to download domain lists from (one domain per line); downloaded domains are merged and deduplicated with manual entries"
+
+msgid "IP list URLs"
+msgstr "IP list URLs"
+
+msgid "URLs to download IP/CIDR lists from (one entry per line); downloaded entries are merged and deduplicated with manual entries"
+msgstr "URLs to download IP/CIDR lists from (one entry per line); downloaded entries are merged and deduplicated with manual entries"
+
+msgid "Failed to fetch config for export"
+msgstr "Failed to fetch config for export"
+
+msgid "Export error: "
+msgstr "Export error: "
+
+msgid "Invalid config file"
+msgstr "Invalid config file"
+
+msgid "Config imported — reloading…"
+msgstr "Config imported — reloading…"
+
+msgid "Import error: "
+msgstr "Import error: "

@@ -389,3 +389,96 @@ msgstr "Некорректный JSON-файл"
 
 msgid "Invalid config: missing subscriptions"
 msgstr "Некорректный конфиг: отсутствуют подписки"
+
+msgid "Routing"
+msgstr "Маршрутизация"
+
+msgid "Run subscriptions"
+msgstr "Запустить подписки"
+
+msgid "Run routing"
+msgstr "Запустить маршрутизацию"
+
+msgid "Export config"
+msgstr "Экспорт конфига"
+
+msgid "Import config"
+msgstr "Импорт конфига"
+
+msgid "Include filters"
+msgstr "Включить серверы"
+
+msgid "Only servers whose names contain at least one of these strings will be used (leave empty to include all)"
+msgstr "Будут использоваться только серверы, в названии которых есть хотя бы одна из этих строк (оставьте пустым для включения всех)"
+
+msgid "--cached-lists"
+msgstr "--cached-lists"
+
+msgid "--download-lists"
+msgstr "--download-lists"
+
+msgid "--with-subscriptions"
+msgstr "--with-subscriptions"
+
+msgid "No log yet. Run subscriptions to see output."
+msgstr "Логов ещё нет. Запустите подписки."
+
+msgid "No log yet. Run routing to see output."
+msgstr "Логов ещё нет. Запустите маршрутизацию."
+
+msgid "Settings have been saved but not yet applied to sing-box. Go to the Run tab and run subscriptions to apply changes."
+msgstr "Настройки сохранены, но ещё не применены к sing-box. Перейдите на вкладку Запуск и запустите подписки."
+
+msgid "Include filters cannot contain empty entries"
+msgstr "Фильтры включения не могут содержать пустые значения"
+
+msgid "Exclude filters cannot contain empty entries"
+msgstr "Фильтры исключения не могут содержать пустые значения"
+
+msgid "How template merging works"
+msgstr "Как работает слияние шаблонов"
+
+msgid "Generated proxy outbounds are prepended before the template outbounds array."
+msgstr "Сгенерированные outbound-ы прокси добавляются в начало массива outbounds шаблона."
+
+msgid "Generated route rules are prepended before the template route.rules array."
+msgstr "Сгенерированные правила маршрутизации добавляются в начало массива route.rules шаблона."
+
+msgid "Bare string entries in outbounds and route.rules arrays are stripped from the template."
+msgstr "Строковые элементы из массивов outbounds и route.rules в шаблоне удаляются."
+
+msgid "log.level is always set from the Log level setting above."
+msgstr "log.level всегда берётся из настройки уровня логирования выше."
+
+msgid "route.final is always set to the default subscription proxy tag."
+msgstr "route.final всегда устанавливается в тег прокси подписки по умолчанию."
+
+msgid "No placeholder strings are needed — the template is plain JSON."
+msgstr "Строки-заглушки не нужны — шаблон является обычным JSON."
+
+msgid "Domain list URLs"
+msgstr "URL списков доменов"
+
+msgid "URLs to download domain lists from (one domain per line); downloaded domains are merged and deduplicated with manual entries"
+msgstr "URL для загрузки списков доменов (по одному домену на строку); загруженные домены объединяются и дедуплицируются с ручными записями"
+
+msgid "IP list URLs"
+msgstr "URL списков IP"
+
+msgid "URLs to download IP/CIDR lists from (one entry per line); downloaded entries are merged and deduplicated with manual entries"
+msgstr "URL для загрузки списков IP/CIDR (по одной записи на строку); загруженные записи объединяются и дедуплицируются с ручными"
+
+msgid "Failed to fetch config for export"
+msgstr "Не удалось получить конфиг для экспорта"
+
+msgid "Export error: "
+msgstr "Ошибка экспорта: "
+
+msgid "Invalid config file"
+msgstr "Некорректный файл конфига"
+
+msgid "Config imported — reloading…"
+msgstr "Конфигурация импортирована — перезагрузка…"
+
+msgid "Import error: "
+msgstr "Ошибка импорта: "
