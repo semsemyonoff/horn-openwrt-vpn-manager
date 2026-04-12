@@ -104,31 +104,33 @@ func extractNodeName(uri string) string {
 	return ""
 }
 
-// filterExclude returns uris with any entry whose node name contains
-// one of the exclude patterns removed (case-insensitive substring match).
-func filterExclude(uris []string, patterns []string) []string {
+// filterExclude returns uris split into kept and excluded slices.
+// An entry is excluded if its node name contains one of the patterns
+// (case-insensitive substring match).
+func filterExclude(uris []string, patterns []string) (kept, excluded []string) {
 	if len(patterns) == 0 {
-		return uris
+		return uris, nil
 	}
 	lower := make([]string, len(patterns))
 	for i, p := range patterns {
 		lower[i] = strings.ToLower(p)
 	}
-	out := uris[:0:0]
 	for _, uri := range uris {
 		name := strings.ToLower(extractNodeName(uri))
-		excluded := false
+		ex := false
 		for _, pat := range lower {
 			if strings.Contains(name, pat) {
-				excluded = true
+				ex = true
 				break
 			}
 		}
-		if !excluded {
-			out = append(out, uri)
+		if ex {
+			excluded = append(excluded, uri)
+		} else {
+			kept = append(kept, uri)
 		}
 	}
-	return out
+	return kept, excluded
 }
 
 // Run downloads and processes all enabled subscriptions, renders the sing-box
@@ -208,10 +210,13 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 
 		if len(sub.Exclude) > 0 {
-			before := len(uris)
-			uris = filterExclude(uris, sub.Exclude)
-			if skipped := before - len(uris); skipped > 0 {
-				logx.Info("Subscription %s: excluded %d node(s) matching exclude patterns", id, skipped)
+			var excludedURIs []string
+			uris, excludedURIs = filterExclude(uris, sub.Exclude)
+			if len(excludedURIs) > 0 {
+				logx.Info("Subscription %s: excluded %d node(s) matching exclude patterns", id, len(excludedURIs))
+				for _, uri := range excludedURIs {
+					logx.Debug("  excluded: %s", extractNodeName(uri))
+				}
 			}
 		}
 
