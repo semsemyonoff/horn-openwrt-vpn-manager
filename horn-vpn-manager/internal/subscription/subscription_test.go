@@ -438,7 +438,7 @@ func TestFilterExclude(t *testing.T) {
 		"vless://id4@h4.example.com:443#Japan",
 	}
 
-	got := filterExclude(uris, []string{"russia", "traffic"})
+	got, _ := filterExclude(uris, []string{"russia", "traffic"})
 	if len(got) != 2 {
 		t.Fatalf("expected 2 uris after filtering, got %d: %v", len(got), got)
 	}

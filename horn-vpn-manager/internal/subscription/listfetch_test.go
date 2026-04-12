@@ -76,7 +76,7 @@ func TestIsValidCIDR(t *testing.T) {
 // --- FetchRouteEntries ---
 
 func TestFetchRouteEntries_NilRoute(t *testing.T) {
-	result := subscription.FetchRouteEntries(context.Background(), "sub1", nil, testOpts())
+	result := subscription.FetchRouteEntries(context.Background(), "sub1", nil, testOpts(), "", false)
 	if result != nil {
 		t.Errorf("expected nil for nil route, got %+v", result)
 	}
@@ -87,7 +87,7 @@ func TestFetchRouteEntries_NoURLs(t *testing.T) {
 		Domains: []string{"example.com"},
 		IPCIDRs: []string{"10.0.0.0/8"},
 	}
-	result := subscription.FetchRouteEntries(context.Background(), "sub1", route, testOpts())
+	result := subscription.FetchRouteEntries(context.Background(), "sub1", route, testOpts(), "", false)
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
@@ -109,7 +109,7 @@ func TestFetchRouteEntries_DomainURLs(t *testing.T) {
 		Domains:    []string{"manual.example.com"},
 		DomainURLs: []string{srv.URL},
 	}
-	result := subscription.FetchRouteEntries(context.Background(), "sub1", route, testOpts())
+	result := subscription.FetchRouteEntries(context.Background(), "sub1", route, testOpts(), "", false)
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
@@ -139,7 +139,7 @@ func TestFetchRouteEntries_IPURLs(t *testing.T) {
 		IPCIDRs: []string{"10.0.0.0/8"},
 		IPURLs:  []string{srv.URL},
 	}
-	result := subscription.FetchRouteEntries(context.Background(), "sub1", route, testOpts())
+	result := subscription.FetchRouteEntries(context.Background(), "sub1", route, testOpts(), "", false)
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
@@ -169,7 +169,7 @@ func TestFetchRouteEntries_InvalidEntriesFiltered(t *testing.T) {
 	route := &config.SubscriptionRoute{
 		DomainURLs: []string{srv.URL},
 	}
-	result := subscription.FetchRouteEntries(context.Background(), "sub1", route, testOpts())
+	result := subscription.FetchRouteEntries(context.Background(), "sub1", route, testOpts(), "", false)
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
@@ -200,7 +200,7 @@ func TestFetchRouteEntries_Deduplication(t *testing.T) {
 		Domains:    []string{"shared.example.com", "manual.example.com"},
 		DomainURLs: []string{srv.URL},
 	}
-	result := subscription.FetchRouteEntries(context.Background(), "sub1", route, testOpts())
+	result := subscription.FetchRouteEntries(context.Background(), "sub1", route, testOpts(), "", false)
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
@@ -233,7 +233,7 @@ func TestFetchRouteEntries_ManualWins(t *testing.T) {
 		IPCIDRs: []string{"10.0.0.0/8"}, // same as in downloaded list
 		IPURLs:  []string{srv.URL},
 	}
-	result := subscription.FetchRouteEntries(context.Background(), "sub1", route, testOpts())
+	result := subscription.FetchRouteEntries(context.Background(), "sub1", route, testOpts(), "", false)
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
@@ -267,7 +267,7 @@ func TestFetchRouteEntries_DownloadFailure(t *testing.T) {
 			srv.URL,
 		},
 	}
-	result := subscription.FetchRouteEntries(context.Background(), "sub1", route, testOpts())
+	result := subscription.FetchRouteEntries(context.Background(), "sub1", route, testOpts(), "", false)
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
@@ -299,7 +299,7 @@ func TestFetchRouteEntries_MultipleURLs(t *testing.T) {
 	route := &config.SubscriptionRoute{
 		DomainURLs: []string{srv1.URL, srv2.URL},
 	}
-	result := subscription.FetchRouteEntries(context.Background(), "sub1", route, testOpts())
+	result := subscription.FetchRouteEntries(context.Background(), "sub1", route, testOpts(), "", false)
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
@@ -315,6 +315,92 @@ func TestFetchRouteEntries_MultipleURLs(t *testing.T) {
 		if !want[d] {
 			t.Errorf("unexpected domain %q", d)
 		}
+	}
+}
+
+// TestFetchRouteEntries_CacheHit verifies that when a cached file exists and
+// forceDownload is false, the URL is served from cache without making a request.
+func TestFetchRouteEntries_CacheHit(t *testing.T) {
+	cacheDir := t.TempDir()
+
+	// Seed the cache manually.
+	if err := subscription.WriteCachedList(cacheDir, "http://will-not-be-called/", "domains", []byte("cached.example.com\n")); err != nil {
+		t.Fatalf("WriteCachedList: %v", err)
+	}
+
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		_, _ = w.Write([]byte("live.example.com\n"))
+	}))
+	defer srv.Close()
+
+	// Replace the URL with the server URL but keep the cached file under the original key.
+	// Instead, seed cache for srv.URL.
+	if err := subscription.WriteCachedList(cacheDir, srv.URL, "domains", []byte("from-cache.example.com\n")); err != nil {
+		t.Fatalf("WriteCachedList: %v", err)
+	}
+
+	route := &config.SubscriptionRoute{DomainURLs: []string{srv.URL}}
+	result := subscription.FetchRouteEntries(context.Background(), "sub1", route, testOpts(), cacheDir, false)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if called {
+		t.Error("expected cache hit but server was called")
+	}
+	if len(result.Domains) != 1 || result.Domains[0] != "from-cache.example.com" {
+		t.Errorf("Domains: got %v, want [from-cache.example.com]", result.Domains)
+	}
+}
+
+// TestFetchRouteEntries_CacheFallback verifies that when a download fails and a
+// cached file exists, the cache is used as a fallback.
+func TestFetchRouteEntries_CacheFallback(t *testing.T) {
+	cacheDir := t.TempDir()
+	unreachable := "http://127.0.0.1:1"
+
+	if err := subscription.WriteCachedList(cacheDir, unreachable, "domains", []byte("fallback.example.com\n")); err != nil {
+		t.Fatalf("WriteCachedList: %v", err)
+	}
+
+	route := &config.SubscriptionRoute{DomainURLs: []string{unreachable}}
+	result := subscription.FetchRouteEntries(context.Background(), "sub1", route, testOpts(), cacheDir, false)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if len(result.Domains) != 1 || result.Domains[0] != "fallback.example.com" {
+		t.Errorf("Domains: got %v, want [fallback.example.com]", result.Domains)
+	}
+}
+
+// TestFetchRouteEntries_ForceDownload verifies that with forceDownload=true, the
+// server is always called even when a cached file exists.
+func TestFetchRouteEntries_ForceDownload(t *testing.T) {
+	cacheDir := t.TempDir()
+
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		_, _ = w.Write([]byte("live.example.com\n"))
+	}))
+	defer srv.Close()
+
+	// Seed cache with stale data.
+	if err := subscription.WriteCachedList(cacheDir, srv.URL, "domains", []byte("stale.example.com\n")); err != nil {
+		t.Fatalf("WriteCachedList: %v", err)
+	}
+
+	route := &config.SubscriptionRoute{DomainURLs: []string{srv.URL}}
+	result := subscription.FetchRouteEntries(context.Background(), "sub1", route, testOpts(), cacheDir, true)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if !called {
+		t.Error("expected server call with forceDownload=true but server was not called")
+	}
+	if len(result.Domains) != 1 || result.Domains[0] != "live.example.com" {
+		t.Errorf("Domains: got %v, want [live.example.com]", result.Domains)
 	}
 }
 

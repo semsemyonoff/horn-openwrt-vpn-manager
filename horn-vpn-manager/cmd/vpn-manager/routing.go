@@ -8,18 +8,22 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/config"
+	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/fetch"
 	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/logx"
 	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/routing"
+	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/subscription"
 	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/system"
 )
 
 type routingFlags struct {
-	configPath string
-	verbosity  int
-	debug      bool
-	noColor    bool
+	configPath        string
+	verbosity         int
+	debug             bool
+	noColor           bool
+	withSubscriptions bool
 }
 
 // binDir returns the directory containing the running binary.
@@ -45,6 +49,8 @@ func parseRoutingFlags(args []string) (routingFlags, error) {
 			f.debug = true
 		case args[i] == "--no-color":
 			f.noColor = true
+		case args[i] == "--with-subscriptions":
+			f.withSubscriptions = true
 		case strings.HasPrefix(args[i], "-v") && !strings.HasPrefix(args[i], "--"):
 			f.verbosity = len(args[i]) - 1 // -v=1, -vv=2, -vvv=3
 		}
@@ -77,7 +83,25 @@ func routingRunCtx(ctx context.Context, args []string) error {
 	applier := system.NewOpenWrt()
 	runner := routing.NewRunner(cfg, applier)
 
-	return runner.Run(ctx)
+	if err := runner.Run(ctx); err != nil {
+		return err
+	}
+
+	if flags.withSubscriptions {
+		subsListsDir := routing.DefaultListsDir + "/" + subscription.SubsListsSubdir
+		logx.Header("downloading subscription lists")
+		opts := fetch.Options{
+			Retries:     cfg.Fetch.Retries,
+			Timeout:     time.Duration(cfg.Fetch.TimeoutSeconds) * time.Second,
+			Parallelism: cfg.Fetch.Parallelism,
+		}
+		if err := subscription.DownloadSubscriptionLists(ctx, cfg, subsListsDir, opts); err != nil {
+			return fmt.Errorf("download subscription lists: %w", err)
+		}
+		logx.Header("done")
+	}
+
+	return nil
 }
 
 func routingRunDebug(flags routingFlags) error {
@@ -115,7 +139,25 @@ func routingRunDebug(flags routingFlags) error {
 	runner := routing.NewRunner(cfg, applier)
 	runner.ListsDir = outDir
 
-	return runner.Run(ctx)
+	if err := runner.Run(ctx); err != nil {
+		return err
+	}
+
+	if flags.withSubscriptions {
+		subsListsDir := filepath.Join(outDir, "lists", subscription.SubsListsSubdir)
+		logx.Header("downloading subscription lists")
+		opts := fetch.Options{
+			Retries:     cfg.Fetch.Retries,
+			Timeout:     time.Duration(cfg.Fetch.TimeoutSeconds) * time.Second,
+			Parallelism: cfg.Fetch.Parallelism,
+		}
+		if err := subscription.DownloadSubscriptionLists(ctx, cfg, subsListsDir, opts); err != nil {
+			return fmt.Errorf("download subscription lists: %w", err)
+		}
+		logx.Header("done")
+	}
+
+	return nil
 }
 
 func routingRestore(args []string) error {

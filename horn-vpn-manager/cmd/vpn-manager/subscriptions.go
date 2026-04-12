@@ -16,11 +16,13 @@ import (
 )
 
 type subsFlags struct {
-	configPath   string
-	templatePath string
-	verbosity    int
-	debug        bool
-	noColor      bool
+	configPath    string
+	templatePath  string
+	verbosity     int
+	debug         bool
+	noColor       bool
+	downloadLists bool
+	cachedLists   bool
 }
 
 func parseSubsFlags(args []string) (subsFlags, error) {
@@ -43,11 +45,34 @@ func parseSubsFlags(args []string) (subsFlags, error) {
 			f.debug = true
 		case args[i] == "--no-color":
 			f.noColor = true
+		case args[i] == "--download-lists":
+			f.downloadLists = true
+		case args[i] == "--cached-lists":
+			f.cachedLists = true
 		case strings.HasPrefix(args[i], "-v") && !strings.HasPrefix(args[i], "--"):
 			f.verbosity = len(args[i]) - 1
 		}
 	}
 	return f, nil
+}
+
+// applyListsFlags wires the list-cache flags onto the runner.
+//
+//   - --cached-lists: use prefetched lists from SubsListsDir (cache-first);
+//     downloads only on cache miss; uses cache as fallback when download fails.
+//     Intended to consume lists pre-fetched by "routing run --with-subscriptions".
+//   - --download-lists: always download fresh lists, save them to SubsListsDir,
+//     and fall back to the saved copy if a download later fails.
+//   - (no flag): live refresh — always download, no cache interaction.
+func applyListsFlags(runner *subscription.Runner, flags subsFlags, subsListsDir string) {
+	switch {
+	case flags.downloadLists:
+		runner.SubsListsDir = subsListsDir
+		runner.DownloadLists = true
+	case flags.cachedLists:
+		runner.SubsListsDir = subsListsDir
+		// DownloadLists stays false → cache-first, download only on miss.
+	}
 }
 
 func subscriptionsRun(args []string) error {
@@ -75,6 +100,7 @@ func subscriptionsRunCtx(ctx context.Context, args []string) error {
 	applier := system.NewOpenWrt()
 	runner := subscription.NewRunner(cfg, applier)
 	runner.TemplatePath = flags.templatePath
+	applyListsFlags(runner, flags, subscription.DefaultSubsListsDir)
 
 	return runner.Run(ctx)
 }
@@ -102,6 +128,7 @@ func subscriptionsDryRun(args []string) error {
 	runner := subscription.NewRunner(cfg, applier)
 	runner.TemplatePath = flags.templatePath
 	runner.DryRun = true
+	applyListsFlags(runner, flags, subscription.DefaultSubsListsDir)
 
 	return runner.Run(ctx)
 }
@@ -147,12 +174,15 @@ func subscriptionsRunDebug(flags subsFlags, dryRun bool) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	subsListsDir := filepath.Join(outDir, "lists", subscription.SubsListsSubdir)
+
 	applier := subscription.NewDebugApplier()
 	runner := subscription.NewRunner(cfg, applier)
 	runner.OutDir = outDir
 	runner.ConfigDir = outDir
 	runner.TemplatePath = templatePath
 	runner.DryRun = dryRun
+	applyListsFlags(runner, flags, subsListsDir)
 
 	return runner.Run(ctx)
 }

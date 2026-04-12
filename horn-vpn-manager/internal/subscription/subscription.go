@@ -49,6 +49,15 @@ type Runner struct {
 	ConfigDir    string
 	TemplatePath string // overrides cfg.Singbox.Template when non-empty
 	DryRun       bool
+
+	// SubsListsDir, if non-empty, enables subscription list caching.
+	// Lists downloaded from domain_urls/ip_urls are read from and written to
+	// this directory. When empty, lists are always downloaded.
+	SubsListsDir string
+
+	// DownloadLists forces re-download of all route lists even when cached
+	// copies exist in SubsListsDir. Downloaded data is still saved to cache.
+	DownloadLists bool
 }
 
 // NewRunner returns a Runner using the provided config and applier.
@@ -254,7 +263,7 @@ func (r *Runner) Run(ctx context.Context) error {
 
 		// Generate per-subscription route rules for non-default subscriptions only.
 		if !sub.Default && sub.Route != nil {
-			mergedRoute := FetchRouteEntries(ctx, id, sub.Route, opts)
+			mergedRoute := FetchRouteEntries(ctx, id, sub.Route, opts, r.SubsListsDir, r.DownloadLists)
 			rules := BuildRouteRules(mergedRoute, plan.FinalTag)
 			plan.RouteRules = rules
 			if len(rules) > 0 {
