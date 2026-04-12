@@ -1094,6 +1094,9 @@ return view.extend({
         ]);
 
         // ── Tab 5: Template editor ────────────────────────────────────────────
+        if (tmplData && tmplData.error) {
+            ui.addNotification(null, E("p", _("Template file not found. Save a template to create one.")), "warning");
+        }
         var initialTemplate =
             tmplData && tmplData.template ? tmplData.template : "";
         var originalTemplate = initialTemplate;
@@ -2338,6 +2341,14 @@ return view.extend({
             ui.addNotification(
                 null,
                 E("p", _("Only one subscription can be set as default")),
+                "warning",
+            );
+            return false;
+        }
+        if (defaults.length === 1 && defaults[0].enabled === false) {
+            ui.addNotification(
+                null,
+                E("p", _("The default subscription cannot be disabled")),
                 "warning",
             );
             return false;

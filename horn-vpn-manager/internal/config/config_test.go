@@ -130,8 +130,6 @@ func TestLoad_subscriptions_only(t *testing.T) {
 func TestLoad_subscription_disabled(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
-	f := false
-	_ = f
 	writeFile(t, path, `{
 		"subscriptions": {
 			"s1": {"name": "S1", "url": "https://example.com/s1", "enabled": false}

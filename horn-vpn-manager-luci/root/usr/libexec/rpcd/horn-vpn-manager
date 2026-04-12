@@ -80,6 +80,13 @@ case "$1" in
                     exit 0
                 fi
 
+                # Validate: all subscriptions must have non-empty string name and url
+                invalid_fields=$(echo "$new_config" | jq '[(.subscriptions // {}) | to_entries[] | select((.value.name | type) != "string" or (.value.url | type) != "string" or (.value.name // "") == "" or (.value.url // "") == "")] | length')
+                if [ "$invalid_fields" -gt 0 ]; then
+                    printf '{"error":"All subscriptions must have a non-empty string name and url"}'
+                    exit 0
+                fi
+
                 # Merge: preserve existing routing section; replace singbox, fetch (if provided), and subscriptions
                 if [ -f "$CONFIG_FILE" ]; then
                     existing=$(cat "$CONFIG_FILE")
@@ -547,7 +554,9 @@ TAGEOF
                 manual_file="$MANUAL_IPS_DEFAULT"
                 if [ -f "$CONFIG_FILE" ]; then
                     cf=$(jq -r '.routing.subnets.manual_file // ""' "$CONFIG_FILE" 2>/dev/null)
-                    [ -n "$cf" ] && manual_file="$cf"
+                    case "$cf" in
+                        /etc/horn-vpn-manager/*) manual_file="$cf" ;;
+                    esac
                 fi
                 if [ -f "$manual_file" ]; then
                     printf '{"ips":%s}' "$(jq -Rs '.' "$manual_file")"
@@ -562,7 +571,9 @@ TAGEOF
                 manual_file="$MANUAL_IPS_DEFAULT"
                 if [ -f "$CONFIG_FILE" ]; then
                     cf=$(jq -r '.routing.subnets.manual_file // ""' "$CONFIG_FILE" 2>/dev/null)
-                    [ -n "$cf" ] && manual_file="$cf"
+                    case "$cf" in
+                        /etc/horn-vpn-manager/*) manual_file="$cf" ;;
+                    esac
                 fi
                 mkdir -p "$(dirname "$manual_file")"
                 printf '%s' "$ips" > "${manual_file}.tmp" && mv "${manual_file}.tmp" "$manual_file"
