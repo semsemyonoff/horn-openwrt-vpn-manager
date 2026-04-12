@@ -155,9 +155,9 @@ The new Go core uses JSON merging (no `__PLACEHOLDER__` strings). Update the tem
 
 ### Task 9: CSS updates
 
-- [ ] Add styles for Run tab layout (two-section layout, per-section log output, mutual-exclusive checkbox visual state)
-- [ ] Add styles for import/export button placement in persistent header/tab bar area
-- [ ] Adjust any Routing tab styles after removing run/log section
+- [x] Add styles for Run tab layout (two-section layout, per-section log output, mutual-exclusive checkbox visual state)
+- [x] Add styles for import/export button placement in persistent header/tab bar area
+- [x] Adjust any Routing tab styles after removing run/log section
 
 ---
 

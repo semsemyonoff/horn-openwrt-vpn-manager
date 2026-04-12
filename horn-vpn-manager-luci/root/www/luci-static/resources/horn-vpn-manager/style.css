@@ -510,37 +510,6 @@
     margin-top: 0.35em;
 }
 
-/* ── Placeholder reference table ─────────────────────────────────────────── */
-.vpnsub-tpl-ref-table {
-    width: 100%;
-    max-width: 60em;
-    border-collapse: collapse;
-    font-size: 0.88em;
-}
-
-.vpnsub-tpl-ref-table th,
-.vpnsub-tpl-ref-table td {
-    text-align: left;
-    padding: 0.4em 0.75em;
-    border-bottom: 1px solid var(--border-color-low, #444);
-}
-
-.vpnsub-tpl-ref-table thead th {
-    background: var(--mid-background-color, rgba(0, 0, 0, 0.07));
-    font-weight: 600;
-    white-space: nowrap;
-}
-
-.vpnsub-tpl-ref-name {
-    font-family: monospace;
-    white-space: nowrap;
-    color: var(--primary-color, #509eaf);
-}
-
-.vpnsub-tpl-ref-type {
-    white-space: nowrap;
-    color: var(--text-low, #888);
-}
 
 /* ── Log output ──────────────────────────────────────────────────────────── */
 .vpnsub-log {
@@ -554,6 +523,11 @@
     overflow-y: auto;
     white-space: pre-wrap;
     word-break: break-all;
+}
+
+/* Run tab log: always reserve height so the empty state is visible */
+.vpnsub-run-log {
+    min-height: 6em;
 }
 
 /* ── Config import/export toolbar ───────────────────────────────────────── */
