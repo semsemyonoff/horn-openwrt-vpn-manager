@@ -502,7 +502,10 @@ TAGEOF
                     exit 0
                 fi
                 mkdir -p "$CONF_DIR"
-                printf '%s' "$tmpl" > "${CUSTOM_TEMPLATE}.tmp" && mv "${CUSTOM_TEMPLATE}.tmp" "$CUSTOM_TEMPLATE"
+                if ! { printf '%s' "$tmpl" > "${CUSTOM_TEMPLATE}.tmp" && mv "${CUSTOM_TEMPLATE}.tmp" "$CUSTOM_TEMPLATE"; }; then
+                    printf '{"error":"Failed to write template file"}'
+                    exit 0
+                fi
                 # Update config.json → singbox.template to point to custom template
                 if [ -f "$CONFIG_FILE" ]; then
                     existing_cfg=$(cat "$CONFIG_FILE")
@@ -510,7 +513,10 @@ TAGEOF
                     existing_cfg='{"singbox":{},"fetch":{},"routing":{},"subscriptions":{}}'
                 fi
                 updated=$(printf '%s' "$existing_cfg" | jq --arg p "$CUSTOM_TEMPLATE" '.singbox.template = $p')
-                printf '%s\n' "$updated" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+                if ! { printf '%s\n' "$updated" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"; }; then
+                    printf '{"error":"Failed to write config file"}'
+                    exit 0
+                fi
                 touch "$UNSYNC_SUBS_FLAG"
                 printf '{"result":"ok"}'
                 ;;
@@ -575,7 +581,7 @@ TAGEOF
                     case "$cf" in
                         /etc/horn-vpn-manager/*)
                             case "$cf" in
-                                *../*|*/..*) ;;
+                                *../*|*/..*|*/..|*/.) ;;
                                 *) manual_file="$cf" ;;
                             esac
                             ;;
@@ -597,7 +603,7 @@ TAGEOF
                     case "$cf" in
                         /etc/horn-vpn-manager/*)
                             case "$cf" in
-                                *../*|*/..*) ;;
+                                *../*|*/..*|*/..|*/.) ;;
                                 *) manual_file="$cf" ;;
                             esac
                             ;;
@@ -647,7 +653,15 @@ TAGEOF
                     }
                 ' /etc/config/dhcp | sort)
 
-                new_domains=$(echo "$input" | jq -r '.domains[]? // empty' | sort)
+                # Build new_domains from validated input to match what will actually be written
+                new_domains=$(echo "$input" | jq -r '.domains[]? // empty' | while IFS= read -r domain; do
+                    [ -z "$domain" ] && continue
+                    case "$domain" in
+                        *[!A-Za-z0-9.-]*) continue ;;
+                        .*|*.)             continue ;;
+                    esac
+                    printf '%s\n' "$domain"
+                done | sort)
 
                 # Strip existing vpn_domains ipset blocks
                 stripped=$(awk '
