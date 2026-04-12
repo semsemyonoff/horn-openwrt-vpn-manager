@@ -1271,6 +1271,7 @@ return view.extend({
                             var tpl = (res && res.template) ? res.template : "";
                             templateTextarea.value = tpl;
                             originalTemplate = tpl;
+                            self._singboxTemplate = "";
                             dirtyEl.style.display = "none";
                             updateHighlight();
                             templateErrEl.style.display = "none";

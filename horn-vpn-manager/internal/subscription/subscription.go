@@ -198,6 +198,7 @@ func (r *Runner) Run(ctx context.Context) error { //nolint:gocognit,gocyclo // o
 		defaultFinalTag string
 		tagNames        = make(map[string]string)
 		processed       int
+		enabledCount    int
 		failedSubs      []string
 		urlCache        = make(map[string][]string) // url → decoded URIs, avoids re-downloading shared URLs
 	)
@@ -214,6 +215,7 @@ func (r *Runner) Run(ctx context.Context) error { //nolint:gocognit,gocyclo // o
 			logx.Info("Skipping disabled subscription: %s", logx.Bold(id))
 			continue
 		}
+		enabledCount++
 		if sub.URL == "" {
 			logx.Warn("Subscription %s has no URL configured, skipping", id)
 			continue
@@ -331,7 +333,7 @@ func (r *Runner) Run(ctx context.Context) error { //nolint:gocognit,gocyclo // o
 		processed++
 	}
 
-	if processed == 0 && len(r.Cfg.Subscriptions) > 0 {
+	if processed == 0 && enabledCount > 0 {
 		return errors.New("no subscriptions were processed successfully")
 	}
 

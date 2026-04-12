@@ -165,7 +165,7 @@ func routingRestore(args []string) error {
 	if err != nil {
 		return err
 	}
-	logx.Setup(!flags.noColor, flags.verbosity, false)
+	logx.Setup(!flags.noColor, flags.verbosity, flags.debug)
 
 	cfg, err := config.Load(flags.configPath)
 	if err != nil {

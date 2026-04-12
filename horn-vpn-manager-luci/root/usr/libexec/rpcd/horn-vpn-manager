@@ -366,6 +366,10 @@ TAGEOF
                 rm -f "$CUSTOM_TEMPLATE"
                 if [ -f "$CONFIG_FILE" ]; then
                     updated=$(jq '.singbox.template = ""' "$CONFIG_FILE")
+                    if [ -z "$updated" ]; then
+                        printf '{"error":"Failed to update config"}'
+                        exit 0
+                    fi
                     printf '%s\n' "$updated" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
                 fi
                 touch "$UNSYNC_FLAG"
