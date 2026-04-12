@@ -163,10 +163,10 @@ The new Go core uses JSON merging (no `__PLACEHOLDER__` strings). Update the tem
 
 ### Task 10: Build verification and fix
 
-- [ ] Run `make build` (or `make build-ipk`) and capture full output
-- [ ] If build fails: read error output, identify root cause, fix (po2lmo errors, missing files, ACL syntax, rpcd syntax errors, etc.)
-- [ ] Re-run build until it passes cleanly
-- [ ] If any Go core changes were made during tasks 1–9: run `go test ./...` and `golangci-lint run` inside `horn-vpn-manager/`
+- [x] Run `make build` (or `make build-ipk`) and capture full output
+- [x] If build fails: read error output, identify root cause, fix (po2lmo errors, missing files, ACL syntax, rpcd syntax errors, etc.)
+- [x] Re-run build until it passes cleanly
+- [x] If any Go core changes were made during tasks 1–9: run `go test ./...` and `golangci-lint run` inside `horn-vpn-manager/`
 
 ---
 
