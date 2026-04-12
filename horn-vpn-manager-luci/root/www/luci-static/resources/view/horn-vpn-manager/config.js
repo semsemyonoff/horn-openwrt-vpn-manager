@@ -1782,10 +1782,88 @@ return view.extend({
             ]),
         ]);
 
+        // ── Import / Export toolbar ───────────────────────────────────────────
+        var exportBtn = E("button", {
+            class: "btn cbi-button cbi-button-neutral",
+            click: function () {
+                callGetConfig()
+                    .then(function (res) {
+                        if (res && res.config) {
+                            downloadJson(res.config, "horn-vpn-manager-config.json");
+                        } else {
+                            ui.addNotification(
+                                null,
+                                E("p", _("Failed to fetch config for export")),
+                                "error",
+                            );
+                        }
+                    })
+                    .catch(function (err) {
+                        ui.addNotification(
+                            null,
+                            E("p", _("Export error: ") + (err.message || String(err))),
+                            "error",
+                        );
+                    });
+            },
+        }, _("Export config"));
+
+        var importBtn = E("button", {
+            class: "btn cbi-button cbi-button-neutral",
+            click: function () {
+                importJson(".json")
+                    .then(function (data) {
+                        if (!data || typeof data !== "object") {
+                            ui.addNotification(
+                                null,
+                                E("p", _("Invalid config file")),
+                                "warning",
+                            );
+                            return;
+                        }
+                        if (!data.subscriptions || typeof data.subscriptions !== "object") {
+                            ui.addNotification(
+                                null,
+                                E("p", _("Invalid config: missing subscriptions")),
+                                "warning",
+                            );
+                            return;
+                        }
+                        return callSetConfig(data)
+                            .then(function (res) {
+                                if (res && res.error) throw new Error(res.error);
+                                ui.addNotification(
+                                    null,
+                                    E("p", _("Config imported — reloading…")),
+                                    "info",
+                                );
+                                setTimeout(function () {
+                                    location.reload();
+                                }, 1500);
+                            });
+                    })
+                    .catch(function (err) {
+                        if (err && err.message !== "No file selected") {
+                            ui.addNotification(
+                                null,
+                                E("p", _("Import error: ") + (err.message || String(err))),
+                                "error",
+                            );
+                        }
+                    });
+            },
+        }, _("Import config"));
+
+        var configToolbar = E("div", { class: "vpnsub-config-toolbar" }, [
+            exportBtn,
+            importBtn,
+        ]);
+
         // ── Assemble tabs ─────────────────────────────────────────────────────
         return E("div", { class: "cbi-map" }, [
             E("h2", {}, _("VPN management")),
             unsyncBanner,
+            configToolbar,
             makeTabs([
                 {
                     id: "settings",

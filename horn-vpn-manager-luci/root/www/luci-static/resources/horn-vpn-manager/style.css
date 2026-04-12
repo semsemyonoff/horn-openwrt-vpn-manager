@@ -556,6 +556,13 @@
     word-break: break-all;
 }
 
+/* ── Config import/export toolbar ───────────────────────────────────────── */
+.vpnsub-config-toolbar {
+    display: flex;
+    gap: 0.5em;
+    margin-bottom: 1em;
+}
+
 /* ── Unsync banner ──────────────────────────────────────────────────────── */
 .vpnsub-unsync-banner {
     margin-bottom: 1em;

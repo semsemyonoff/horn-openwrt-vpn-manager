@@ -122,9 +122,9 @@ Remove "Update" tab, rename tabs, add "Run" tab with two sections.
 
 ### Task 6: Update config.js — import/export config on all tabs
 
-- [ ] Add "Export config" and "Import config" buttons to the tab bar area or a persistent header (visible across all tabs)
-- [ ] Export: call `get_config` (or use current in-memory config), serialize to JSON, trigger browser `Blob` download as `horn-vpn-manager-config.json`
-- [ ] Import: file input (`<input type="file">`), read JSON via `FileReader`, pass to `_validate()`, then call `set_config` RPC; show success/error feedback
+- [x] Add "Export config" and "Import config" buttons to the tab bar area or a persistent header (visible across all tabs)
+- [x] Export: call `get_config` (or use current in-memory config), serialize to JSON, trigger browser `Blob` download as `horn-vpn-manager-config.json`
+- [x] Import: file input (`<input type="file">`), read JSON via `FileReader`, pass to `_validate()`, then call `set_config` RPC; show success/error feedback
 
 ---
 
