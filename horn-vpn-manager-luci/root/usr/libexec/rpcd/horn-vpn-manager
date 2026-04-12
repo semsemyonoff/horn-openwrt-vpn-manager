@@ -87,6 +87,20 @@ case "$1" in
                     exit 0
                 fi
 
+                # Validate: include and exclude must be arrays of strings if present
+                invalid_filter_type=$(echo "$new_config" | jq '[(.subscriptions // {})[] | select((.include != null and (.include | type) != "array") or (.exclude != null and (.exclude | type) != "array"))] | length')
+                if [ "$invalid_filter_type" -gt 0 ]; then
+                    printf '{"error":"Include and exclude filters must be arrays"}'
+                    exit 0
+                fi
+
+                # Validate: include and exclude filter entries must be non-empty strings
+                invalid_filter_entries=$(echo "$new_config" | jq '[(.subscriptions // {})[] | ((.include // []) + (.exclude // []))[] | select(type != "string" or . == "")] | length')
+                if [ "$invalid_filter_entries" -gt 0 ]; then
+                    printf '{"error":"Include and exclude filter entries must be non-empty strings"}'
+                    exit 0
+                fi
+
                 # Merge: preserve existing routing section; replace singbox, fetch (if provided), and subscriptions
                 if [ -f "$CONFIG_FILE" ]; then
                     existing=$(cat "$CONFIG_FILE")

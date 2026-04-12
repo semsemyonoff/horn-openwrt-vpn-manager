@@ -2547,11 +2547,15 @@ return view.extend({
 
         var cfg = { domains: { url: domainsUrl }, subnets: { urls: subnetUrls } };
 
+        var self = this;
         if (btn) btn.disabled = true;
         Promise.all([callSetDomainsConfig(cfg)])
             .then(function () {
-                ui.addNotification(null, E("p", _("Settings saved")), "info");
                 if (dirtyEl) dirtyEl.style.display = "none";
+                return self._refreshSyncStatus();
+            })
+            .then(function () {
+                ui.addNotification(null, E("p", _("Settings saved")), "info");
             })
             .catch(function (err) {
                 ui.addNotification(

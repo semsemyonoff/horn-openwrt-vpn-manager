@@ -9,6 +9,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -68,6 +69,7 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	opts := r.fetchOpts()
 	var domainsUpdated, subnetsUpdated bool
+	var downloadFailed bool
 
 	// Download domains
 	if url := r.Cfg.Routing.Domains.URL; url != "" {
@@ -76,6 +78,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		data, err := fetch.Download(ctx, url, opts)
 		if err != nil {
 			logx.Err("Failed to download domain list: %v", err)
+			downloadFailed = true
 		} else {
 			if err := atomicWrite(r.domainsCachePath(), data); err != nil {
 				return fmt.Errorf("write domains cache: %w", err)
@@ -97,6 +100,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		for i, res := range results {
 			if res.Err != nil {
 				logx.Err("Failed to download subnet list: %s", res.URL)
+				downloadFailed = true
 				continue
 			}
 			anySucceeded = true
@@ -153,6 +157,9 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 
 	logx.Header("done")
+	if downloadFailed {
+		return errors.New("one or more downloads failed; routing partially updated")
+	}
 	return nil
 }
 
@@ -166,10 +173,9 @@ func (r *Runner) Restore() error {
 	if fileExistsNonEmpty(domainsCache) {
 		logx.Info("Restoring domain list from cache...")
 		if err := r.Applier.ApplyDomains(domainsCache, "/tmp/dnsmasq.d"); err != nil {
-			logx.Err("Failed to apply domains: %v", err)
-		} else {
-			restored = true
+			return fmt.Errorf("apply domains: %w", err)
 		}
+		restored = true
 	} else {
 		logx.Info("No domain cache to restore")
 	}
@@ -188,10 +194,9 @@ func (r *Runner) Restore() error {
 			}
 			logx.Info("IP list updated: %s entries -> %s", logx.Bold(strconv.Itoa(len(ipList))), path)
 			if err := r.Applier.ApplyIPs(path); err != nil {
-				logx.Err("Failed to apply IPs: %v", err)
-			} else {
-				restored = true
+				return fmt.Errorf("apply IPs: %w", err)
 			}
+			restored = true
 		}
 	} else {
 		logx.Info("No IP cache to restore")
