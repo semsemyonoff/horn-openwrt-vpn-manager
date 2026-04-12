@@ -117,10 +117,14 @@ func RenderConfig(
 	}
 
 	// Write back the managed fields into the route map.
-	if b, err := json.Marshal(mergedRules); err == nil {
+	if b, err := json.Marshal(mergedRules); err != nil {
+		return nil, fmt.Errorf("marshal route rules: %w", err)
+	} else {
 		routeMap["rules"] = b
 	}
-	if b, err := json.Marshal(defaultFinalTag); err == nil {
+	if b, err := json.Marshal(defaultFinalTag); err != nil {
+		return nil, fmt.Errorf("marshal route final: %w", err)
+	} else {
 		routeMap["final"] = b
 	}
 

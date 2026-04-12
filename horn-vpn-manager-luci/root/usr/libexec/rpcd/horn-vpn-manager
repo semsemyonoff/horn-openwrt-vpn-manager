@@ -408,6 +408,10 @@ case "$1" in
             test_delays)
                 read -r input
                 test_url=$(echo "$input" | jq -r '.url // "https://www.gstatic.com/generate_204"')
+                case "$test_url" in
+                    http://*|https://*) ;;
+                    *) printf '{"error":"Invalid URL"}'; exit 0 ;;
+                esac
                 # URL-encode test_url for use as query parameter
                 enc_url=$(printf '%s' "$test_url" | sed \
                     -e 's/%/%25/g' -e 's/ /%20/g' -e 's/:/%3A/g' \
@@ -555,7 +559,12 @@ TAGEOF
                 if [ -f "$CONFIG_FILE" ]; then
                     cf=$(jq -r '.routing.subnets.manual_file // ""' "$CONFIG_FILE" 2>/dev/null)
                     case "$cf" in
-                        /etc/horn-vpn-manager/*) manual_file="$cf" ;;
+                        /etc/horn-vpn-manager/*)
+                            case "$cf" in
+                                *../*|*/..*) ;;
+                                *) manual_file="$cf" ;;
+                            esac
+                            ;;
                     esac
                 fi
                 if [ -f "$manual_file" ]; then
@@ -572,7 +581,12 @@ TAGEOF
                 if [ -f "$CONFIG_FILE" ]; then
                     cf=$(jq -r '.routing.subnets.manual_file // ""' "$CONFIG_FILE" 2>/dev/null)
                     case "$cf" in
-                        /etc/horn-vpn-manager/*) manual_file="$cf" ;;
+                        /etc/horn-vpn-manager/*)
+                            case "$cf" in
+                                *../*|*/..*) ;;
+                                *) manual_file="$cf" ;;
+                            esac
+                            ;;
                     esac
                 fi
                 mkdir -p "$(dirname "$manual_file")"

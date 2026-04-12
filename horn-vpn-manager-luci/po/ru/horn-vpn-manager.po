@@ -234,8 +234,8 @@ msgstr "Просмотр последних записей sing-box из сис�
 msgid "Sing-box template config"
 msgstr "Шаблон конфига sing-box"
 
-msgid "Edit config.template.json — the template used to generate the sing-box configuration"
-msgstr "Редактирование config.template.json — шаблона для генерации конфигурации sing-box"
+msgid "Edit sing-box.template.json — the template used to generate the sing-box configuration"
+msgstr "Редактирование sing-box.template.json — шаблона для генерации конфигурации sing-box"
 
 msgid "sing-box system log"
 msgstr "Системный лог sing-box"
@@ -264,8 +264,8 @@ msgstr "(ожидание вывода…)"
 msgid "Template"
 msgstr "Шаблон"
 
-msgid "config.template.json"
-msgstr "config.template.json"
+msgid "sing-box.template.json"
+msgstr "sing-box.template.json"
 
 msgid "Placeholders"
 msgstr "Переменные"
@@ -425,6 +425,12 @@ msgstr "Логов ещё нет. Запустите подписки."
 
 msgid "No log yet. Run routing to see output."
 msgstr "Логов ещё нет. Запустите маршрутизацию."
+
+msgid "Settings have been saved but not yet applied. Go to the Run tab and run both subscriptions and routing to apply changes."
+msgstr "Настройки сохранены, но ещё не применены. Перейдите на вкладку Запуск и запустите подписки и маршрутизацию."
+
+msgid "Routing settings have been saved but not yet applied. Go to the Run tab and run routing to apply changes."
+msgstr "Настройки маршрутизации сохранены, но ещё не применены. Перейдите на вкладку Запуск и запустите маршрутизацию."
 
 msgid "Settings have been saved but not yet applied to sing-box. Go to the Run tab and run subscriptions to apply changes."
 msgstr "Настройки сохранены, но ещё не применены к sing-box. Перейдите на вкладку Запуск и запустите подписки."

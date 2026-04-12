@@ -234,8 +234,8 @@ msgstr "View recent sing-box log entries from the system journal"
 msgid "Sing-box template config"
 msgstr "Sing-box template config"
 
-msgid "Edit config.template.json — the template used to generate the sing-box configuration"
-msgstr "Edit config.template.json — the template used to generate the sing-box configuration"
+msgid "Edit sing-box.template.json — the template used to generate the sing-box configuration"
+msgstr "Edit sing-box.template.json — the template used to generate the sing-box configuration"
 
 msgid "sing-box system log"
 msgstr "sing-box system log"
@@ -264,8 +264,8 @@ msgstr "(waiting for output…)"
 msgid "Template"
 msgstr "Template"
 
-msgid "config.template.json"
-msgstr "config.template.json"
+msgid "sing-box.template.json"
+msgstr "sing-box.template.json"
 
 msgid "Placeholders"
 msgstr "Placeholders"
@@ -425,6 +425,12 @@ msgstr "No log yet. Run subscriptions to see output."
 
 msgid "No log yet. Run routing to see output."
 msgstr "No log yet. Run routing to see output."
+
+msgid "Settings have been saved but not yet applied. Go to the Run tab and run both subscriptions and routing to apply changes."
+msgstr "Settings have been saved but not yet applied. Go to the Run tab and run both subscriptions and routing to apply changes."
+
+msgid "Routing settings have been saved but not yet applied. Go to the Run tab and run routing to apply changes."
+msgstr "Routing settings have been saved but not yet applied. Go to the Run tab and run routing to apply changes."
 
 msgid "Settings have been saved but not yet applied to sing-box. Go to the Run tab and run subscriptions to apply changes."
 msgstr "Settings have been saved but not yet applied to sing-box. Go to the Run tab and run subscriptions to apply changes."

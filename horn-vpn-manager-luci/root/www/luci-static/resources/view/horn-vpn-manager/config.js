@@ -1264,7 +1264,7 @@ return view.extend({
 
         var templatePane = E("div", { class: "vpnsub-tab-pane" }, [
             E("div", { class: "cbi-section" }, [
-                E("legend", {}, _("config.template.json")),
+                E("legend", {}, _("sing-box.template.json")),
                 E("div", { class: "vpnsub-log-actions" }, [
                     dirtyEl,
                     "\u00a0\u00a0",
@@ -1868,7 +1868,7 @@ return view.extend({
                     id: "template",
                     label: _("Sing-box template config"),
                     desc: _(
-                        "Edit config.template.json — the template used to generate the sing-box configuration",
+                        "Edit sing-box.template.json — the template used to generate the sing-box configuration",
                     ),
                     content: templatePane,
                 },
