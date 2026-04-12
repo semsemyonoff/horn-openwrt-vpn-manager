@@ -2,88 +2,112 @@
 # shellcheck disable=SC3043
 
 CONF_DIR="/etc/horn-vpn-manager"
-SUBS_JSON="${CONF_DIR}/subs.json"
-SUBS_SCRIPT="/usr/libexec/horn-vpn-manager/subs.sh"
-TEMPLATE_FILE="${CONF_DIR}/config.template.json"
-DEFAULT_TEMPLATE_FILE="/usr/share/horn-vpn-manager/config.template.default.json"
+CONFIG_FILE="${CONF_DIR}/config.json"
+CUSTOM_TEMPLATE="${CONF_DIR}/sing-box.template.json"
+DEFAULT_TEMPLATE_FILE="/usr/share/horn-vpn-manager/sing-box.template.json"
 TAGS_FILE="${CONF_DIR}/subs-tags.json"
-LOG_FILE="/tmp/horn-vpn-manager-sub.log"
+LOG_FILE="/tmp/horn-vpn-manager-subscriptions.log"
 PID_FILE="/tmp/horn-vpn-manager.pid"
+ROUTING_LOG="/tmp/horn-vpn-manager-routing.log"
+ROUTING_PID="/tmp/horn-vpn-manager-routing.pid"
 
 UNSYNC_FLAG="${CONF_DIR}/.needs-update"
 
-DOMAINS_JSON="${CONF_DIR}/domains.json"
-DOMAINS_SCRIPT="/usr/libexec/horn-vpn-manager/getdomains.sh"
-DOMAINS_LOG="/tmp/horn-vpn-manager-domains.log"
-DOMAINS_PID="/tmp/horn-vpn-manager-domains.pid"
-MANUAL_IPS="${CONF_DIR}/lists/manual-ip.lst"
+MANUAL_IPS_DEFAULT="${CONF_DIR}/lists/manual-ip.lst"
 
 case "$1" in
     list)
-        echo '{"get_config":{},"set_config":{"config":"Object"},"run_script":{"dry_run":"Boolean","verbose":"Number"},"get_log":{},"get_syslog":{"lines":"Number"},"test_url":{"url":"String"},"get_sb_status":{},"set_proxy":{"proxy":"String","selected":"String"},"test_delays":{"tags":"Array","url":"String"},"get_template":{},"set_template":{"template":"String"},"reset_template":{},"get_domains_config":{},"set_domains_config":{"config":"Object"},"get_manual_ips":{},"set_manual_ips":{"ips":"String"},"run_getdomains":{"verbose":"Number"},"get_domains_log":{},"get_manual_domains":{},"set_manual_domains":{"domains":"Array"},"get_sync_status":{}}'
+        echo '{"get_config":{},"set_config":{"config":"Object"},"run_script":{"dry_run":"Boolean","cached_lists":"Boolean","download_lists":"Boolean"},"get_log":{},"get_syslog":{"lines":"Number"},"test_url":{"url":"String"},"get_sb_status":{},"set_proxy":{"proxy":"String","selected":"String"},"test_delays":{"tags":"Array","url":"String"},"get_template":{},"set_template":{"template":"String"},"reset_template":{},"get_domains_config":{},"set_domains_config":{"config":"Object"},"get_manual_ips":{},"set_manual_ips":{"ips":"String"},"run_routing":{"with_subscriptions":"Boolean"},"get_routing_log":{},"get_manual_domains":{},"set_manual_domains":{"domains":"Array"},"get_sync_status":{}}'
         ;;
     call)
         case "$2" in
             get_config)
-                if [ -f "$SUBS_JSON" ]; then
-                    printf '{"config":%s}' "$(cat "$SUBS_JSON")"
+                if [ -f "$CONFIG_FILE" ]; then
+                    # Return singbox settings and the full subscriptions keyed object
+                    result=$(jq '{
+                        singbox: (.singbox // {}),
+                        subscriptions: (.subscriptions // {})
+                    }' "$CONFIG_FILE" 2>/dev/null)
+                    if [ -n "$result" ]; then
+                        printf '{"config":%s}' "$result"
+                    else
+                        printf '{"error":"Failed to parse config.json"}'
+                    fi
                 else
-                    printf '{"config":{"log_level":"warn","subscriptions":[]}}'
+                    printf '{"config":{"singbox":{"log_level":"warn","test_url":"https://www.gstatic.com/generate_204","template":""},"subscriptions":{}}}'
                 fi
                 ;;
 
             set_config)
                 read -r input
-                # Extract the "config" field as raw JSON and write to file
-                if echo "$input" | jq -e '.config' > /dev/null 2>&1; then
-                    config_json=$(echo "$input" | jq '.config')
-                    # Validate: default subscriptions must not be disabled
-                    def_disabled=$(echo "$config_json" | jq '[.subscriptions[]? | select(.default == true and ((if has("enabled") then .enabled else true end) | tostring | ascii_downcase) == "false")] | length')
-                    if [ "$def_disabled" -gt 0 ]; then
-                        printf '{"error":"Default subscription cannot be disabled"}'
-                        exit 0
-                    fi
-                    # Validate: at least one enabled default subscription
-                    def_enabled=$(echo "$config_json" | jq '[.subscriptions[]? | select(.default == true and ((if has("enabled") then .enabled else true end) | tostring | ascii_downcase) != "false")] | length')
-                    if [ "$def_enabled" -eq 0 ]; then
-                        printf '{"error":"At least one enabled default subscription is required"}'
-                        exit 0
-                    fi
-                    mkdir -p "$(dirname "$SUBS_JSON")"
-                    echo "$config_json" > "$SUBS_JSON"
-                    touch "$UNSYNC_FLAG"
-                    printf '{"result":"ok"}'
-                else
+                if ! echo "$input" | jq -e '.config' > /dev/null 2>&1; then
                     printf '{"error":"Invalid config JSON"}'
+                    exit 0
                 fi
+                new_config=$(echo "$input" | jq '.config')
+
+                # Validate: subscriptions must be a non-empty object
+                sub_count=$(echo "$new_config" | jq '(.subscriptions // {}) | length')
+                if [ "$sub_count" -eq 0 ]; then
+                    printf '{"error":"At least one subscription is required"}'
+                    exit 0
+                fi
+
+                # Validate: exactly one default subscription
+                def_count=$(echo "$new_config" | jq '[(.subscriptions // {})[] | select(.default == true)] | length')
+                if [ "$def_count" -eq 0 ]; then
+                    printf '{"error":"At least one enabled default subscription is required"}'
+                    exit 0
+                fi
+                if [ "$def_count" -gt 1 ]; then
+                    printf '{"error":"Only one default subscription is allowed"}'
+                    exit 0
+                fi
+
+                # Validate: default subscription must not be disabled
+                def_disabled=$(echo "$new_config" | jq '[(.subscriptions // {})[] | select(.default == true and .enabled == false)] | length')
+                if [ "$def_disabled" -gt 0 ]; then
+                    printf '{"error":"Default subscription cannot be disabled"}'
+                    exit 0
+                fi
+
+                # Merge: preserve existing fetch and routing sections; replace singbox and subscriptions
+                if [ -f "$CONFIG_FILE" ]; then
+                    existing=$(cat "$CONFIG_FILE")
+                else
+                    existing='{"singbox":{},"fetch":{},"routing":{},"subscriptions":{}}'
+                fi
+                merged=$(jq -n \
+                    --argjson ex "$existing" \
+                    --argjson inp "$new_config" \
+                    '$ex + {singbox: ($inp.singbox // $ex.singbox // {}), subscriptions: ($inp.subscriptions // {})}')
+                if [ -z "$merged" ]; then
+                    printf '{"error":"Failed to merge config"}'
+                    exit 0
+                fi
+                mkdir -p "$CONF_DIR"
+                printf '%s\n' "$merged" > "$CONFIG_FILE"
+                touch "$UNSYNC_FLAG"
+                printf '{"result":"ok"}'
                 ;;
 
             run_script)
-                if [ ! -f "$SUBS_SCRIPT" ]; then
-                    printf '{"error":"Script not found: %s"}' "$SUBS_SCRIPT"
-                    exit 0
-                fi
-                if [ ! -x "$SUBS_SCRIPT" ]; then
-                    chmod +x "$SUBS_SCRIPT"
-                fi
-                # Parse optional params: {"dry_run": bool, "verbose": number}
+                # Parse optional params
                 read -r input
                 dry_run=$(echo "$input" | jq -r '.dry_run // false')
-                verbose=$(echo "$input"  | jq -r '.verbose  // 2')
+                cached_lists=$(echo "$input" | jq -r '.cached_lists // false')
+                download_lists=$(echo "$input" | jq -r '.download_lists // false')
 
-                # Build command + options
-                [ "$dry_run" = "true" ] && cmd="dry-run" || cmd="run"
-                args="$cmd"
-                case "$verbose" in
-                    1) args="$args -v"   ;;
-                    2) args="$args -vv"  ;;
-                    3) args="$args -vvv" ;;
-                esac
+                # Build subcommand
+                [ "$dry_run" = "true" ] && subcmd="dry-run" || subcmd="run"
+                args="subscriptions $subcmd"
+                [ "$cached_lists" = "true" ]   && args="$args --cached-lists"
+                [ "$download_lists" = "true" ]  && args="$args --download-lists"
 
                 # Truncate log so the frontend sees only the current run
                 : > "$LOG_FILE"
                 # shellcheck disable=SC2086
-                sh "$SUBS_SCRIPT" $args > /dev/null 2>&1 &
+                vpn-manager $args >> "$LOG_FILE" 2>&1 &
                 echo $! > "$PID_FILE"
                 printf '{"result":"started"}'
                 ;;
@@ -98,6 +122,36 @@ case "$1" in
                 fi
                 if [ -f "$LOG_FILE" ]; then
                     log_json=$(jq -Rs '.' "$LOG_FILE")
+                else
+                    log_json='""'
+                fi
+                printf '{"log":%s,"running":%s}' "$log_json" "$running"
+                ;;
+
+            run_routing)
+                read -r input
+                with_subs=$(echo "$input" | jq -r '.with_subscriptions // false')
+
+                args="routing run"
+                [ "$with_subs" = "true" ] && args="$args --with-subscriptions"
+
+                : > "$ROUTING_LOG"
+                # shellcheck disable=SC2086
+                vpn-manager $args >> "$ROUTING_LOG" 2>&1 &
+                echo $! > "$ROUTING_PID"
+                printf '{"result":"started"}'
+                ;;
+
+            get_routing_log)
+                running=false
+                if [ -f "$ROUTING_PID" ]; then
+                    pid=$(cat "$ROUTING_PID")
+                    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+                        running=true
+                    fi
+                fi
+                if [ -f "$ROUTING_LOG" ]; then
+                    log_json=$(jq -Rs '.' "$ROUTING_LOG")
                 else
                     log_json='""'
                 fi
@@ -122,10 +176,10 @@ case "$1" in
                 vpn_ok=false
                 case "$vpn_http_code" in [1-9][0-9][0-9]) vpn_ok=true ;; esac
 
-                # 2. Determine outbound from config.json routing rules
+                # 2. Determine outbound from sing-box config routing rules
                 outbound=""
-                config_json="/etc/sing-box/config.json"
-                if [ -f "$config_json" ]; then
+                sb_config="/etc/sing-box/config.json"
+                if [ -f "$sb_config" ]; then
                     outbound=$(jq -r --arg d "$domain" '
                         [
                           .route.rules[]? |
@@ -137,10 +191,9 @@ case "$1" in
                           ) |
                           .outbound
                         ][0] // ""
-                    ' "$config_json" 2>/dev/null)
-                    # Fall back to route.final (default outbound)
+                    ' "$sb_config" 2>/dev/null)
                     [ -z "$outbound" ] && \
-                        outbound=$(jq -r '.route.final // "direct"' "$config_json" 2>/dev/null)
+                        outbound=$(jq -r '.route.final // "direct"' "$sb_config" 2>/dev/null)
                 fi
 
                 jq -n \
@@ -176,12 +229,11 @@ case "$1" in
                 fi
 
                 # Tags use only alphanumeric and hyphens — no URL encoding needed
-                result=$(curl -s -X PUT \
+                curl -s -X PUT \
                     -H "Content-Type: application/json" \
                     -d "{\"name\":\"${selected}\"}" \
                     --max-time 5 \
-                    "http://127.0.0.1:9090/proxies/${proxy}" 2>/dev/null)
-                # Clash API returns 204 No Content on success
+                    "http://127.0.0.1:9090/proxies/${proxy}" > /dev/null 2>/dev/null
                 printf '{"result":"ok"}'
                 ;;
 
@@ -235,10 +287,18 @@ TAGEOF
                 ;;
 
             get_template)
-                if [ -f "$TEMPLATE_FILE" ]; then
-                    printf '{"template":%s}' "$(jq -Rs '.' "$TEMPLATE_FILE")"
+                # Determine template path: custom path from config, then default on-device file
+                tmpl_path=""
+                if [ -f "$CONFIG_FILE" ]; then
+                    tmpl_path=$(jq -r '.singbox.template // ""' "$CONFIG_FILE" 2>/dev/null)
+                fi
+                # Fall back to default on-device template
+                [ -z "$tmpl_path" ] && tmpl_path="$DEFAULT_TEMPLATE_FILE"
+
+                if [ -f "$tmpl_path" ]; then
+                    printf '{"template":%s}' "$(jq -Rs '.' "$tmpl_path")"
                 else
-                    printf '{"error":"Template file not found: %s"}' "$TEMPLATE_FILE"
+                    printf '{"error":"Template file not found: %s"}' "$tmpl_path"
                 fi
                 ;;
 
@@ -249,47 +309,76 @@ TAGEOF
                     printf '{"error":"Empty template"}'
                     exit 0
                 fi
-                if echo "$tmpl" | jq -e '.' > /dev/null 2>&1; then
-                    printf '%s' "$tmpl" > "$TEMPLATE_FILE"
-                    touch "$UNSYNC_FLAG"
-                    printf '{"result":"ok"}'
-                else
+                if ! echo "$tmpl" | jq -e '.' > /dev/null 2>&1; then
                     printf '{"error":"Invalid JSON"}'
+                    exit 0
                 fi
+                mkdir -p "$CONF_DIR"
+                printf '%s' "$tmpl" > "$CUSTOM_TEMPLATE"
+                # Update config.json → singbox.template to point to custom template
+                if [ -f "$CONFIG_FILE" ]; then
+                    updated=$(jq --arg p "$CUSTOM_TEMPLATE" '.singbox.template = $p' "$CONFIG_FILE")
+                    printf '%s\n' "$updated" > "$CONFIG_FILE"
+                fi
+                touch "$UNSYNC_FLAG"
+                printf '{"result":"ok"}'
                 ;;
 
             reset_template)
-                if [ ! -f "$DEFAULT_TEMPLATE_FILE" ]; then
-                    printf '{"error":"Default template not found: %s"}' "$DEFAULT_TEMPLATE_FILE"
-                    exit 0
+                # Remove custom template file and clear config.json → singbox.template field
+                rm -f "$CUSTOM_TEMPLATE"
+                if [ -f "$CONFIG_FILE" ]; then
+                    updated=$(jq '.singbox.template = ""' "$CONFIG_FILE")
+                    printf '%s\n' "$updated" > "$CONFIG_FILE"
                 fi
-                cp "$DEFAULT_TEMPLATE_FILE" "$TEMPLATE_FILE"
                 touch "$UNSYNC_FLAG"
-                printf '{"template":%s}' "$(jq -Rs '.' "$TEMPLATE_FILE")"
+                # Return the default template content for display
+                if [ -f "$DEFAULT_TEMPLATE_FILE" ]; then
+                    printf '{"template":%s}' "$(jq -Rs '.' "$DEFAULT_TEMPLATE_FILE")"
+                else
+                    printf '{"result":"ok"}'
+                fi
                 ;;
 
             get_domains_config)
-                if [ -f "$DOMAINS_JSON" ]; then
-                    printf '{"config":%s}' "$(cat "$DOMAINS_JSON")"
+                if [ -f "$CONFIG_FILE" ]; then
+                    routing=$(jq '.routing // {}' "$CONFIG_FILE" 2>/dev/null)
+                    printf '{"config":%s}' "$routing"
                 else
-                    printf '{"config":{"domains_url":"","subnet_urls":[]}}'
+                    printf '{"config":{}}'
                 fi
                 ;;
 
             set_domains_config)
                 read -r input
-                if echo "$input" | jq -e '.config' > /dev/null 2>&1; then
-                    mkdir -p "$(dirname "$DOMAINS_JSON")"
-                    echo "$input" | jq '.config' > "$DOMAINS_JSON"
-                    printf '{"result":"ok"}'
-                else
+                if ! echo "$input" | jq -e '.config' > /dev/null 2>&1; then
                     printf '{"error":"Invalid config JSON"}'
+                    exit 0
                 fi
+                new_routing=$(echo "$input" | jq '.config')
+                # Merge into existing config, replacing only the routing section
+                if [ -f "$CONFIG_FILE" ]; then
+                    existing=$(cat "$CONFIG_FILE")
+                else
+                    existing='{"singbox":{},"fetch":{},"routing":{},"subscriptions":{}}'
+                fi
+                merged=$(jq -n \
+                    --argjson ex "$existing" \
+                    --argjson r "$new_routing" \
+                    '$ex + {routing: $r}')
+                mkdir -p "$CONF_DIR"
+                printf '%s\n' "$merged" > "$CONFIG_FILE"
+                printf '{"result":"ok"}'
                 ;;
 
             get_manual_ips)
-                if [ -f "$MANUAL_IPS" ]; then
-                    printf '{"ips":%s}' "$(jq -Rs '.' "$MANUAL_IPS")"
+                manual_file="$MANUAL_IPS_DEFAULT"
+                if [ -f "$CONFIG_FILE" ]; then
+                    cf=$(jq -r '.routing.subnets.manual_file // ""' "$CONFIG_FILE" 2>/dev/null)
+                    [ -n "$cf" ] && manual_file="$cf"
+                fi
+                if [ -f "$manual_file" ]; then
+                    printf '{"ips":%s}' "$(jq -Rs '.' "$manual_file")"
                 else
                     printf '{"ips":""}'
                 fi
@@ -298,48 +387,14 @@ TAGEOF
             set_manual_ips)
                 read -r input
                 ips=$(echo "$input" | jq -r '.ips // ""')
-                mkdir -p "$(dirname "$MANUAL_IPS")"
-                printf '%s' "$ips" > "$MANUAL_IPS"
+                manual_file="$MANUAL_IPS_DEFAULT"
+                if [ -f "$CONFIG_FILE" ]; then
+                    cf=$(jq -r '.routing.subnets.manual_file // ""' "$CONFIG_FILE" 2>/dev/null)
+                    [ -n "$cf" ] && manual_file="$cf"
+                fi
+                mkdir -p "$(dirname "$manual_file")"
+                printf '%s' "$ips" > "$manual_file"
                 printf '{"result":"ok"}'
-                ;;
-
-            run_getdomains)
-                if [ ! -f "$DOMAINS_SCRIPT" ]; then
-                    printf '{"error":"Script not found: %s"}' "$DOMAINS_SCRIPT"
-                    exit 0
-                fi
-                if [ ! -x "$DOMAINS_SCRIPT" ]; then
-                    chmod +x "$DOMAINS_SCRIPT"
-                fi
-                read -r input
-                verbose=$(echo "$input" | jq -r '.verbose // 2')
-                args="run"
-                case "$verbose" in
-                    1) args="$args -v"   ;;
-                    2) args="$args -vv"  ;;
-                    3) args="$args -vvv" ;;
-                esac
-                : > "$DOMAINS_LOG"
-                # shellcheck disable=SC2086
-                sh "$DOMAINS_SCRIPT" $args > /dev/null 2>&1 &
-                echo $! > "$DOMAINS_PID"
-                printf '{"result":"started"}'
-                ;;
-
-            get_domains_log)
-                running=false
-                if [ -f "$DOMAINS_PID" ]; then
-                    pid=$(cat "$DOMAINS_PID")
-                    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-                        running=true
-                    fi
-                fi
-                if [ -f "$DOMAINS_LOG" ]; then
-                    log_json=$(jq -Rs '.' "$DOMAINS_LOG")
-                else
-                    log_json='""'
-                fi
-                printf '{"log":%s,"running":%s}' "$log_json" "$running"
                 ;;
 
             get_manual_domains)
