@@ -106,17 +106,17 @@ The backend currently calls old shell scripts. Must call `vpn-manager` binary wi
 
 Remove "Update" tab, rename tabs, add "Run" tab with two sections.
 
-- [ ] Rename "Domains" tab section to "Routing"
-- [ ] Remove the "Update" tab entirely
-- [ ] Remove script output / run button from the "Routing" (ex-Domains) tab section
-- [ ] Add new "Run" tab with two independent sections:
+- [x] Rename "Domains" tab section to "Routing"
+- [x] Remove the "Update" tab entirely
+- [x] Remove script output / run button from the "Routing" (ex-Domains) tab section
+- [x] Add new "Run" tab with two independent sections:
   - **Subscriptions** section: `--cached-lists` checkbox (default: checked), `--download-lists` checkbox (default: unchecked), mutually exclusive logic (checking one unchecks the other), dry-run checkbox, Run button, scrollable log output area, auto-poll log while running
   - **Routing** section: `--with-subscriptions` checkbox (default: checked), Run button, scrollable log output area, auto-poll log while running
-- [ ] Wire Subscriptions Run button → `run_script` RPC with selected flag options
-- [ ] Wire Routing Run button → `run_routing` RPC with `--with-subscriptions` flag
-- [ ] Wire log polling to `get_log` (subscriptions) and `get_routing_log` (routing) respectively
-- [ ] Reorder tabs to: Subscriptions → Routing → Sing-box template config → Additional domains → Sing-box logs → Test
-- [ ] Update RPC declarations at top of file for new/changed methods (`run_routing`, `get_routing_log`)
+- [x] Wire Subscriptions Run button → `run_script` RPC with selected flag options
+- [x] Wire Routing Run button → `run_routing` RPC with `--with-subscriptions` flag
+- [x] Wire log polling to `get_log` (subscriptions) and `get_routing_log` (routing) respectively
+- [x] Reorder tabs to: Subscriptions → Routing → Sing-box template config → Additional domains → Sing-box logs → Test
+- [x] Update RPC declarations at top of file for new/changed methods (`run_routing`, `get_routing_log`)
 
 ---
 

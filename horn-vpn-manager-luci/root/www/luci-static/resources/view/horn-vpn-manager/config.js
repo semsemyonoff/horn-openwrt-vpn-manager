@@ -28,9 +28,18 @@ var callSetConfig = rpc.declare({
 var callRunScript = rpc.declare({
     object: "horn-vpn-manager",
     method: "run_script",
-    params: ["dry_run", "verbose"],
+    params: ["dry_run", "cached_lists", "download_lists"],
+});
+var callRunRouting = rpc.declare({
+    object: "horn-vpn-manager",
+    method: "run_routing",
+    params: ["with_subscriptions"],
 });
 var callGetLog = rpc.declare({ object: "horn-vpn-manager", method: "get_log" });
+var callGetRoutingLog = rpc.declare({
+    object: "horn-vpn-manager",
+    method: "get_routing_log",
+});
 var callGetSyslog = rpc.declare({
     object: "horn-vpn-manager",
     method: "get_syslog",
@@ -90,15 +99,6 @@ var callSetManualDomains = rpc.declare({
     object: "horn-vpn-manager",
     method: "set_manual_domains",
     params: ["domains"],
-});
-var callRunGetdomains = rpc.declare({
-    object: "horn-vpn-manager",
-    method: "run_getdomains",
-    params: ["verbose"],
-});
-var callGetDomainsLog = rpc.declare({
-    object: "horn-vpn-manager",
-    method: "get_domains_log",
 });
 var callGetSyncStatus = rpc.declare({
     object: "horn-vpn-manager",
@@ -813,12 +813,11 @@ return view.extend({
     _subIdx: 0,
     _pollTimer: null,
     _syslogTimer: null,
-    _domainsPollTimer: null,
+    _routingPollTimer: null,
 
     load: function () {
         return Promise.all([
             callGetConfig(),
-            callGetLog(),
             callGetSbStatus(),
             callGetTemplate(),
             callGetDomainsConfig().catch(function () {
@@ -839,13 +838,12 @@ return view.extend({
     render: function (results) {
         var self = this;
         var data = results[0];
-        var logData = results[1];
-        var sbData = results[2];
-        var tmplData = results[3];
-        var domainsData = results[4];
-        var manualIpsData = results[5];
-        var manualDomainsData = results[6];
-        var syncData = results[7];
+        var sbData = results[1];
+        var tmplData = results[2];
+        var domainsData = results[3];
+        var manualIpsData = results[4];
+        var manualDomainsData = results[5];
+        var syncData = results[6];
 
         var cfg =
             data && data.config
@@ -970,7 +968,7 @@ return view.extend({
                     "p",
                     {},
                     _(
-                        "Settings have been saved but not yet applied to sing-box. Go to the Update tab and run update to apply changes.",
+                        "Settings have been saved but not yet applied to sing-box. Go to the Run tab and run subscriptions to apply changes.",
                     ),
                 ),
             ],
@@ -1068,68 +1066,7 @@ return view.extend({
             settingsDirtyEl.style.display = "";
         }).observe(subList, { childList: true });
 
-        // ── Tab 2: Logs ───────────────────────────────────────────────────────
-        var logPre = E("pre", { id: "vpnsub-log", class: "vpnsub-log" });
-
-        var initialLog = logData && logData.log ? logData.log : "";
-        logPre.innerHTML =
-            ansiToHtml(initialLog) ||
-            _("No log yet. Run the script to see output.");
-
-        var dryRunChk = E("input", { type: "checkbox", id: "vpnsub-dry-run" });
-        var debugChk = E("input", { type: "checkbox", id: "vpnsub-debug" });
-
-        var runBtn = E(
-            "button",
-            {
-                type: "button",
-                class: "cbi-button cbi-button-action",
-                id: "vpnsub-run-btn",
-                title: _("Run"),
-                click: function () {
-                    self.handleRun(runBtn, logPre);
-                },
-            },
-            _("Run"),
-        );
-
-        var clearBtn = E(
-            "button",
-            {
-                type: "button",
-                class: "cbi-button",
-                click: function () {
-                    logPre.innerHTML = "";
-                },
-            },
-            _("Clear"),
-        );
-
-        var logsPane = E("div", { class: "vpnsub-tab-pane" }, [
-            E("div", { class: "cbi-section" }, [
-                E("legend", {}, _("Script output")),
-                E("div", { class: "vpnsub-run-options" }, [
-                    E("label", { class: "vpnsub-run-option" }, [
-                        dryRunChk,
-                        "\u00a0",
-                        _("Dry run"),
-                    ]),
-                    E("label", { class: "vpnsub-run-option" }, [
-                        debugChk,
-                        "\u00a0",
-                        _("Debug (-vvv)"),
-                    ]),
-                ]),
-                E("div", { class: "vpnsub-log-actions" }, [
-                    runBtn,
-                    "\u00a0",
-                    clearBtn,
-                ]),
-                logPre,
-            ]),
-        ]);
-
-        // ── Tab 3: sing-box syslog ────────────────────────────────────────────
+        // ── Tab: Sing-box syslog ──────────────────────────────────────────────
         var syslogPre = E(
             "pre",
             { id: "vpnsub-syslog", class: "vpnsub-log" },
@@ -1558,45 +1495,9 @@ return view.extend({
             _("Import"),
         );
 
-        var domainsLogPre = E(
-            "pre",
-            { class: "vpnsub-log", id: "vpnsub-domains-log" },
-            _("No log yet. Run the script to see output."),
-        );
-
-        var domainsDebugChk = E("input", {
-            type: "checkbox",
-            id: "vpnsub-domains-debug",
-        });
-
-        var domainsRunBtn = E(
-            "button",
-            {
-                type: "button",
-                class: "cbi-button cbi-button-action",
-                title: _("Run"),
-                click: function () {
-                    self.handleRunGetdomains(domainsRunBtn, domainsLogPre);
-                },
-            },
-            _("Run"),
-        );
-
-        var domainsClearBtn = E(
-            "button",
-            {
-                type: "button",
-                class: "cbi-button",
-                click: function () {
-                    domainsLogPre.innerHTML = "";
-                },
-            },
-            _("Clear"),
-        );
-
         var domainsPane = E("div", { class: "vpnsub-tab-pane" }, [
             E("div", { class: "cbi-section" }, [
-                E("legend", {}, _("Domain list")),
+                E("legend", {}, _("Routing")),
                 formRow(
                     _("Domains URL"),
                     domainsUrlInput,
@@ -1682,22 +1583,6 @@ return view.extend({
                     "\u00a0\u00a0",
                     domainsSaveBtn,
                 ]),
-            ]),
-            E("div", { class: "cbi-section" }, [
-                E("legend", {}, _("Script output")),
-                E("div", { class: "vpnsub-run-options" }, [
-                    E("label", { class: "vpnsub-run-option" }, [
-                        domainsDebugChk,
-                        "\u00a0",
-                        _("Debug (-vvv)"),
-                    ]),
-                ]),
-                E("div", { class: "vpnsub-log-actions" }, [
-                    domainsRunBtn,
-                    "\u00a0",
-                    domainsClearBtn,
-                ]),
-                domainsLogPre,
             ]),
         ]);
 
@@ -1785,6 +1670,118 @@ return view.extend({
             additionalDirtyEl.style.display = "";
         }).observe(manualDomainsW.node, { childList: true });
 
+        // ── Tab: Run ──────────────────────────────────────────────────────────
+        var subLogPre = E("pre", { class: "vpnsub-log vpnsub-run-log" },
+            _("No log yet. Run subscriptions to see output."));
+
+        var subCachedChk = E("input", {
+            type: "checkbox",
+            id: "vpnsub-cached-lists",
+            checked: true,
+            change: function () {
+                if (this.checked) subDownloadChk.checked = false;
+            },
+        });
+        var subDownloadChk = E("input", {
+            type: "checkbox",
+            id: "vpnsub-download-lists",
+            change: function () {
+                if (this.checked) subCachedChk.checked = false;
+            },
+        });
+        var subDryRunChk = E("input", {
+            type: "checkbox",
+            id: "vpnsub-run-dry-run",
+        });
+
+        var subRunBtn = E(
+            "button",
+            {
+                type: "button",
+                class: "cbi-button cbi-button-action",
+                click: function () {
+                    self.handleRun(subRunBtn, subLogPre);
+                },
+            },
+            _("Run subscriptions"),
+        );
+        var subClearBtn = E(
+            "button",
+            {
+                type: "button",
+                class: "cbi-button",
+                click: function () {
+                    subLogPre.innerHTML = "";
+                },
+            },
+            _("Clear"),
+        );
+
+        var routingLogPre = E("pre", { class: "vpnsub-log vpnsub-run-log" },
+            _("No log yet. Run routing to see output."));
+
+        var routingWithSubsChk = E("input", {
+            type: "checkbox",
+            id: "vpnsub-with-subscriptions",
+            checked: true,
+        });
+
+        var routingRunBtn = E(
+            "button",
+            {
+                type: "button",
+                class: "cbi-button cbi-button-action",
+                click: function () {
+                    self.handleRunRouting(routingRunBtn, routingLogPre);
+                },
+            },
+            _("Run routing"),
+        );
+        var routingClearBtn = E(
+            "button",
+            {
+                type: "button",
+                class: "cbi-button",
+                click: function () {
+                    routingLogPre.innerHTML = "";
+                },
+            },
+            _("Clear"),
+        );
+
+        var runPane = E("div", { class: "vpnsub-tab-pane" }, [
+            E("div", { class: "cbi-section" }, [
+                E("legend", {}, _("Run subscriptions")),
+                E("div", { class: "vpnsub-run-options" }, [
+                    E("label", { class: "vpnsub-run-option" }, [
+                        subCachedChk, "\u00a0", _("--cached-lists"),
+                    ]),
+                    E("label", { class: "vpnsub-run-option" }, [
+                        subDownloadChk, "\u00a0", _("--download-lists"),
+                    ]),
+                    E("label", { class: "vpnsub-run-option" }, [
+                        subDryRunChk, "\u00a0", _("Dry run"),
+                    ]),
+                ]),
+                E("div", { class: "vpnsub-log-actions" }, [
+                    subRunBtn, "\u00a0", subClearBtn,
+                ]),
+                subLogPre,
+            ]),
+            E("div", { class: "cbi-section" }, [
+                E("legend", {}, _("Run routing")),
+                E("div", { class: "vpnsub-run-options" }, [
+                    E("label", { class: "vpnsub-run-option" }, [
+                        routingWithSubsChk, "\u00a0", _("--with-subscriptions"),
+                    ]),
+                ]),
+                E("div", { class: "vpnsub-log-actions" }, [
+                    routingRunBtn, "\u00a0", routingClearBtn,
+                ]),
+                routingLogPre,
+            ]),
+        ]);
+
         // ── Assemble tabs ─────────────────────────────────────────────────────
         return E("div", { class: "cbi-map" }, [
             E("h2", {}, _("VPN management")),
@@ -1799,28 +1796,12 @@ return view.extend({
                     content: settingsPane,
                 },
                 {
-                    id: "logs",
-                    label: _("Update"),
-                    desc: _(
-                        "Run the subscription update script to download servers and regenerate sing-box config",
-                    ),
-                    content: logsPane,
-                },
-                {
                     id: "domains",
-                    label: _("Domains"),
+                    label: _("Routing"),
                     desc: _(
-                        "Configure domain and subnet lists downloaded by the getdomains script, and static IP routes",
+                        "Configure domain and subnet lists for routing, and static IP routes",
                     ),
                     content: domainsPane,
-                },
-                {
-                    id: "additional",
-                    label: _("Additional domains"),
-                    desc: _(
-                        "Manage per-domain VPN routing via dnsmasq ipset — changes are written to /etc/config/dhcp",
-                    ),
-                    content: additionalPane,
                 },
                 {
                     id: "template",
@@ -1829,6 +1810,14 @@ return view.extend({
                         "Edit config.template.json — the template used to generate the sing-box configuration",
                     ),
                     content: templatePane,
+                },
+                {
+                    id: "additional",
+                    label: _("Additional domains"),
+                    desc: _(
+                        "Manage per-domain VPN routing via dnsmasq ipset — changes are written to /etc/config/dhcp",
+                    ),
+                    content: additionalPane,
                 },
                 {
                     id: "syslog",
@@ -1845,6 +1834,14 @@ return view.extend({
                         "Test VPN connectivity — checks which outbound handles a given URL through tun0",
                     ),
                     content: testPane,
+                },
+                {
+                    id: "run",
+                    label: _("Run"),
+                    desc: _(
+                        "Run subscriptions or routing updates with per-command options and live log output",
+                    ),
+                    content: runPane,
                 },
             ]),
         ]);
@@ -2480,50 +2477,12 @@ return view.extend({
     },
 
     // ── Run getdomains + poll log ─────────────────────────────────────────────
-    handleRunGetdomains: function (btn, logPre) {
-        var self = this;
-        var verbose = document.getElementById("vpnsub-domains-debug").checked
-            ? 3
-            : 2;
-
-        if (self._domainsPollTimer) {
-            clearInterval(self._domainsPollTimer);
-            self._domainsPollTimer = null;
-        }
-
-        logPre.innerHTML = ansiToHtml(_("Starting…") + "\n");
-        if (btn) btn.disabled = true;
-
-        callRunGetdomains(verbose)
-            .then(function () {
-                self._domainsPollTimer = setInterval(function () {
-                    callGetDomainsLog().then(function (res) {
-                        if (!res) return;
-                        var logText = res.log != null ? res.log : "";
-                        logPre.innerHTML =
-                            ansiToHtml(logText) || _("(waiting for output…)");
-                        logPre.scrollTop = logPre.scrollHeight;
-                        if (!res.running) {
-                            clearInterval(self._domainsPollTimer);
-                            self._domainsPollTimer = null;
-                            if (btn) btn.disabled = false;
-                        }
-                    });
-                }, 2000);
-            })
-            .catch(function (err) {
-                logPre.innerHTML += ansiToHtml(
-                    "\n" + _("Error: ") + (err.message || String(err)),
-                );
-                if (btn) btn.disabled = false;
-            });
-    },
-
-    // ── Run script + poll log ─────────────────────────────────────────────────
+    // ── Run subscriptions + poll log ──────────────────────────────────────────
     handleRun: function (btn, logPre) {
         var self = this;
-        var dryRun = document.getElementById("vpnsub-dry-run").checked;
-        var verbose = document.getElementById("vpnsub-debug").checked ? 3 : 2;
+        var dryRun = document.getElementById("vpnsub-run-dry-run").checked;
+        var cachedLists = document.getElementById("vpnsub-cached-lists").checked;
+        var downloadLists = document.getElementById("vpnsub-download-lists").checked;
 
         if (self._pollTimer) {
             clearInterval(self._pollTimer);
@@ -2534,7 +2493,7 @@ return view.extend({
         logPre.innerHTML = ansiToHtml(_("Starting…") + modeLabel + "\n");
         if (btn) btn.disabled = true;
 
-        callRunScript(dryRun, verbose)
+        callRunScript(dryRun, cachedLists, downloadLists)
             .then(function (res) {
                 if (res && res.error) throw new Error(res.error);
                 self._pollTimer = setInterval(function () {
@@ -2551,6 +2510,45 @@ return view.extend({
                             self._pollTimer = null;
                             if (btn) btn.disabled = false;
                             if (!dryRun) self._refreshSyncStatus();
+                        }
+                    });
+                }, 2000);
+            })
+            .catch(function (err) {
+                logPre.innerHTML += ansiToHtml(
+                    "\n" + _("Error: ") + (err.message || String(err)),
+                );
+                if (btn) btn.disabled = false;
+            });
+    },
+
+    // ── Run routing + poll log ────────────────────────────────────────────────
+    handleRunRouting: function (btn, logPre) {
+        var self = this;
+        var withSubs = document.getElementById("vpnsub-with-subscriptions").checked;
+
+        if (self._routingPollTimer) {
+            clearInterval(self._routingPollTimer);
+            self._routingPollTimer = null;
+        }
+
+        logPre.innerHTML = ansiToHtml(_("Starting…") + "\n");
+        if (btn) btn.disabled = true;
+
+        callRunRouting(withSubs)
+            .then(function (res) {
+                if (res && res.error) throw new Error(res.error);
+                self._routingPollTimer = setInterval(function () {
+                    callGetRoutingLog().then(function (res) {
+                        if (!res) return;
+                        var logText = res.log != null ? res.log : "";
+                        logPre.innerHTML =
+                            ansiToHtml(logText) || _("(waiting for output…)");
+                        logPre.scrollTop = logPre.scrollHeight;
+                        if (!res.running) {
+                            clearInterval(self._routingPollTimer);
+                            self._routingPollTimer = null;
+                            if (btn) btn.disabled = false;
                         }
                     });
                 }, 2000);
