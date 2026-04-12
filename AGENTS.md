@@ -2,19 +2,17 @@
 
 ## Status
 
-This repository is in the middle of a breaking rewrite of `horn-vpn-manager`.
+`horn-vpn-manager` has been rewritten in Go. The shell-based implementation is gone.
 
-Target state:
+Current state:
 
-- `horn-vpn-manager` is a Go application.
-- Shell remains only for OpenWrt package lifecycle glue such as init scripts.
-- The core uses a single config file instead of `subs.json` and `domains.json`.
-- The CLI must support running subscriptions and routing updates independently.
-- The CLI must also allow separate cron scheduling for subscriptions and routing updates.
-- Runtime dependencies on tools like `jq`, `curl`, `awk`, `sed`, `grep`, `base64`, `md5sum`, and `gzip` are being removed from the core path.
+- `horn-vpn-manager` is a Go application; the binary is `vpn-manager`.
+- Shell is used only for OpenWrt package lifecycle glue (init script).
+- A single `config.json` replaces the old `subs.json` + `domains.json` split.
+- The CLI supports running subscriptions and routing updates independently.
+- Both pipelines can be placed on separate cron schedules.
+- Runtime dependencies on `jq`, `curl`, `awk`, `sed`, `grep`, `base64`, `md5sum`, and `gzip` have been removed from the core path.
 - `horn-vpn-manager-luci` is not being adapted yet; LuCI compatibility is a later phase.
-
-Until the rewrite is finished, the repository may contain both new Go code and legacy shell-based implementation details. Prefer the new architecture for all new work unless a task explicitly targets legacy behavior.
 
 ## Project Structure & Module Organization
 
@@ -27,22 +25,22 @@ This repository contains two OpenWrt packages plus local Docker-based build tool
 - `docker/entrypoint.sh` — syncs package sources into the SDK and builds `horn-vpn-manager` / `horn-vpn-manager-luci`
 - `bin/` — local build output (`.apk` / `.ipk` artifacts); treat as generated output, not source of truth
 
-### `horn-vpn-manager` (core package, rewrite target)
+### `horn-vpn-manager` (core package)
 
-The core package is being rewritten around a Go binary named `vpn-manager`.
+The core package is a Go binary named `vpn-manager`.
 
-Preferred direction for the package:
+Package layout:
 
 - `horn-vpn-manager/Makefile` — OpenWrt package definition for the Go-based core
-- `horn-vpn-manager/files/horn-vpn-manager.init` — boot-time init script or thin wrapper around the binary
-- `horn-vpn-manager/files/` — package assets only, not business logic
-- `horn-vpn-manager/cmd/` — CLI entrypoints
+- `horn-vpn-manager/files/horn-vpn-manager.init` — boot-time init script (thin POSIX sh wrapper)
+- `horn-vpn-manager/files/sing-box.template.default.json` — default sing-box template shipped with the package
+- `horn-vpn-manager/files/config.example.json` — annotated config example shipped with the package
+- `horn-vpn-manager/cmd/vpn-manager` — CLI bootstrap
 - `horn-vpn-manager/internal/` — application internals
 - `horn-vpn-manager/testdata/` — fixtures and golden files for parser/config generation tests
 
-Suggested internal package split:
+Internal package split:
 
-- `cmd/vpn-manager` — CLI bootstrap
 - `internal/config` — single config schema, loading, validation
 - `internal/fetch` — HTTP fetch, retries, gzip/base64 detection, bounded parallelism
 - `internal/subscription` — subscription orchestration and tag planning
@@ -50,11 +48,11 @@ Suggested internal package split:
 - `internal/routing` — domain/IP/subnet aggregation and route rule assembly
 - `internal/singbox` — typed `sing-box` config generation
 - `internal/system` — atomic writes, service reloads, firewall and dnsmasq integration
-- `internal/state` — caches, generated files, runtime state
+- `internal/logx` — structured, colored CLI logging
 
 ### `horn-vpn-manager-luci` (LuCI addon)
 
-`horn-vpn-manager-luci` is intentionally out of scope for the current rewrite phase. Do not reshape the Go core around LuCI compatibility constraints unless the task explicitly says otherwise.
+`horn-vpn-manager-luci` is intentionally out of scope for the current phase. Do not reshape the Go core around LuCI compatibility constraints unless the task explicitly says otherwise.
 
 Current package contents:
 
@@ -68,62 +66,70 @@ Current package contents:
 
 ## Config Model
 
-The target core config is a single JSON file, for example:
+The core config is a single JSON file at `/etc/horn-vpn-manager/config.json`.
 
-- `/etc/horn-vpn-manager/config.json`
+Top-level structure:
 
-Preferred top-level structure:
-
-- `singbox` — settings directly related to `sing-box`
-- `fetch` — global download/runtime settings such as retries, timeout, and bounded parallelism
-- `routing` — global routing sources such as dnsmasq domains and subnet sources
+- `singbox` — settings directly related to `sing-box` (log level, test URL, template path)
+- `fetch` — global download/runtime settings (retries, timeout, bounded parallelism)
+- `routing` — global routing sources (dnsmasq domains URL, subnet URLs, manual IP file)
 - `subscriptions` — keyed subscription definitions; keys are stable IDs and must remain object keys, not array items
 
-Recommended conventions:
+Conventions:
 
-- Prefer `singbox`, not `sing-box`, for easier handling in Go and tooling
-- Prefer explicit names such as `url`, `urls`, `manual_file`, `ip_cidrs`
-- Per-subscription routing may live under a nested `route` object if that keeps the schema clearer
+- `singbox`, not `sing-box`, for easier handling in Go and tooling
+- Explicit field names: `url`, `urls`, `manual_file`, `ip_cidrs`
+- Per-subscription routing lives under a nested `route` object
 - When generating `sing-box` config, use the official `sing-box` documentation as the source of truth: `https://sing-box.sagernet.org/configuration/`
 
 ## CLI Model
 
-The new CLI must keep subscriptions and routing as independent execution units.
+Subscriptions and routing are independent execution units.
 
-Preferred command shape:
+Command shape:
 
 - `vpn-manager subscriptions run`
 - `vpn-manager subscriptions dry-run`
 - `vpn-manager routing run`
 - `vpn-manager routing restore`
 - `vpn-manager check`
+- `vpn-manager run` — convenience: runs routing then subscriptions (for initial bootstrap)
 
-Optional convenience commands are fine, but they must not replace the split execution model:
+Flags available on most subcommands:
 
-- `vpn-manager run` may execute both pipelines for initial bootstrap
-- init scripts may run both when the device is first brought up
+- `-c / --config` — path to config file (default: `/etc/horn-vpn-manager/config.json`)
+- `-v / -vv / -vvv` — verbosity
+- `--no-color` — disable colored output
+- `--debug` — local debug mode: config/template from binary dir, output to `./out`, no system actions
 
-Design constraints for the CLI:
+Additional routing flags:
+
+- `--with-subscriptions` — after routing, also pre-fetch subscription route lists into the cache
+
+Additional subscriptions flags:
+
+- `-t / --template` — path to sing-box template
+- `--download-lists` — always download fresh per-subscription route lists and cache them
+- `--cached-lists` — use pre-fetched lists from cache (download only on miss)
+
+Design constraints:
 
 - subscriptions must be runnable without touching routing caches or dnsmasq state
 - routing must be runnable without downloading subscriptions or regenerating proxy groups
 - both command families must be idempotent
 - both command families must be safe to place on different cron schedules
-- logging and exit codes should make separate cron usage operationally clear
+- logging and exit codes must make separate cron usage operationally clear
 
 ## On-Device Layout
-
-Target layout for the rewritten core:
 
 - CLI: `/usr/bin/vpn-manager`
 - Config dir: `/etc/horn-vpn-manager/`
 - Main config: `/etc/horn-vpn-manager/config.json`
 - List/cache dir: `/etc/horn-vpn-manager/lists/`
 - Generated `sing-box` config: `/etc/sing-box/config.json`
-- Default template shipped by package: `/usr/share/horn-vpn-manager/sing-box.template.default.json`
-- Runtime logs: prefer separate logs per pipeline, for example `/tmp/horn-vpn-manager-subscriptions.log` and `/tmp/horn-vpn-manager-routing.log`
-
-During migration there may still be extra legacy files in the package. Do not treat them as long-term design targets.
+- Default template: `/usr/share/horn-vpn-manager/sing-box.template.default.json`
+- Config example: `/usr/share/horn-vpn-manager/config.example.json`
+- Logs: `/tmp/horn-vpn-manager-subscriptions.log`, `/tmp/horn-vpn-manager-routing.log`
 
 ## Build, Test, and Development Commands
 
@@ -133,7 +139,7 @@ During migration there may still be extra legacy files in the package. Do not tr
 - `make shell` / `make shell-ipk` — open an interactive shell inside the SDK container
 - `make lint` — run local static checks configured by the repository, including `golangci-lint` for Go code
 
-Preferred checks for the rewritten core:
+Preferred checks before opening a change:
 
 - `gofmt -w` on changed Go files
 - `golangci-lint run`
@@ -158,7 +164,7 @@ Primary language for the core is Go.
 - Treat config schema changes as API design; name fields for long-term clarity
 - Keep concurrency bounded and explicit; router-class hardware is slow and memory-constrained
 
-For shell that remains in the package:
+For the init script and any remaining shell:
 
 - Use POSIX `sh`
 - Avoid Bash-only features
@@ -171,8 +177,6 @@ For LuCI JS, preserve the existing plain LuCI style unless the LuCI rewrite phas
 - no framework additions
 
 ## Testing Guidelines
-
-The rewrite should add automated tests as a first-class part of the core.
 
 Expected test coverage areas:
 
@@ -192,14 +196,6 @@ Preferred test layout:
 - unit tests near packages
 - `testdata/` for fixtures and golden outputs
 - integration-style tests with `httptest.Server` for fetch/retry scenarios
-
-Before opening a change:
-
-- run `golangci-lint run`
-- run `go test ./...` for the affected package set
-- run `make lint`
-- run the affected `make build*` target when package/build logic changes
-- if you change OpenWrt integration behavior, validate on-device when feasible
 
 ## Performance & Binary Size Constraints
 
@@ -225,7 +221,7 @@ Use short imperative commit messages, preferably scoped:
 PRs should state:
 
 - which package(s) are affected: `horn-vpn-manager`, `horn-vpn-manager-luci`, build tooling
-- whether the change targets the new Go core or legacy transition code
+- whether the change targets the Go core or OpenWrt packaging
 - which checks were run
 
 ## Security & Configuration Tips
@@ -235,74 +231,3 @@ Do not commit live subscription URLs, credentials, router-specific configs, or g
 - device-local config files are configuration, not repository data
 - `bin/` contains build artifacts and can become stale; rebuild instead of inferring behavior from old packages
 - treat `/etc/config/dhcp`, firewall state, and dnsmasq state as user/system state, not source-controlled data
-
-## Legacy Transition Blocks
-
-These sections describe the shell-based implementation that is being replaced. They exist only to help migration work. Delete them once the rewrite is complete and the old code is gone.
-
-### Legacy Core Layout
-
-The previous core implementation is shell-based:
-
-- `horn-vpn-manager/files/vpn-manager.sh` — installed CLI entry point
-- `horn-vpn-manager/files/subs.sh` — downloads subscription data and generates `/etc/sing-box/config.json`
-- `horn-vpn-manager/files/getdomains.sh` — downloads dnsmasq domain/subnet lists and rebuilds the VPN IP list
-- `horn-vpn-manager/files/config.template.json` — default `sing-box` template
-- `horn-vpn-manager/files/subs.example.json` — legacy subscription config example
-- `horn-vpn-manager/files/domains.example.json` — legacy domain/subnet config example
-
-### Legacy Runtime Contract
-
-The old shell version currently relies on:
-
-- `/etc/horn-vpn-manager/subs.json`
-- `/etc/horn-vpn-manager/domains.json`
-- `/etc/horn-vpn-manager/lists/manual-ip.lst`
-- `/etc/horn-vpn-manager/subs-tags.json`
-- `/tmp/horn-vpn-manager-sub.log`
-- `/tmp/horn-vpn-manager-domains.log`
-
-Legacy CLI split:
-
-- `vpn-manager subscriptions ...`
-- `vpn-manager domains ...`
-
-Legacy init behavior:
-
-- wait for internet
-- run domain update
-- run subscription update
-- or restore partial cached state when offline
-
-### Legacy Schema Notes
-
-The old `subs.json` schema uses a keyed object under `subscriptions`; those keys become stable tag prefixes:
-
-- `<id>-single`
-- `<id>-auto`
-- `<id>-manual`
-- `<id>-node-<hash>`
-
-If a migration task needs to preserve behavior while porting shell logic to Go, keep that tag semantics stable unless the task explicitly changes it.
-
-The old implementation also separates:
-
-- global dnsmasq domain and subnet sources in `domains.json`
-- per-subscription routing rules inside `subs.json`
-
-That split is legacy design baggage from the two-script architecture and should not be carried forward into the new unified config.
-
-### Legacy Tooling Notes
-
-The old shell core depends on external runtime tools such as:
-
-- `jq`
-- `curl`
-- `awk`
-- `sed`
-- `grep`
-- `base64`
-- `md5sum`
-- `gzip`
-
-The rewrite is explicitly removing these dependencies from the core execution path.
