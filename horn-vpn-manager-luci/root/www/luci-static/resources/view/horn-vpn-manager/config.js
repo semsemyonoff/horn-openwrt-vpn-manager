@@ -969,7 +969,7 @@ return view.extend({
                 click: function () {
                     callGetConfig().then(function (res) {
                         var cfg = res && res.config ? res.config : {};
-                        downloadJson(cfg, "subs.json");
+                        downloadJson(cfg, "horn-vpn-manager-config.json");
                     });
                 },
             },
@@ -1268,10 +1268,9 @@ return view.extend({
                     callResetTemplate()
                         .then(function (res) {
                             if (res && res.error) throw new Error(res.error);
-                            if (!res || !res.template)
-                                throw new Error(_("No template returned"));
-                            templateTextarea.value = res.template;
-                            originalTemplate = res.template;
+                            var tpl = (res && res.template) ? res.template : "";
+                            templateTextarea.value = tpl;
+                            originalTemplate = tpl;
                             dirtyEl.style.display = "none";
                             updateHighlight();
                             templateErrEl.style.display = "none";
@@ -1410,6 +1409,9 @@ return view.extend({
                         .then(function (data) {
                             if (!data || typeof data !== "object") {
                                 throw new Error(_("Invalid JSON file"));
+                            }
+                            if (data.subscriptions !== undefined || data.singbox !== undefined) {
+                                throw new Error(_("This appears to be a full config file. Use the global Import button instead."));
                             }
                             return callSetDomainsConfig(data);
                         })
@@ -2271,6 +2273,16 @@ return view.extend({
         if (!valid) return false;
 
         var cfg = this._collectConfig();
+        var cardCount = document.querySelectorAll(".vpnsub-sub-card").length;
+        if (Object.keys(cfg.subscriptions).length < cardCount) {
+            ui.addNotification(
+                null,
+                E("p", _("Two or more subscriptions have the same ID. Each subscription must have a unique ID.")),
+                "warning",
+            );
+            return false;
+        }
+
         var subVals = Object.values(cfg.subscriptions);
         var defaults = subVals.filter(function (s) {
             return s.default === true;

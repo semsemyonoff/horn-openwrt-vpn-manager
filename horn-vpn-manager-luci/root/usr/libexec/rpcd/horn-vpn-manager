@@ -98,6 +98,15 @@ case "$1" in
                 ;;
 
             run_script)
+                # Reject if a previous run is still active
+                if [ -f "$PID_FILE" ]; then
+                    pid=$(cat "$PID_FILE")
+                    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+                        printf '{"error":"already running"}'
+                        exit 0
+                    fi
+                fi
+
                 # Parse optional params
                 read -r input
                 dry_run=$(echo "$input" | jq -r '.dry_run // false')
@@ -135,6 +144,15 @@ case "$1" in
                 ;;
 
             run_routing)
+                # Reject if a previous routing run is still active
+                if [ -f "$ROUTING_PID" ]; then
+                    pid=$(cat "$ROUTING_PID")
+                    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+                        printf '{"error":"already running"}'
+                        exit 0
+                    fi
+                fi
+
                 read -r input
                 with_subs=$(echo "$input" | jq -r '.with_subscriptions // false')
 
