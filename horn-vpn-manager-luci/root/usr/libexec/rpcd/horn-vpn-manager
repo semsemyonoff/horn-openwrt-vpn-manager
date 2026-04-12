@@ -80,7 +80,13 @@ case "$1" in
                 merged=$(jq -n \
                     --argjson ex "$existing" \
                     --argjson inp "$new_config" \
-                    '$ex + {singbox: ($inp.singbox // $ex.singbox // {}), subscriptions: ($inp.subscriptions // {})}')
+                    '
+                    ($inp.singbox // {}) as $isb |
+                    ($ex.singbox // {}) as $esb |
+                    $ex + {
+                        singbox: ($esb + $isb + {template: (if (($isb.template // "") != "") then $isb.template else ($esb.template // "") end)}),
+                        subscriptions: ($inp.subscriptions // {})
+                    }')
                 if [ -z "$merged" ]; then
                     printf '{"error":"Failed to merge config"}'
                     exit 0
@@ -473,7 +479,7 @@ TAGEOF
                         esac
                         printf 'config ipset\n\tlist name '\''vpn_domains'\''\n\tlist domain '\''%s'\''\n\n' "$domain"
                     done
-                } > /etc/config/dhcp
+                } > /etc/config/dhcp.tmp && mv /etc/config/dhcp.tmp /etc/config/dhcp
 
                 if [ "$new_domains" != "$old_domains" ]; then
                     /etc/init.d/dnsmasq restart > /dev/null 2>&1
