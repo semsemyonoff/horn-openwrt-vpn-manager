@@ -75,13 +75,13 @@ The backend currently reads `subs.json` (old array format). Must switch to `conf
 
 The backend currently calls old shell scripts. Must call `vpn-manager` binary with correct flags.
 
-- [ ] Rewrite `run_script` (subscriptions): call `vpn-manager subscriptions run` (or `dry-run`); support `--cached-lists` and `--download-lists` flags passed from frontend; log to `/tmp/horn-vpn-manager-subscriptions.log`
-- [ ] Add `run_routing` method: call `vpn-manager routing run`; support `--with-subscriptions` flag; log to `/tmp/horn-vpn-manager-routing.log`; check/set running status analogously to `run_script`
-- [ ] Update `get_log` to read from `/tmp/horn-vpn-manager-subscriptions.log`
-- [ ] Add `get_routing_log`: read from `/tmp/horn-vpn-manager-routing.log`; return log content + running status
-- [ ] Remove dependency on `subs.sh`, `getdomains.sh` — replace `run_getdomains` with `run_routing`; remove `get_domains_log` (replaced by `get_routing_log`)
-- [ ] Keep `get_sb_status`, `set_proxy`, `test_delays`, `test_url`, `get_syslog`, `get_manual_domains`, `set_manual_domains`, `get_sync_status` — update paths/calls where needed
-- [ ] Update `list` method to expose all new/changed method signatures
+- [x] Rewrite `run_script` (subscriptions): call `vpn-manager subscriptions run` (or `dry-run`); support `--cached-lists` and `--download-lists` flags passed from frontend; log to `/tmp/horn-vpn-manager-subscriptions.log`
+- [x] Add `run_routing` method: call `vpn-manager routing run`; support `--with-subscriptions` flag; log to `/tmp/horn-vpn-manager-routing.log`; check/set running status analogously to `run_script`
+- [x] Update `get_log` to read from `/tmp/horn-vpn-manager-subscriptions.log`
+- [x] Add `get_routing_log`: read from `/tmp/horn-vpn-manager-routing.log`; return log content + running status
+- [x] Remove dependency on `subs.sh`, `getdomains.sh` — replace `run_getdomains` with `run_routing`; remove `get_domains_log` (replaced by `get_routing_log`)
+- [x] Keep `get_sb_status`, `set_proxy`, `test_delays`, `test_url`, `get_syslog`, `get_manual_domains`, `set_manual_domains`, `get_sync_status` — update paths/calls where needed
+- [x] Update `list` method to expose all new/changed method signatures
 
 ---
 
