@@ -665,8 +665,10 @@ TAGEOF
                     echo "$input" | jq -r '.domains[]? // empty' | while IFS= read -r domain; do
                         [ -z "$domain" ] && continue
                         # Validate: domains contain only safe characters (alphanumeric, hyphens, dots)
+                        # and must not start or end with a dot (invalid FQDN, breaks dnsmasq)
                         case "$domain" in
                             *[!A-Za-z0-9.-]*) continue ;;
+                            .*|*.)             continue ;;
                         esac
                         printf 'config ipset\n\tlist name '\''vpn_domains'\''\n\tlist domain '\''%s'\''\n\n' "$domain"
                     done
