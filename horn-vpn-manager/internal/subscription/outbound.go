@@ -268,11 +268,15 @@ func nodeToOutbound(n *vless.Node, tag string) *VLESSOutbound {
 	// TLS block: generate only when security is explicitly "tls" or "reality".
 	// An empty security field means plaintext — do not inject TLS.
 	if n.Security == "tls" || n.Security == "reality" {
+		alpn := n.ALPN
+		if len(alpn) == 0 && n.TransportType == "xhttp" {
+			alpn = []string{"h2"}
+		}
 		tls := &OutboundTLS{
 			Enabled:    true,
 			Insecure:   false,
 			ServerName: n.SNI,
-			ALPN:       n.ALPN,
+			ALPN:       alpn,
 		}
 		if n.Fingerprint != "" {
 			tls.UTLS = &UTLSConfig{
@@ -325,9 +329,13 @@ func buildTransport(n *vless.Node) *OutboundTransport {
 	case "grpc":
 		return &OutboundTransport{Type: "grpc", ServiceName: n.ServiceName}
 	case "xhttp":
+		mode := n.Mode
+		if mode == "" {
+			mode = "auto"
+		}
 		return &OutboundTransport{
 			Type:          "xhttp",
-			XHTTPMode:     n.Mode,
+			XHTTPMode:     mode,
 			XHTTPHost:     n.Host,
 			XHTTPPath:     n.Path,
 			XPaddingBytes: "100-1000",

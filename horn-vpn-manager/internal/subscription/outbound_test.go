@@ -299,6 +299,68 @@ func TestBuildOutbounds_GRPCTransport(t *testing.T) {
 	}
 }
 
+func TestBuildOutbounds_XHTTPTransport(t *testing.T) {
+	t.Run("defaults applied when mode and alpn absent", func(t *testing.T) {
+		uris := []string{
+			"vless://uuid@server.example.com:443?security=tls&sni=server.example.com&type=xhttp&path=%2Fpath#XHTTP+Node",
+		}
+		plan, err := subscription.BuildOutbounds("sub", uris, "5m", 100, testURL)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		ob := plan.NodeOutbounds[0]
+
+		// Transport defaults.
+		if ob.Transport == nil {
+			t.Fatal("Transport should not be nil for xhttp type")
+		}
+		data, err := json.Marshal(ob.Transport)
+		if err != nil {
+			t.Fatalf("marshal transport: %v", err)
+		}
+		var m map[string]any
+		_ = json.Unmarshal(data, &m)
+		if m["type"] != "xhttp" {
+			t.Errorf("transport type: got %v want xhttp", m["type"])
+		}
+		if m["mode"] != "auto" {
+			t.Errorf("transport mode: got %v want auto", m["mode"])
+		}
+
+		// TLS ALPN default.
+		if ob.TLS == nil {
+			t.Fatal("TLS block should not be nil for security=tls")
+		}
+		if len(ob.TLS.ALPN) != 1 || ob.TLS.ALPN[0] != "h2" {
+			t.Errorf("TLS.ALPN: got %v want [h2]", ob.TLS.ALPN)
+		}
+	})
+
+	t.Run("explicit mode and alpn are preserved", func(t *testing.T) {
+		uris := []string{
+			"vless://uuid@server.example.com:443?security=tls&sni=server.example.com&type=xhttp&mode=stream-up&alpn=h3#XHTTP+Node",
+		}
+		plan, err := subscription.BuildOutbounds("sub", uris, "5m", 100, testURL)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		ob := plan.NodeOutbounds[0]
+
+		data, err := json.Marshal(ob.Transport)
+		if err != nil {
+			t.Fatalf("marshal transport: %v", err)
+		}
+		var m map[string]any
+		_ = json.Unmarshal(data, &m)
+		if m["mode"] != "stream-up" {
+			t.Errorf("transport mode: got %v want stream-up", m["mode"])
+		}
+		if len(ob.TLS.ALPN) != 1 || ob.TLS.ALPN[0] != "h3" {
+			t.Errorf("TLS.ALPN: got %v want [h3]", ob.TLS.ALPN)
+		}
+	})
+}
+
 func TestBuildOutbounds_NoURIs(t *testing.T) {
 	_, err := subscription.BuildOutbounds("sub", nil, "5m", 100, testURL)
 	if err == nil {

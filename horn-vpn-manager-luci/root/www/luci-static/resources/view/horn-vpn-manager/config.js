@@ -28,12 +28,12 @@ var callSetConfig = rpc.declare({
 var callRunScript = rpc.declare({
     object: "horn-vpn-manager",
     method: "run_script",
-    params: ["dry_run", "cached_lists", "download_lists"],
+    params: ["dry_run", "cached_lists", "download_lists", "verbosity"],
 });
 var callRunRouting = rpc.declare({
     object: "horn-vpn-manager",
     method: "run_routing",
-    params: ["with_subscriptions"],
+    params: ["with_subscriptions", "verbosity"],
 });
 var callGetLog = rpc.declare({ object: "horn-vpn-manager", method: "get_log" });
 var callGetRoutingLog = rpc.declare({
@@ -952,11 +952,17 @@ return view.extend({
         self._settingsDirtyEl = settingsDirtyEl;
 
         var hasPendingChanges = !!(syncData && syncData.synced === false);
-        var unsyncBannerMsg = E(
-            "p",
-            {},
-            _("Settings have been saved but not yet applied to sing-box. Go to the Run tab and run subscriptions to apply changes."),
-        );
+        var subsP = !!(syncData && syncData.subs_pending);
+        var routingP = !!(syncData && syncData.routing_pending);
+        var initialMsg;
+        if (subsP && routingP) {
+            initialMsg = _("Settings have been saved but not yet applied. Go to the Run tab and run both subscriptions and routing to apply changes.");
+        } else if (routingP) {
+            initialMsg = _("Routing settings have been saved but not yet applied. Go to the Run tab and run routing to apply changes.");
+        } else {
+            initialMsg = _("Settings have been saved but not yet applied to sing-box. Go to the Run tab and run subscriptions to apply changes.");
+        }
+        var unsyncBannerMsg = E("p", {}, initialMsg);
         var unsyncBanner = E(
             "div",
             {
@@ -1589,6 +1595,12 @@ return view.extend({
             type: "checkbox",
             id: "vpnsub-run-dry-run",
         });
+        var subVerbositySelect = E("select", { id: "vpnsub-verbosity", class: "vpnsub-verbosity-select" }, [
+            E("option", { value: "0" }, _("default")),
+            E("option", { value: "1" }, "-v"),
+            E("option", { value: "2" }, "-vv"),
+            E("option", { value: "3" }, "-vvv"),
+        ]);
 
         var subRunBtn = E(
             "button",
@@ -1621,6 +1633,12 @@ return view.extend({
             id: "vpnsub-with-subscriptions",
             checked: true,
         });
+        var routingVerbositySelect = E("select", { id: "vpnsub-routing-verbosity", class: "vpnsub-verbosity-select" }, [
+            E("option", { value: "0" }, _("default")),
+            E("option", { value: "1" }, "-v"),
+            E("option", { value: "2" }, "-vv"),
+            E("option", { value: "3" }, "-vvv"),
+        ]);
 
         var routingRunBtn = E(
             "button",
@@ -1658,6 +1676,9 @@ return view.extend({
                     E("label", { class: "vpnsub-run-option" }, [
                         subDryRunChk, "\u00a0", _("Dry run"),
                     ]),
+                    E("label", { class: "vpnsub-run-option" }, [
+                        _("Verbosity"), "\u00a0", subVerbositySelect,
+                    ]),
                 ]),
                 E("div", { class: "vpnsub-log-actions" }, [
                     subRunBtn, "\u00a0", subClearBtn,
@@ -1669,6 +1690,9 @@ return view.extend({
                 E("div", { class: "vpnsub-run-options" }, [
                     E("label", { class: "vpnsub-run-option" }, [
                         routingWithSubsChk, "\u00a0", _("--with-subscriptions"),
+                    ]),
+                    E("label", { class: "vpnsub-run-option" }, [
+                        _("Verbosity"), "\u00a0", routingVerbositySelect,
                     ]),
                 ]),
                 E("div", { class: "vpnsub-log-actions" }, [
@@ -1865,6 +1889,14 @@ return view.extend({
                     content: domainsPane,
                 },
                 {
+                    id: "run",
+                    label: _("Run"),
+                    desc: _(
+                        "Run subscriptions or routing updates with per-command options and live log output",
+                    ),
+                    content: runPane,
+                },
+                {
                     id: "template",
                     label: _("Sing-box template config"),
                     desc: _(
@@ -1895,14 +1927,6 @@ return view.extend({
                         "Test VPN connectivity — checks which outbound handles a given URL through tun0",
                     ),
                     content: testPane,
-                },
-                {
-                    id: "run",
-                    label: _("Run"),
-                    desc: _(
-                        "Run subscriptions or routing updates with per-command options and live log output",
-                    ),
-                    content: runPane,
                 },
             ]),
         ]);
@@ -2576,6 +2600,7 @@ return view.extend({
         var dryRun = document.getElementById("vpnsub-run-dry-run").checked;
         var cachedLists = document.getElementById("vpnsub-cached-lists").checked;
         var downloadLists = document.getElementById("vpnsub-download-lists").checked;
+        var verbosity = parseInt(document.getElementById("vpnsub-verbosity").value, 10) || 0;
 
         if (self._pollTimer) {
             clearInterval(self._pollTimer);
@@ -2586,7 +2611,7 @@ return view.extend({
         logPre.innerHTML = ansiToHtml(_("Starting…") + modeLabel + "\n");
         if (btn) btn.disabled = true;
 
-        callRunScript(dryRun, cachedLists, downloadLists)
+        callRunScript(dryRun, cachedLists, downloadLists, verbosity)
             .then(function (res) {
                 if (res && res.error) throw new Error(res.error);
                 self._pollTimer = setInterval(function () {
@@ -2619,6 +2644,7 @@ return view.extend({
     handleRunRouting: function (btn, logPre) {
         var self = this;
         var withSubs = document.getElementById("vpnsub-with-subscriptions").checked;
+        var verbosity = parseInt(document.getElementById("vpnsub-routing-verbosity").value, 10) || 0;
 
         if (self._routingPollTimer) {
             clearInterval(self._routingPollTimer);
@@ -2628,7 +2654,7 @@ return view.extend({
         logPre.innerHTML = ansiToHtml(_("Starting…") + "\n");
         if (btn) btn.disabled = true;
 
-        callRunRouting(withSubs)
+        callRunRouting(withSubs, verbosity)
             .then(function (res) {
                 if (res && res.error) throw new Error(res.error);
                 self._routingPollTimer = setInterval(function () {

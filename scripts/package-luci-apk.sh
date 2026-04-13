@@ -37,6 +37,14 @@ chmod 755 "$DATA/usr/libexec/rpcd/horn-vpn-manager"
 mkdir -p "$DATA/usr/lib/lua/luci/i18n"
 cp "$I18N"/*.lmo "$DATA/usr/lib/lua/luci/i18n/"
 
+# ── post-install script ─────────────────────────────────────
+POSTINST="$WORK/post-install.sh"
+cat > "$POSTINST" <<'EOF'
+#!/bin/sh
+/etc/init.d/rpcd restart
+EOF
+chmod 755 "$POSTINST"
+
 # ── package via apk mkpkg ──────────────────────────────────
 APK_FILE="${PKG_NAME}-${PKG_VERSION}-r${PKG_RELEASE}.apk"
 
@@ -46,12 +54,13 @@ docker run --rm \
   apk mkpkg \
     --info "name:${PKG_NAME}" \
     --info "version:${PKG_VERSION}-r${PKG_RELEASE}" \
-    --info "arch:all" \
+    --info "arch:noarch" \
     --info "description:LuCI interface for horn-vpn-manager" \
     --info "license:GPL-2.0" \
     --info "origin:${PKG_NAME}" \
     --info "maintainer:horn" \
     --files "/pkg/data" \
+    --script "post-install:/pkg/post-install.sh" \
     --output "/pkg/${APK_FILE}"
 
 cp "$WORK/$APK_FILE" "$OUTPUT_DIR/"
