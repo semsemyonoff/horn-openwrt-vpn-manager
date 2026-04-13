@@ -203,14 +203,39 @@ func (r *Runner) Run(ctx context.Context) error { //nolint:gocognit,gocyclo // o
 		urlCache        = make(map[string][]string) // url → decoded URIs, avoids re-downloading shared URLs
 	)
 
-	subIDs := make([]string, 0, len(r.Cfg.Subscriptions))
-	for id := range r.Cfg.Subscriptions {
-		subIDs = append(subIDs, id)
+	// Build processing order: default subscription first, then the rest sorted.
+	// Non-default subscriptions are only processed after the default succeeds.
+	var defaultID string
+	for id, sub := range r.Cfg.Subscriptions {
+		if sub.Default {
+			defaultID = id
+			break
+		}
 	}
-	sort.Strings(subIDs)
+	subIDs := make([]string, 0, len(r.Cfg.Subscriptions))
+	if defaultID != "" {
+		subIDs = append(subIDs, defaultID)
+	}
+	rest := make([]string, 0, len(r.Cfg.Subscriptions)-1)
+	for id := range r.Cfg.Subscriptions {
+		if id != defaultID {
+			rest = append(rest, id)
+		}
+	}
+	sort.Strings(rest)
+	subIDs = append(subIDs, rest...)
+
+	defaultProcessed := false
 
 	for _, id := range subIDs {
 		sub := r.Cfg.Subscriptions[id]
+
+		// Skip non-default subscriptions until the default has been processed successfully.
+		if defaultID != "" && !sub.Default && !defaultProcessed {
+			logx.Warn("Skipping subscription %s: default subscription has not completed successfully", logx.Bold(id))
+			continue
+		}
+
 		if !sub.IsEnabled() {
 			logx.Info("Skipping disabled subscription: %s", logx.Bold(id))
 			continue
@@ -327,6 +352,7 @@ func (r *Runner) Run(ctx context.Context) error { //nolint:gocognit,gocyclo // o
 
 		if sub.Default {
 			defaultFinalTag = plan.FinalTag
+			defaultProcessed = true
 		}
 		maps.Copy(tagNames, plan.TagNames)
 		plans = append(plans, plan)
