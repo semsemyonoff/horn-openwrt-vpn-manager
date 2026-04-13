@@ -42,7 +42,6 @@ collect_output() {
   if [ -d "$OUT_DIR" ]; then
     echo ">> Collecting packages to /out..."
     find "${SDK_DIR}/bin" -name 'horn-vpn-manager*.apk' -exec cp -v {} "$OUT_DIR/" \; 2>/dev/null || true
-    find "${SDK_DIR}/bin" -name 'horn-vpn-manager*.ipk' -exec cp -v {} "$OUT_DIR/" \; 2>/dev/null || true
     echo ">> Done. Packages in /out:"
     ls -lh "$OUT_DIR"/horn-vpn-manager* 2>/dev/null || echo "   (no packages found)"
   fi

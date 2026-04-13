@@ -23,7 +23,7 @@ This repository contains two OpenWrt packages plus local Docker-based build tool
 - `Makefile` — main entry point for local development: builds Docker images, packages, shells, and lint checks
 - `Dockerfile` — OpenWrt SDK builder image
 - `docker/entrypoint.sh` — syncs package sources into the SDK and builds `horn-vpn-manager` / `horn-vpn-manager-luci`
-- `bin/` — local build output (`.apk` / `.ipk` artifacts); treat as generated output, not source of truth
+- `bin/` — local build output (`.apk` artifacts); treat as generated output, not source of truth
 
 ### `horn-vpn-manager` (core package)
 
@@ -63,8 +63,9 @@ Package contents:
 - `horn-vpn-manager-luci/root/usr/share/rpcd/acl.d/horn-vpn-manager.json` — ubus ACL
 - `horn-vpn-manager-luci/root/usr/share/luci/menu.d/horn-vpn-manager.json` — menu entry
 - `horn-vpn-manager-luci/po/{en,ru}/horn-vpn-manager.po` — translations
+- `horn-vpn-manager-luci/tools/po2lmo.py` — PO→LMO compiler for translations
 
-Tab order: Subscriptions → Routing → Sing-box template config → Additional domains → Sing-box logs → Test → Run
+Tab order: Subscriptions → Routing → Run → Sing-box template config → Additional domains → Sing-box logs → Test
 
 UI features:
 - Import/export config buttons available on all tabs
@@ -73,6 +74,7 @@ UI features:
 
 rpcd methods (current):
 - `get_config` / `set_config` — reads/writes `config.json` (subscriptions + singbox settings)
+- `set_full_config` — atomic write of both config and template in one call
 - `get_template` / `set_template` / `reset_template` — manage sing-box template
 - `get_domains_config` / `set_domains_config` — read/write `config.json → routing` section
 - `get_manual_ips` / `set_manual_ips` — manual IP/CIDR list
@@ -95,6 +97,8 @@ Top-level structure:
 - `fetch` — global download/runtime settings (retries, timeout, bounded parallelism)
 - `routing` — global routing sources (dnsmasq domains URL, subnet URLs, manual IP file)
 - `subscriptions` — keyed subscription definitions; keys are stable IDs and must remain object keys, not array items
+
+Per-subscription fields: `name`, `url`, `default`, `enabled` (optional, defaults true), `include`, `exclude`, `interval`, `tolerance`, `retries` (optional, overrides global), `route` (optional nested routing)
 
 Conventions:
 
@@ -155,9 +159,10 @@ Design constraints:
 ## Build, Test, and Development Commands
 
 - `make help` — list supported local tasks
-- `make build` — build `.apk` packages with the SNAPSHOT SDK
-- `make build-ipk OPENWRT_RELEASE=23.05.5` — build `.ipk` packages against a release SDK
-- `make shell` / `make shell-ipk` — open an interactive shell inside the SDK container
+- `make build` — build `.apk` packages for current platform (core + luci)
+- `make build-all` — build `.apk` packages for all platforms (core + luci)
+- `make build-core-all` — build core `.apk` for all platforms only
+- `make shell` — open an interactive shell inside the SDK container
 - `make lint` — run local static checks configured by the repository, including `golangci-lint` for Go code
 
 Preferred checks before opening a change:

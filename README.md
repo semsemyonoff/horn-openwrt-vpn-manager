@@ -1,12 +1,12 @@
 # horn-vpn-manager
 
-`horn-vpn-manager` — OpenWrt-пакет для управления VPN-подписками sing-box и маршрутизацией трафика через dnsmasq/nftables. Написан на Go. Репозиторий содержит core-пакет, LuCI-интерфейс и Docker-based сборку пакетов.
+`horn-vpn-manager` — OpenWrt-пакет для управления VPN-подписками sing-box и маршрутизацией трафика через dnsmasq/nftables.
 
 ## Что есть в репозитории
 
 - `horn-vpn-manager` — Go-бинарник `vpn-manager` для обновления подписок, генерации `sing-box` конфига и управления domain/IP lists
 - `horn-vpn-manager-luci` — LuCI UI поверх rpcd backend
-- `Makefile`, `Dockerfile`, `docker/entrypoint.sh` — локальная сборка `.apk` и `.ipk` через OpenWrt SDK в контейнере
+- `Makefile`, `Dockerfile`, `docker/entrypoint.sh` — локальная сборка `.apk` через OpenWrt SNAPSHOT SDK в контейнере
 
 ## Что делает core-пакет
 
@@ -53,6 +53,8 @@ Init script `/etc/init.d/horn-vpn-manager` ждёт доступ в интерн
 
 - `sing-box`
 - `dnsmasq-full`
+
+Для использования `xhttp` нужно использовать [sing-box-extended](https://github.com/shtorm-7/sing-box-extended) вместо обычного. Установить можно используя [скрипт](https://github.com/EikeiDev/OpenWRT-sing-box-extended/tree/main)
 
 ## Формат `config.json`
 
@@ -211,34 +213,17 @@ vpn-manager run [-c config]
 
 ### 1. Собрать пакеты
 
-Для OpenWrt SNAPSHOT / APK:
-
 ```sh
 make build
-```
-
-Для release SDK / IPK:
-
-```sh
-make build-ipk OPENWRT_RELEASE=23.05.5
 ```
 
 Готовые артефакты будут в `bin/`.
 
 ### 2. Установить пакеты
 
-Если вы собрали `.apk`:
-
 ```sh
 scp bin/horn-vpn-manager-[0-9]*.apk root@192.168.1.1:/tmp/
 ssh root@192.168.1.1 "apk add --allow-untrusted /tmp/horn-vpn-manager-[0-9]*.apk"
-```
-
-Если вы собрали `.ipk`:
-
-```sh
-scp bin/horn-vpn-manager_[0-9]*.ipk root@192.168.1.1:/tmp/
-ssh root@192.168.1.1 "opkg install /tmp/horn-vpn-manager_[0-9]*.ipk"
 ```
 
 Если нужен LuCI-пакет, установите его отдельно:
@@ -325,7 +310,6 @@ ssh root@192.168.1.1 "vpn-manager subscriptions run -v"
 make help
 make lint
 make shell
-make shell-ipk
 ```
 
 `make lint` выполняет:
