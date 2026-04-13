@@ -8,11 +8,24 @@ import (
 	"syscall"
 )
 
+// version is set at build time via -ldflags "-X main.version=<ver>".
+var version = "dev"
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// hasHelpFlag reports whether args contains -h or --help.
+func hasHelpFlag(args []string) bool {
+	for _, a := range args {
+		if a == "-h" || a == "--help" {
+			return true
+		}
+	}
+	return false
 }
 
 func run(args []string) error {
@@ -22,6 +35,8 @@ func run(args []string) error {
 	}
 
 	switch args[0] {
+	case "version":
+		return runVersion(args[1:])
 	case "run":
 		return runBoth(args[1:])
 	case "routing":
@@ -36,6 +51,18 @@ func run(args []string) error {
 	default:
 		return fmt.Errorf("unknown command: %s", args[0])
 	}
+}
+
+func runVersion(args []string) error {
+	if hasHelpFlag(args) {
+		fmt.Print(`vpn-manager version — print version and exit
+
+Usage: vpn-manager version
+`)
+		return nil
+	}
+	fmt.Printf("vpn-manager %s\n", version)
+	return nil
 }
 
 func runRouting(args []string) error {
@@ -80,6 +107,11 @@ func runSubscriptions(args []string) error {
 // that SIGTERM/interrupt during the routing phase also prevents subscriptions
 // from starting.
 func runBoth(args []string) error {
+	if hasHelpFlag(args) {
+		printRunHelp()
+		return nil
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -105,9 +137,36 @@ Commands:
   routing        Manage domain/IP routing lists (download, apply, restore)
   subscriptions  Download and process VPN subscriptions
   check          Validate config and report what is configured
+  version        Print version and exit
   help           Show this help message
 
-Run "vpn-manager <command> help" for command-specific options.
+Run "vpn-manager <command> --help" for command-specific options.
+`)
+}
+
+func printRunHelp() {
+	fmt.Print(`vpn-manager run — run routing then subscriptions (initial bootstrap)
+
+Usage: vpn-manager run [options]
+
+Options:
+  -c, --config     Path to config file (default: /etc/horn-vpn-manager/config.json)
+  -t, --template   Path to sing-box template
+  -v               Increase verbosity (up to -vvv)
+  --no-color       Disable colored output
+  --debug          Debug mode: config/template from binary dir, output to ./out, no system actions
+`)
+}
+
+func printCheckHelp() {
+	fmt.Print(`vpn-manager check — validate config and report what is configured
+
+Usage: vpn-manager check [options]
+
+Options:
+  -c, --config   Path to config file (default: /etc/horn-vpn-manager/config.json)
+  -v             Increase verbosity (up to -vvv)
+  --no-color     Disable colored output
 `)
 }
 
@@ -141,9 +200,10 @@ Subcommands:
   help           Show this help message
 
 Options:
-  -c, --config   Path to config file (default: /etc/horn-vpn-manager/config.json)
-  -v             Increase verbosity (up to -vvv)
-  --no-color     Disable colored output
-  --debug        Debug mode: config from binary dir, output to ./out, no system actions
+  -c, --config              Path to config file (default: /etc/horn-vpn-manager/config.json)
+  -v                        Increase verbosity (up to -vvv)
+  --no-color                Disable colored output
+  --debug                   Debug mode: config from binary dir, output to ./out, no system actions
+  --with-subscriptions      Also pre-fetch subscription route lists into cache (run only)
 `)
 }

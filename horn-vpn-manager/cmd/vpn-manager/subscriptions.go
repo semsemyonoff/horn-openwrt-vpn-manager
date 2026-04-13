@@ -76,6 +76,10 @@ func applyListsFlags(runner *subscription.Runner, flags subsFlags, subsListsDir 
 }
 
 func subscriptionsRun(args []string) error {
+	if hasHelpFlag(args) {
+		printSubscriptionsHelp()
+		return nil
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return subscriptionsRunCtx(ctx, args)
@@ -106,6 +110,10 @@ func subscriptionsRunCtx(ctx context.Context, args []string) error {
 }
 
 func subscriptionsDryRun(args []string) error {
+	if hasHelpFlag(args) {
+		printSubscriptionsHelp()
+		return nil
+	}
 	flags, err := parseSubsFlags(args)
 	if err != nil {
 		return err

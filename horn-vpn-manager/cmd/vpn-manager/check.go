@@ -36,6 +36,11 @@ func parseCheckFlags(args []string) (checkFlags, error) {
 }
 
 func runCheck(args []string) error {
+	if hasHelpFlag(args) {
+		printCheckHelp()
+		return nil
+	}
+
 	flags, err := parseCheckFlags(args)
 	if err != nil {
 		return err

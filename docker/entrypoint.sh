@@ -24,7 +24,7 @@ sync_sources() {
 setup_config() {
   cd "$SDK_DIR"
   echo ">> Running make defconfig..."
-  make defconfig 2>&1
+  make defconfig </dev/null 2>&1
   echo ">> defconfig done"
 }
 

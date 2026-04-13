@@ -62,7 +62,7 @@ else
   PKG_PLATFORM ?= linux-$(GOARCH)
 endif
 
-PKG_VERSION ?= 2.0.0
+PKG_VERSION ?= $(shell grep '^PKG_VERSION' horn-vpn-manager/Makefile | sed 's/PKG_VERSION[ ]*:=[ ]*//')
 PKG_RELEASE ?= 1
 
 TARGET_TAG       = $(subst /,-,$(TARGET))
@@ -110,7 +110,7 @@ help: ## Show this help
 define go-cross-compile
 	@mkdir -p $(OUTPUT_DIR)
 	cd $(GO_PKG_DIR) && GOOS=linux GOARCH=$(GOARCH) GOARM=$(GOARM) GOMIPS=$(GOMIPS) \
-		go build -trimpath -ldflags='-s -w' -o ../$(OUTPUT_DIR)/$(GO_BIN) ./cmd/vpn-manager
+		go build -trimpath -ldflags='-s -w -X main.version=$(PKG_VERSION)' -o ../$(OUTPUT_DIR)/$(GO_BIN) ./cmd/vpn-manager
 endef
 
 build-core: ## Build horn-vpn-manager .apk (single platform)
@@ -138,7 +138,7 @@ build-all: ## Build horn-vpn-manager .apk for all platforms
 		echo ""; \
 		echo "========== $$label =========="; \
 		(cd $(GO_PKG_DIR) && GOOS=linux GOARCH=$$goarch GOARM=$$goarm GOMIPS=$$gomips \
-			go build -trimpath -ldflags='-s -w' -o ../$(OUTPUT_DIR)/$(GO_BIN) ./cmd/vpn-manager) && \
+			go build -trimpath -ldflags="-s -w -X main.version=$(PKG_VERSION)" -o ../$(OUTPUT_DIR)/$(GO_BIN) ./cmd/vpn-manager) && \
 		PKG_VERSION=$(PKG_VERSION) PKG_RELEASE=$(PKG_RELEASE) PKG_ARCH=$$pkgarch PKG_PLATFORM=$$label \
 			./scripts/package-apk.sh $(OUTPUT_DIR)/$(GO_BIN) $(GO_PKG_DIR)/files $(OUTPUT_DIR) && \
 		rm -f $(OUTPUT_DIR)/$(GO_BIN) || exit 1; \
@@ -158,7 +158,7 @@ build-ipk-all: ## Build horn-vpn-manager .ipk for all platforms
 		echo ""; \
 		echo "========== $$label =========="; \
 		(cd $(GO_PKG_DIR) && GOOS=linux GOARCH=$$goarch GOARM=$$goarm GOMIPS=$$gomips \
-			go build -trimpath -ldflags='-s -w' -o ../$(OUTPUT_DIR)/$(GO_BIN) ./cmd/vpn-manager) && \
+			go build -trimpath -ldflags="-s -w -X main.version=$(PKG_VERSION)" -o ../$(OUTPUT_DIR)/$(GO_BIN) ./cmd/vpn-manager) && \
 		PKG_VERSION=$(PKG_VERSION) PKG_RELEASE=$(PKG_RELEASE) PKG_ARCH=$$pkgarch PKG_PLATFORM=$$label \
 			./scripts/package-ipk.sh $(OUTPUT_DIR)/$(GO_BIN) $(GO_PKG_DIR)/files $(OUTPUT_DIR) && \
 		rm -f $(OUTPUT_DIR)/$(GO_BIN) || exit 1; \
@@ -167,21 +167,19 @@ build-ipk-all: ## Build horn-vpn-manager .ipk for all platforms
 	@echo ">> All platforms built:"
 	@ls -lh $(OUTPUT_DIR)/horn-vpn-manager_*.ipk
 
-# ── LuCI package (Docker SDK) ───────────────────────────────
+# ── LuCI package (local, no SDK needed) ─────────────────────
 
-docker-apk: ## Build Docker image with OpenWrt SNAPSHOT SDK (apk)
-	$(DOCKER_BUILD) --build-arg SDK_BASE_URL=$(SDK_URL_APK) -t $(IMAGE_APK) .
+LUCI_SRC = horn-vpn-manager-luci
 
-docker-ipk: ## Build Docker image with OpenWrt release SDK (ipk)
-	$(DOCKER_BUILD) --build-arg SDK_BASE_URL=$(SDK_URL_IPK) -t $(IMAGE_IPK) .
-
-build-luci: docker-apk ## Build horn-vpn-manager-luci .apk (Docker SDK)
+build-luci: ## Build horn-vpn-manager-luci .apk
 	@mkdir -p $(OUTPUT_DIR)
-	$(DOCKER_RUN) $(IMAGE_APK) luci
+	PKG_VERSION=$(PKG_VERSION) PKG_RELEASE=$(PKG_RELEASE) \
+		./scripts/package-luci-apk.sh $(LUCI_SRC) $(OUTPUT_DIR)
 
-build-ipk-luci: docker-ipk ## Build horn-vpn-manager-luci .ipk (Docker SDK)
+build-ipk-luci: ## Build horn-vpn-manager-luci .ipk
 	@mkdir -p $(OUTPUT_DIR)
-	$(DOCKER_RUN) $(IMAGE_IPK) luci
+	PKG_VERSION=$(PKG_VERSION) PKG_RELEASE=$(PKG_RELEASE) \
+		./scripts/package-luci-ipk.sh $(LUCI_SRC) $(OUTPUT_DIR)
 
 # ── Aggregates ───────────────────────────────────────────────
 
@@ -205,7 +203,7 @@ lint: go-fmt go-lint ## Run all checks (Go)
 
 go-build: ## Build vpn-manager binary to bin/ (native)
 	@mkdir -p $(OUTPUT_DIR)
-	cd $(GO_PKG_DIR) && go build -trimpath -ldflags='-s -w' -o ../$(OUTPUT_DIR)/$(GO_BIN) ./cmd/vpn-manager
+	cd $(GO_PKG_DIR) && go build -trimpath -ldflags='-s -w -X main.version=$(PKG_VERSION)' -o ../$(OUTPUT_DIR)/$(GO_BIN) ./cmd/vpn-manager
 
 go-test: ## Run Go tests
 	cd $(GO_PKG_DIR) && go test ./... -count=1

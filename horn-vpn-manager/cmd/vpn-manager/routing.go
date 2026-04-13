@@ -59,6 +59,10 @@ func parseRoutingFlags(args []string) (routingFlags, error) {
 }
 
 func routingRun(args []string) error {
+	if hasHelpFlag(args) {
+		printRoutingHelp()
+		return nil
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return routingRunCtx(ctx, args)
@@ -161,6 +165,10 @@ func routingRunDebug(flags routingFlags) error {
 }
 
 func routingRestore(args []string) error {
+	if hasHelpFlag(args) {
+		printRoutingHelp()
+		return nil
+	}
 	flags, err := parseRoutingFlags(args)
 	if err != nil {
 		return err
