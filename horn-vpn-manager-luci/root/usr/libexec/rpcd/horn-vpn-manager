@@ -262,7 +262,7 @@ case "$1" in
 
                 # Build subcommand
                 [ "$dry_run" = "true" ] && subcmd="dry-run" || subcmd="run"
-                args="subscriptions $subcmd"
+                args="subscriptions $subcmd --logs"
                 [ "$cached_lists" = "true" ]   && args="$args --cached-lists"
                 [ "$download_lists" = "true" ]  && args="$args --download-lists"
                 case "$verbosity" in
@@ -271,13 +271,11 @@ case "$1" in
                     3) args="$args -vvv" ;;
                 esac
 
-                # Truncate log so the frontend sees only the current run
-                : > "$LOG_FILE"
                 # shellcheck disable=SC2086
                 if [ "$dry_run" = "true" ]; then
-                    (vpn-manager $args >> "$LOG_FILE" 2>&1) &
+                    (vpn-manager $args) &
                 else
-                    (vpn-manager $args >> "$LOG_FILE" 2>&1; rm -f "$UNSYNC_SUBS_FLAG") &
+                    (vpn-manager $args; rm -f "$UNSYNC_SUBS_FLAG") &
                 fi
                 echo $! > "$PID_FILE"
                 printf '{"result":"started"}'
@@ -313,7 +311,7 @@ case "$1" in
                 with_subs=$(echo "$input" | jq -r '.with_subscriptions // false')
                 verbosity=$(echo "$input" | jq -r '.verbosity // 0')
 
-                args="routing run"
+                args="routing run --logs"
                 [ "$with_subs" = "true" ] && args="$args --with-subscriptions"
                 case "$verbosity" in
                     1) args="$args -v" ;;
@@ -321,9 +319,8 @@ case "$1" in
                     3) args="$args -vvv" ;;
                 esac
 
-                : > "$ROUTING_LOG"
                 # shellcheck disable=SC2086
-                (vpn-manager $args >> "$ROUTING_LOG" 2>&1; rm -f "$UNSYNC_ROUTING_FLAG") &
+                (vpn-manager $args; rm -f "$UNSYNC_ROUTING_FLAG") &
                 echo $! > "$ROUTING_PID"
                 printf '{"result":"started"}'
                 ;;

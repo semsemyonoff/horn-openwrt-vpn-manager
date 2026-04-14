@@ -1702,6 +1702,57 @@ return view.extend({
             ]),
         ]);
 
+        // ── Initial log load for Run tab ──────────────────────────────────────
+        callGetLog().then(function (res) {
+            if (!res) return;
+            var logText = res.log != null ? res.log : "";
+            if (logText) {
+                subLogPre.innerHTML = ansiToHtml(logText);
+                subLogPre.scrollTop = subLogPre.scrollHeight;
+            }
+            if (res.running) {
+                subRunBtn.disabled = true;
+                self._pollTimer = setInterval(function () {
+                    callGetLog().then(function (r) {
+                        if (!r) return;
+                        var t = r.log != null ? r.log : "";
+                        subLogPre.innerHTML = ansiToHtml(t) || _("(waiting for output…)");
+                        subLogPre.scrollTop = subLogPre.scrollHeight;
+                        if (!r.running) {
+                            clearInterval(self._pollTimer);
+                            self._pollTimer = null;
+                            subRunBtn.disabled = false;
+                        }
+                    });
+                }, 2000);
+            }
+        });
+
+        callGetRoutingLog().then(function (res) {
+            if (!res) return;
+            var logText = res.log != null ? res.log : "";
+            if (logText) {
+                routingLogPre.innerHTML = ansiToHtml(logText);
+                routingLogPre.scrollTop = routingLogPre.scrollHeight;
+            }
+            if (res.running) {
+                routingRunBtn.disabled = true;
+                self._routingPollTimer = setInterval(function () {
+                    callGetRoutingLog().then(function (r) {
+                        if (!r) return;
+                        var t = r.log != null ? r.log : "";
+                        routingLogPre.innerHTML = ansiToHtml(t) || _("(waiting for output…)");
+                        routingLogPre.scrollTop = routingLogPre.scrollHeight;
+                        if (!r.running) {
+                            clearInterval(self._routingPollTimer);
+                            self._routingPollTimer = null;
+                            routingRunBtn.disabled = false;
+                        }
+                    });
+                }, 2000);
+            }
+        });
+
         // ── Import / Export toolbar ───────────────────────────────────────────
         var exportBtn = E("button", {
             class: "btn cbi-button cbi-button-neutral",

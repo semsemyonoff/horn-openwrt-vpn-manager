@@ -15,12 +15,15 @@ import (
 	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/system"
 )
 
+const subsLogFile = "/tmp/horn-vpn-manager-subscriptions.log"
+
 type subsFlags struct {
 	configPath    string
 	templatePath  string
 	verbosity     int
 	debug         bool
 	noColor       bool
+	logs          bool
 	downloadLists bool
 	cachedLists   bool
 }
@@ -45,6 +48,8 @@ func parseSubsFlags(args []string) (subsFlags, error) {
 			f.debug = true
 		case args[i] == "--no-color":
 			f.noColor = true
+		case args[i] == "--logs":
+			f.logs = true
 		case args[i] == "--download-lists":
 			f.downloadLists = true
 		case args[i] == "--cached-lists":
@@ -91,6 +96,11 @@ func subscriptionsRunCtx(ctx context.Context, args []string) error {
 		return err
 	}
 	logx.Setup(!flags.noColor, flags.verbosity, flags.debug)
+	if flags.logs {
+		if logErr := logx.SetLogFile(subsLogFile); logErr != nil {
+			return fmt.Errorf("open log file: %w", logErr)
+		}
+	}
 
 	if flags.debug {
 		return subscriptionsRunDebug(flags, false)
@@ -119,6 +129,11 @@ func subscriptionsDryRun(args []string) error {
 		return err
 	}
 	logx.Setup(!flags.noColor, flags.verbosity, flags.debug)
+	if flags.logs {
+		if logErr := logx.SetLogFile(subsLogFile); logErr != nil {
+			return fmt.Errorf("open log file: %w", logErr)
+		}
+	}
 
 	if flags.debug {
 		return subscriptionsRunDebug(flags, true)

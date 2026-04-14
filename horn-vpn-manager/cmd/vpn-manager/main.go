@@ -154,6 +154,7 @@ Options:
   -t, --template   Path to sing-box template
   -v               Increase verbosity (up to -vvv)
   --no-color       Disable colored output
+  --logs           Write output to log files in addition to stderr
   --debug          Debug mode: config/template from binary dir, output to ./out, no system actions
 `)
 }
@@ -185,6 +186,7 @@ Options:
   -t, --template   Path to sing-box template (default: embedded; in --debug: <bindir>/sing-box.template.default.json)
   -v               Increase verbosity (up to -vvv)
   --no-color       Disable colored output
+  --logs           Write output to /tmp/horn-vpn-manager-subscriptions.log in addition to stderr
   --debug          Debug mode: config/template from binary dir, output to ./out, no system actions
 `)
 }
@@ -203,6 +205,7 @@ Options:
   -c, --config              Path to config file (default: /etc/horn-vpn-manager/config.json)
   -v                        Increase verbosity (up to -vvv)
   --no-color                Disable colored output
+  --logs                    Write output to /tmp/horn-vpn-manager-routing.log in addition to stderr
   --debug                   Debug mode: config from binary dir, output to ./out, no system actions
   --with-subscriptions      Also pre-fetch subscription route lists into cache (run only)
 `)

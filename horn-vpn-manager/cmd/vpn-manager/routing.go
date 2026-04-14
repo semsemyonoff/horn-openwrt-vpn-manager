@@ -18,11 +18,14 @@ import (
 	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/system"
 )
 
+const routingLogFile = "/tmp/horn-vpn-manager-routing.log"
+
 type routingFlags struct {
 	configPath        string
 	verbosity         int
 	debug             bool
 	noColor           bool
+	logs              bool
 	withSubscriptions bool
 }
 
@@ -49,6 +52,8 @@ func parseRoutingFlags(args []string) (routingFlags, error) {
 			f.debug = true
 		case args[i] == "--no-color":
 			f.noColor = true
+		case args[i] == "--logs":
+			f.logs = true
 		case args[i] == "--with-subscriptions":
 			f.withSubscriptions = true
 		case strings.HasPrefix(args[i], "-v") && !strings.HasPrefix(args[i], "--"):
@@ -74,6 +79,11 @@ func routingRunCtx(ctx context.Context, args []string) error {
 		return err
 	}
 	logx.Setup(!flags.noColor, flags.verbosity, flags.debug)
+	if flags.logs {
+		if logErr := logx.SetLogFile(routingLogFile); logErr != nil {
+			return fmt.Errorf("open log file: %w", logErr)
+		}
+	}
 
 	if flags.debug {
 		return routingRunDebug(flags)
@@ -174,6 +184,11 @@ func routingRestore(args []string) error {
 		return err
 	}
 	logx.Setup(!flags.noColor, flags.verbosity, flags.debug)
+	if flags.logs {
+		if logErr := logx.SetLogFile(routingLogFile); logErr != nil {
+			return fmt.Errorf("open log file: %w", logErr)
+		}
+	}
 
 	if flags.debug {
 		return routingRestoreDebug(flags)

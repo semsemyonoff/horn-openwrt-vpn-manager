@@ -204,10 +204,26 @@ vpn-manager run [-c config]
 - `-t / --template` — путь к шаблону sing-box (только для subscriptions)
 - `-v / -vv / -vvv` — уровень детализации логов
 - `--no-color` — отключить цвет (для cron)
+- `--logs` — писать вывод в лог-файл параллельно со stderr (см. ниже)
 - `--debug` — debug режим: конфиг/шаблон из директории бинарника, вывод в `./out`, без системных действий
 - `--with-subscriptions` — для `routing run`: после routing скачать также списки для subscription route rules
 - `--download-lists` — для `subscriptions run`: всегда скачивать свежие списки и кэшировать
 - `--cached-lists` — для `subscriptions run`: использовать кэш (скачивать только при отсутвии кеша)
+
+## Логи
+
+При передаче флага `--logs` бинарник дублирует весь вывод в файл на диске (вывод при этом также идёт в stderr):
+
+| Команда | Лог-файл |
+|---|---|
+| `subscriptions run` / `subscriptions dry-run` | `/tmp/horn-vpn-manager-subscriptions.log` |
+| `routing run` / `routing restore` | `/tmp/horn-vpn-manager-routing.log` |
+
+Файл усекается при каждом запуске с `--logs`, то есть хранит только последний запуск.
+
+LuCI всегда передаёт `--logs` при запуске команд из интерфейса — отключить это поведение через UI нельзя. Вкладка **Run** отображает содержимое этих файлов в реальном времени.
+
+При запуске из cron рекомендуется также передавать `--logs`, чтобы последний прогон всегда был доступен в LuCI (см. пример в разделе [Автозапуск и cron](#автозапуск-и-cron)).
 
 ## Установка на роутер
 
@@ -273,10 +289,10 @@ ssh root@192.168.1.1 "vpn-manager subscriptions run -v"
 
 ```cron
 # Подписки каждые 6 часов
-0 */6 * * * /usr/bin/vpn-manager subscriptions run --no-color
+0 */6 * * * /usr/bin/vpn-manager subscriptions run --no-color --logs
 
 # Routing lists раз в сутки
-15 4 * * * /usr/bin/vpn-manager routing run --no-color
+15 4 * * * /usr/bin/vpn-manager routing run --no-color --logs
 ```
 
 ## LuCI

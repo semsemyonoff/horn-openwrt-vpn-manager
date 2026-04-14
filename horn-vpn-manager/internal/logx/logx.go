@@ -42,6 +42,19 @@ type Logger struct {
 
 var std = &Logger{out: os.Stderr, color: true}
 
+// SetLogFile opens (or creates and truncates) path and tees all log output
+// to both stderr and the file. Returns an error if the file cannot be opened.
+func SetLogFile(path string) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	std.mu.Lock()
+	defer std.mu.Unlock()
+	std.out = io.MultiWriter(os.Stderr, f)
+	return nil
+}
+
 // Setup configures the global logger.
 func Setup(color bool, verbosity int, debug bool) {
 	std.mu.Lock()
@@ -59,7 +72,7 @@ func SetOutput(w io.Writer) {
 }
 
 func timestamp() string {
-	return time.Now().Format("15:04:05")
+	return time.Now().Format("2006-01-02 15:04:05")
 }
 
 func (l *Logger) printf(format string, args ...any) {

@@ -13,6 +13,7 @@ const (
 	defaultTolerance = 100
 	packetEncoding   = "xudp"
 	transportHTTP    = "http"
+	transportXHTTP   = "xhttp"
 )
 
 // OutboundPlan holds the sing-box outbound configuration generated for a single
@@ -128,7 +129,7 @@ func (t *OutboundTransport) MarshalJSON() ([]byte, error) {
 		if t.ServiceName != "" {
 			m["service_name"] = t.ServiceName
 		}
-	case "xhttp":
+	case transportXHTTP:
 		if t.XHTTPMode != "" {
 			m["mode"] = t.XHTTPMode
 		}
@@ -269,7 +270,7 @@ func nodeToOutbound(n *vless.Node, tag string) *VLESSOutbound {
 	// An empty security field means plaintext — do not inject TLS.
 	if n.Security == "tls" || n.Security == "reality" {
 		alpn := n.ALPN
-		if len(alpn) == 0 && n.TransportType == "xhttp" {
+		if len(alpn) == 0 && n.TransportType == transportXHTTP {
 			alpn = []string{"h2"}
 		}
 		tls := &OutboundTLS{
@@ -328,13 +329,13 @@ func buildTransport(n *vless.Node) *OutboundTransport {
 		return t
 	case "grpc":
 		return &OutboundTransport{Type: "grpc", ServiceName: n.ServiceName}
-	case "xhttp":
+	case transportXHTTP:
 		mode := n.Mode
 		if mode == "" {
 			mode = "auto"
 		}
 		return &OutboundTransport{
-			Type:          "xhttp",
+			Type:          transportXHTTP,
 			XHTTPMode:     mode,
 			XHTTPHost:     n.Host,
 			XHTTPPath:     n.Path,
