@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/config"
@@ -200,11 +201,10 @@ func (r *Runner) Run(ctx context.Context) error { //nolint:gocognit,gocyclo // o
 		processed       int
 		enabledCount    int
 		failedSubs      []string
-		urlCache        = make(map[string][]string) // url → decoded URIs, avoids re-downloading shared URLs
+		urlCache        = make(map[string][]string) // url → decoded URIs from the default sub, shared read-only with goroutines
 	)
 
-	// Build processing order: default subscription first, then the rest sorted.
-	// Non-default subscriptions are only processed after the default succeeds.
+	// Find the default subscription.
 	var defaultID string
 	for id, sub := range r.Cfg.Subscriptions {
 		if sub.Default {
@@ -212,80 +212,35 @@ func (r *Runner) Run(ctx context.Context) error { //nolint:gocognit,gocyclo // o
 			break
 		}
 	}
-	subIDs := make([]string, 0, len(r.Cfg.Subscriptions))
+
+	// ── Phase 1: process the default subscription (must succeed before the rest) ─
 	if defaultID != "" {
-		subIDs = append(subIDs, defaultID)
-	}
-	rest := make([]string, 0, len(r.Cfg.Subscriptions)-1)
-	for id := range r.Cfg.Subscriptions {
-		if id != defaultID {
-			rest = append(rest, id)
-		}
-	}
-	sort.Strings(rest)
-	subIDs = append(subIDs, rest...)
-
-	defaultProcessed := false
-
-	for _, id := range subIDs {
-		sub := r.Cfg.Subscriptions[id]
-
-		// Skip non-default subscriptions until the default has been processed successfully.
-		if defaultID != "" && !sub.Default && !defaultProcessed {
-			logx.Warn("Skipping subscription %s: default subscription has not completed successfully", logx.Bold(id))
-			continue
-		}
-
-		if !sub.IsEnabled() {
-			logx.Info("Skipping disabled subscription: %s", logx.Bold(id))
-			continue
-		}
+		sub := r.Cfg.Subscriptions[defaultID]
 		enabledCount++
-		if sub.URL == "" {
-			logx.Warn("Subscription %s has no URL configured, skipping", id)
-			continue
-		}
 
 		opts := r.fetchOptsForSub(sub)
 
-		var uris []string
-		if cached, ok := urlCache[sub.URL]; ok {
-			logx.Info("Subscription %s: reusing cached nodes from %s", logx.Bold(id), urlHost(sub.URL))
-			uris = cached
-		} else {
-			logx.Info("Downloading subscription %s...", logx.Bold(id))
-			logx.Detail("  URL: %s", urlHost(sub.URL))
-			data, err := fetch.Download(ctx, sub.URL, opts)
-			if err != nil {
-				if ctx.Err() != nil {
-					return fmt.Errorf("interrupted: %w", ctx.Err())
-				}
-				logx.Err("Failed to download subscription %s: %v", id, err)
-				if sub.Default {
-					return fmt.Errorf("default subscription %q failed to download, aborting", id)
-				}
-				failedSubs = append(failedSubs, id)
-				continue
+		logx.Info("Downloading subscription %s...", logx.Bold(defaultID))
+		logx.Detail("  URL: %s", urlHost(sub.URL))
+		data, dlErr := fetch.Download(ctx, sub.URL, opts)
+		if dlErr != nil {
+			if ctx.Err() != nil {
+				return fmt.Errorf("interrupted: %w", ctx.Err())
 			}
-
-			decoded, err := DecodePayload(data)
-			if err != nil {
-				logx.Err("Failed to decode subscription %s: %v", id, err)
-				if sub.Default {
-					return fmt.Errorf("default subscription %q failed to decode, aborting", id)
-				}
-				failedSubs = append(failedSubs, id)
-				continue
-			}
-
-			urlCache[sub.URL] = decoded
-			uris = decoded
+			return fmt.Errorf("default subscription %q failed to download, aborting", defaultID)
 		}
+
+		decoded, decErr := DecodePayload(data)
+		if decErr != nil {
+			return fmt.Errorf("default subscription %q failed to decode, aborting", defaultID)
+		}
+		urlCache[sub.URL] = decoded
+		uris := decoded
 
 		if len(sub.Include) > 0 {
 			before := len(uris)
 			uris = filterInclude(uris, sub.Include)
-			logx.Info("Subscription %s: include filter matched %d/%d node(s)", id, len(uris), before)
+			logx.Info("Subscription %s: include filter matched %d/%d node(s)", defaultID, len(uris), before)
 			for _, uri := range uris {
 				logx.Debug("  included: %s", extractNodeName(uri))
 			}
@@ -295,35 +250,30 @@ func (r *Runner) Run(ctx context.Context) error { //nolint:gocognit,gocyclo // o
 			var excludedURIs []string
 			uris, excludedURIs = filterExclude(uris, sub.Exclude)
 			if len(excludedURIs) > 0 {
-				logx.Info("Subscription %s: excluded %d node(s) matching exclude patterns", id, len(excludedURIs))
+				logx.Info("Subscription %s: excluded %d node(s) matching exclude patterns", defaultID, len(excludedURIs))
 				for _, uri := range excludedURIs {
 					logx.Debug("  excluded: %s", extractNodeName(uri))
 				}
 			}
 		}
 
-		logx.OK("Subscription %s: %s node(s)", id, logx.Bold(strconv.Itoa(len(uris))))
+		logx.OK("Subscription %s: %s node(s)", defaultID, logx.Bold(strconv.Itoa(len(uris))))
 		for _, uri := range uris {
 			logx.Debug("  %s", uri)
 		}
 
 		if r.DryRun {
-			if writeErr := r.writeDryRunNodes(id, uris); writeErr != nil {
-				logx.Err("Failed to write dry-run output for %s: %v", id, writeErr)
+			if writeErr := r.writeDryRunNodes(defaultID, uris); writeErr != nil {
+				logx.Err("Failed to write dry-run output for %s: %v", defaultID, writeErr)
 			}
 		}
 
-		plan, err := BuildOutbounds(id, uris, sub.Interval, sub.Tolerance, testURL)
-		if err != nil {
-			logx.Err("Failed to build outbounds for %s: %v", id, err)
-			if sub.Default {
-				return fmt.Errorf("default subscription %q failed to build outbounds, aborting", id)
-			}
-			failedSubs = append(failedSubs, id)
-			continue
+		plan, buildErr := BuildOutbounds(defaultID, uris, sub.Interval, sub.Tolerance, testURL)
+		if buildErr != nil {
+			return fmt.Errorf("default subscription %q failed to build outbounds, aborting", defaultID)
 		}
 
-		logx.Detail("  Subscription %s: final outbound tag: %s", id, logx.Bold(plan.FinalTag))
+		logx.Detail("  Subscription %s: final outbound tag: %s", defaultID, logx.Bold(plan.FinalTag))
 		for _, ob := range plan.NodeOutbounds {
 			logx.Debug("  node: %s (%s)", ob.Tag, plan.TagNames[ob.Tag])
 		}
@@ -334,29 +284,65 @@ func (r *Runner) Run(ctx context.Context) error { //nolint:gocognit,gocyclo // o
 			logx.Debug("  group(selector): %s", plan.SelectorGroup.Tag)
 		}
 
-		// Generate per-subscription route rules for non-default subscriptions only.
-		if !sub.Default && sub.Route != nil {
-			mergedRoute := FetchRouteEntries(ctx, id, sub.Route, opts, r.SubsListsDir, r.DownloadLists)
-			rules := BuildRouteRules(mergedRoute, plan.FinalTag)
-			plan.RouteRules = rules
-			if len(rules) > 0 {
-				var nDomains, nCIDRs int
-				for _, r := range rules {
-					nDomains += len(r.DomainSuffix)
-					nCIDRs += len(r.IPCIDR)
-				}
-				logx.Detail("  Subscription %s: route rules -> %s (%d domain(s), %d CIDR(s))",
-					id, plan.FinalTag, nDomains, nCIDRs)
-			}
-		}
-
-		if sub.Default {
-			defaultFinalTag = plan.FinalTag
-			defaultProcessed = true
-		}
+		defaultFinalTag = plan.FinalTag
 		maps.Copy(tagNames, plan.TagNames)
 		plans = append(plans, plan)
 		processed++
+	}
+
+	// ── Phase 2: process non-default subscriptions in parallel ───────────────
+	rest := make([]string, 0, len(r.Cfg.Subscriptions)-1)
+	for id := range r.Cfg.Subscriptions {
+		if id != defaultID {
+			rest = append(rest, id)
+		}
+	}
+	sort.Strings(rest)
+
+	// Pre-filter: skip disabled/empty before spawning goroutines.
+	type subJob struct {
+		id  string
+		sub *config.Subscription
+	}
+	var jobs []subJob
+	for _, id := range rest {
+		sub := r.Cfg.Subscriptions[id]
+		if !sub.IsEnabled() {
+			logx.Info("Skipping disabled subscription: %s", logx.Bold(id))
+			continue
+		}
+		enabledCount++
+		if sub.URL == "" {
+			logx.Warn("Subscription %s has no URL configured, skipping", id)
+			continue
+		}
+		jobs = append(jobs, subJob{id: id, sub: sub})
+	}
+
+	if len(jobs) > 0 {
+		// urlCache is read-only from here: goroutines may reuse the default
+		// subscription's decoded URIs when the URL matches.
+		results := make([]subResult, len(jobs))
+		var wg sync.WaitGroup
+		for i, job := range jobs {
+			wg.Add(1)
+			go func(i int, id string, sub *config.Subscription) {
+				defer wg.Done()
+				results[i] = r.processSub(ctx, id, sub, testURL, urlCache)
+			}(i, job.id, job.sub)
+		}
+		wg.Wait()
+
+		// Merge results in the original sorted order.
+		for _, res := range results {
+			if res.err != nil {
+				failedSubs = append(failedSubs, res.id)
+				continue
+			}
+			maps.Copy(tagNames, res.plan.TagNames)
+			plans = append(plans, res.plan)
+			processed++
+		}
 	}
 
 	if processed == 0 && enabledCount > 0 {
@@ -462,6 +448,112 @@ func (r *Runner) writeDryRunNodes(id string, uris []string) error {
 	path := filepath.Join(r.OutDir, id+"-nodes.txt")
 	data := []byte(strings.Join(uris, "\n") + "\n")
 	return os.WriteFile(path, data, 0o644)
+}
+
+// subResult holds the outcome of processing a single non-default subscription.
+type subResult struct {
+	id   string
+	plan *OutboundPlan
+	err  error
+}
+
+// processSub downloads, decodes, filters, and builds outbounds for a single
+// non-default subscription. It is safe to call concurrently from multiple
+// goroutines. urlCache is read-only: if the subscription URL matches a cached
+// entry (e.g. from the default subscription), the cached URIs are reused.
+func (r *Runner) processSub(ctx context.Context, id string, sub *config.Subscription, testURL string, urlCache map[string][]string) subResult {
+	opts := r.fetchOptsForSub(sub)
+
+	var uris []string
+	if cached, ok := urlCache[sub.URL]; ok {
+		logx.Info("Subscription %s: reusing cached nodes from %s", logx.Bold(id), urlHost(sub.URL))
+		uris = make([]string, len(cached))
+		copy(uris, cached)
+	} else {
+		logx.Info("Downloading subscription %s...", logx.Bold(id))
+		logx.Detail("  URL: %s", urlHost(sub.URL))
+		data, dlErr := fetch.Download(ctx, sub.URL, opts)
+		if dlErr != nil {
+			if ctx.Err() != nil {
+				logx.Err("Subscription %s interrupted: %v", id, ctx.Err())
+			} else {
+				logx.Err("Failed to download subscription %s: %v", id, dlErr)
+			}
+			return subResult{id: id, err: dlErr}
+		}
+
+		decoded, decErr := DecodePayload(data)
+		if decErr != nil {
+			logx.Err("Failed to decode subscription %s: %v", id, decErr)
+			return subResult{id: id, err: decErr}
+		}
+		uris = decoded
+	}
+
+	if len(sub.Include) > 0 {
+		before := len(uris)
+		uris = filterInclude(uris, sub.Include)
+		logx.Info("Subscription %s: include filter matched %d/%d node(s)", id, len(uris), before)
+		for _, uri := range uris {
+			logx.Debug("  included: %s", extractNodeName(uri))
+		}
+	}
+
+	if len(sub.Exclude) > 0 {
+		var excludedURIs []string
+		uris, excludedURIs = filterExclude(uris, sub.Exclude)
+		if len(excludedURIs) > 0 {
+			logx.Info("Subscription %s: excluded %d node(s) matching exclude patterns", id, len(excludedURIs))
+			for _, uri := range excludedURIs {
+				logx.Debug("  excluded: %s", extractNodeName(uri))
+			}
+		}
+	}
+
+	logx.OK("Subscription %s: %s node(s)", id, logx.Bold(strconv.Itoa(len(uris))))
+	for _, uri := range uris {
+		logx.Debug("  %s", uri)
+	}
+
+	if r.DryRun {
+		if writeErr := r.writeDryRunNodes(id, uris); writeErr != nil {
+			logx.Err("Failed to write dry-run output for %s: %v", id, writeErr)
+		}
+	}
+
+	plan, buildErr := BuildOutbounds(id, uris, sub.Interval, sub.Tolerance, testURL)
+	if buildErr != nil {
+		logx.Err("Failed to build outbounds for %s: %v", id, buildErr)
+		return subResult{id: id, err: buildErr}
+	}
+
+	logx.Detail("  Subscription %s: final outbound tag: %s", id, logx.Bold(plan.FinalTag))
+	for _, ob := range plan.NodeOutbounds {
+		logx.Debug("  node: %s (%s)", ob.Tag, plan.TagNames[ob.Tag])
+	}
+	if plan.URLTestGroup != nil {
+		logx.Debug("  group(urltest): %s", plan.URLTestGroup.Tag)
+	}
+	if plan.SelectorGroup != nil {
+		logx.Debug("  group(selector): %s", plan.SelectorGroup.Tag)
+	}
+
+	if sub.Route != nil {
+		mergedRoute := FetchRouteEntries(ctx, id, sub.Route, opts, r.SubsListsDir, r.DownloadLists)
+		rules := BuildRouteRules(mergedRoute, plan.FinalTag)
+		plan.RouteRules = rules
+		if len(rules) > 0 {
+			var nDomains, nCIDRs int
+			for _, rule := range rules {
+				nDomains += len(rule.DomainSuffix)
+				nCIDRs += len(rule.IPCIDR)
+			}
+			logx.Detail("  Subscription %s: route rules -> %s (%d domain(s), %d CIDR(s))",
+				id, plan.FinalTag, nDomains, nCIDRs)
+		}
+	}
+
+	return subResult{id: id, plan: plan}
 }
 
 // atomicWrite writes data to path via a temp file and rename to prevent partial writes.

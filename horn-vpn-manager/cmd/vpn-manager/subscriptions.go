@@ -170,11 +170,13 @@ func subscriptionsRunDebug(flags subsFlags, dryRun bool) error {
 	templatePath := flags.templatePath
 	if templatePath == "" {
 		local := filepath.Join(dir, "sing-box.template.json")
+		defaultLocal := filepath.Join(dir, "sing-box.template.default.json")
 		if _, statErr := os.Stat(local); statErr == nil {
 			templatePath = local
-		} else {
-			templatePath = filepath.Join(dir, "sing-box.template.default.json")
+		} else if _, statErr := os.Stat(defaultLocal); statErr == nil {
+			templatePath = defaultLocal
 		}
+		// otherwise templatePath stays empty → embedded template
 	}
 
 	outDir := filepath.Join(dir, "out")
