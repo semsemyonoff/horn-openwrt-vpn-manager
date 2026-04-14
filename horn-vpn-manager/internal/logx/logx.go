@@ -42,8 +42,26 @@ type Logger struct {
 
 var std = &Logger{out: os.Stderr, color: true}
 
+// teeWriter writes to the primary writer unconditionally, then best-effort
+// to the secondary writer. Errors from the secondary are silently ignored
+// so that a broken stderr (e.g. in rpcd/daemon context) never prevents
+// the log file from being written.
+type teeWriter struct {
+	primary   io.Writer
+	secondary io.Writer
+}
+
+func (t *teeWriter) Write(p []byte) (int, error) {
+	n, err := t.primary.Write(p)
+	if t.secondary != nil {
+		_, _ = t.secondary.Write(p)
+	}
+	return n, err
+}
+
 // SetLogFile opens (or creates and truncates) path and tees all log output
-// to both stderr and the file. Returns an error if the file cannot be opened.
+// to the file and stderr. The file is the primary destination; stderr is
+// best-effort so that a broken pipe in daemon context cannot block logging.
 func SetLogFile(path string) error {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
@@ -51,7 +69,7 @@ func SetLogFile(path string) error {
 	}
 	std.mu.Lock()
 	defer std.mu.Unlock()
-	std.out = io.MultiWriter(os.Stderr, f)
+	std.out = &teeWriter{primary: f, secondary: os.Stderr}
 	return nil
 }
 

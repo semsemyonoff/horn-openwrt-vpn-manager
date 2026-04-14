@@ -273,9 +273,9 @@ case "$1" in
 
                 # shellcheck disable=SC2086
                 if [ "$dry_run" = "true" ]; then
-                    (vpn-manager $args) &
+                    (vpn-manager $args 2>/dev/null) &
                 else
-                    (vpn-manager $args; rm -f "$UNSYNC_SUBS_FLAG") &
+                    (vpn-manager $args 2>/dev/null; rm -f "$UNSYNC_SUBS_FLAG") &
                 fi
                 echo $! > "$PID_FILE"
                 printf '{"result":"started"}'
@@ -320,7 +320,7 @@ case "$1" in
                 esac
 
                 # shellcheck disable=SC2086
-                (vpn-manager $args; rm -f "$UNSYNC_ROUTING_FLAG") &
+                (vpn-manager $args 2>/dev/null; rm -f "$UNSYNC_ROUTING_FLAG") &
                 echo $! > "$ROUTING_PID"
                 printf '{"result":"started"}'
                 ;;
