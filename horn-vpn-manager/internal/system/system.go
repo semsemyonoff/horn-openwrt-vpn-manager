@@ -102,7 +102,9 @@ func (o *OpenWrt) ApplySingbox(stagingPath, finalPath string) error {
 	out, err := o.Cmd.Run("sing-box", "check", "-c", stagingPath)
 	if err != nil {
 		_ = os.Remove(stagingPath)
-		return fmt.Errorf("sing-box check failed: %s: %w", strings.TrimSpace(string(out)), err)
+		msg := strings.TrimSpace(string(out))
+		logx.Err("sing-box config validation failed: %s", msg)
+		return fmt.Errorf("sing-box check failed: %s: %w", msg, err)
 	}
 	logx.OK("sing-box config validation passed")
 

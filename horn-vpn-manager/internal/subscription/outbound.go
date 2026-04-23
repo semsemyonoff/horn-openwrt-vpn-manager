@@ -211,9 +211,15 @@ func BuildOutbounds(id string, uris []string, interval string, tolerance int, te
 	} else {
 		// Multi-node mode: hash-tagged nodes + urltest + selector.
 		nodeTags := make([]string, 0, len(nodes))
+		seenTags := make(map[string]int, len(nodes))
 		for _, n := range nodes {
 			hash := vless.StableHash(n)
-			tag := fmt.Sprintf("%s-node-%s", id, hash)
+			base := fmt.Sprintf("%s-node-%s", id, hash)
+			tag := base
+			if count := seenTags[base]; count > 0 {
+				tag = fmt.Sprintf("%s-%d", base, count+1)
+			}
+			seenTags[base]++
 			ob := nodeToOutbound(n, tag)
 			plan.NodeOutbounds = append(plan.NodeOutbounds, ob)
 			plan.TagNames[tag] = n.Name
