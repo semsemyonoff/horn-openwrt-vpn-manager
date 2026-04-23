@@ -327,6 +327,7 @@ func TestFormatString(t *testing.T) {
 		{FormatBase64URL, "base64url"},
 		{FormatGzipBase64, "gzip+base64"},
 		{FormatGzipBase64URL, "gzip+base64url"},
+		{FormatJSON, "json"},
 		{FormatUnknown, "unknown"},
 	}
 	for _, tc := range cases {

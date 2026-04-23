@@ -24,6 +24,7 @@ const (
 	FormatBase64URL            // URL-safe base64-encoded payload
 	FormatGzipBase64           // gzip-compressed payload wrapped in standard base64
 	FormatGzipBase64URL        // gzip-compressed payload wrapped in URL-safe base64
+	FormatJSON                 // V2Ray/Xray-style JSON config (array or object)
 )
 
 func (f Format) String() string {
@@ -40,6 +41,8 @@ func (f Format) String() string {
 		return "gzip+base64"
 	case FormatGzipBase64URL:
 		return "gzip+base64url"
+	case FormatJSON:
+		return "json"
 	default:
 		return "unknown"
 	}
@@ -58,6 +61,10 @@ func DecodePayload(data []byte) ([]string, error) {
 	}
 
 	if uris, format := tryGzip(data); format == FormatGzip {
+		return uris, nil
+	}
+
+	if uris, format := tryJSON(data); format == FormatJSON {
 		return uris, nil
 	}
 
