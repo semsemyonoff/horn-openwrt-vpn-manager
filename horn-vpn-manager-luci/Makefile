@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=horn-vpn-manager-luci
-PKG_VERSION:=2.1.0
+PKG_VERSION:=2.2.0
 PKG_RELEASE:=1
 
 include $(INCLUDE_DIR)/package.mk
@@ -11,8 +11,7 @@ define Package/horn-vpn-manager-luci
   CATEGORY:=LuCI
   SUBMENU:=3. Applications
   TITLE:=LuCI interface for horn-vpn-manager
-  # Runtime: luci-base, horn-vpn-manager (not enforced at build time)
-
+  DEPENDS:=+horn-vpn-manager
   PKGARCH:=all
 endef
 

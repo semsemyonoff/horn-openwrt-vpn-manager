@@ -447,8 +447,8 @@ msgstr "Как работает слияние шаблонов"
 msgid "Generated proxy outbounds are prepended before the template outbounds array."
 msgstr "Сгенерированные outbound-ы прокси добавляются в начало массива outbounds шаблона."
 
-msgid "Generated route rules are prepended before the template route.rules array."
-msgstr "Сгенерированные правила маршрутизации добавляются в начало массива route.rules шаблона."
+msgid "The sniff action is placed first, then generated route rules are prepended before the template route.rules array."
+msgstr "Сначала добавляется action sniff, затем сгенерированные правила маршрутизации добавляются перед массивом route.rules шаблона."
 
 msgid "Bare string entries in outbounds and route.rules arrays are stripped from the template."
 msgstr "Строковые элементы из массивов outbounds и route.rules в шаблоне удаляются."

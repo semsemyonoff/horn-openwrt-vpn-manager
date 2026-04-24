@@ -663,14 +663,12 @@ TAGEOF
                 ' /etc/config/dhcp | sort)
 
                 # Build new_domains from validated input to match what will actually be written
-                new_domains=$(echo "$input" | jq -r '.domains[]? // empty' | while IFS= read -r domain; do
-                    [ -z "$domain" ] && continue
-                    case "$domain" in
-                        *[!A-Za-z0-9.-]*) continue ;;
-                        .*|*.)             continue ;;
-                    esac
-                    printf '%s\n' "$domain"
-                done | sort)
+                new_domains=$(printf '%s' "$input" | jq -r '
+                    .domains[]? // empty
+                    | select(type == "string")
+                    | select(test("^[A-Za-z0-9.-]+$"))
+                    | select((startswith(".") | not) and (endswith(".") | not))
+                ' | sort)
 
                 # Strip existing vpn_domains ipset blocks
                 stripped=$(awk '
@@ -685,14 +683,8 @@ TAGEOF
                 # Rewrite the file: stripped content + new domain blocks
                 {
                     printf '%s\n' "$stripped"
-                    echo "$input" | jq -r '.domains[]? // empty' | while IFS= read -r domain; do
+                    printf '%s\n' "$new_domains" | while IFS= read -r domain; do
                         [ -z "$domain" ] && continue
-                        # Validate: domains contain only safe characters (alphanumeric, hyphens, dots)
-                        # and must not start or end with a dot (invalid FQDN, breaks dnsmasq)
-                        case "$domain" in
-                            *[!A-Za-z0-9.-]*) continue ;;
-                            .*|*.)             continue ;;
-                        esac
                         printf 'config ipset\n\tlist name '\''vpn_domains'\''\n\tlist domain '\''%s'\''\n\n' "$domain"
                     done
                 } > /etc/config/dhcp.tmp && mv /etc/config/dhcp.tmp /etc/config/dhcp

@@ -447,8 +447,8 @@ msgstr "How template merging works"
 msgid "Generated proxy outbounds are prepended before the template outbounds array."
 msgstr "Generated proxy outbounds are prepended before the template outbounds array."
 
-msgid "Generated route rules are prepended before the template route.rules array."
-msgstr "Generated route rules are prepended before the template route.rules array."
+msgid "The sniff action is placed first, then generated route rules are prepended before the template route.rules array."
+msgstr "The sniff action is placed first, then generated route rules are prepended before the template route.rules array."
 
 msgid "Bare string entries in outbounds and route.rules arrays are stripped from the template."
 msgstr "Bare string entries in outbounds and route.rules arrays are stripped from the template."

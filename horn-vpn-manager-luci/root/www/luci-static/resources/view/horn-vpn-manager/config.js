@@ -1260,7 +1260,7 @@ return view.extend({
             E("legend", {}, _("How template merging works")),
             E("ul", { class: "vpnsub-tpl-merge-notes" }, [
                 E("li", {}, _("Generated proxy outbounds are prepended before the template outbounds array.")),
-                E("li", {}, _("Generated route rules are prepended before the template route.rules array.")),
+                E("li", {}, _("The sniff action is placed first, then generated route rules are prepended before the template route.rules array.")),
                 E("li", {}, _("Bare string entries in outbounds and route.rules arrays are stripped from the template.")),
                 E("li", {}, _("log.level is always set from the Log level setting above.")),
                 E("li", {}, _("route.final is always set to the default subscription proxy tag.")),

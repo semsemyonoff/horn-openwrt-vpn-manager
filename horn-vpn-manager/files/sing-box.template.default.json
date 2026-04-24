@@ -6,20 +6,18 @@
     {
       "type": "tun",
       "interface_name": "tun0",
-      "domain_strategy": "ipv4_only",
       "address": ["172.16.250.1/30"],
       "auto_route": false,
-      "strict_route": false,
-      "sniff": true,
-      "sniff_override_destination": false
+      "strict_route": false
     }
   ],
   "outbounds": [
-    {"type": "direct", "tag": "direct"},
-    {"type": "block", "tag": "block"}
+    {"type": "direct", "tag": "direct"}
   ],
   "route": {
-    "rules": [],
+    "rules": [
+      {"action": "sniff"}
+    ],
     "auto_detect_interface": true
   },
   "experimental": {

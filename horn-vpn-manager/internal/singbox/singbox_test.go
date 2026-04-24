@@ -76,18 +76,18 @@ func TestRenderConfig_basic_single_node(t *testing.T) {
 		t.Errorf("route.final = %v, want sub-single", route["final"])
 	}
 
-	// outbounds: node first, then static
+	// outbounds: node first, then non-deprecated static
 	obs, _ := cfg["outbounds"].([]any)
-	if len(obs) != 3 {
-		t.Fatalf("expected 3 outbounds (node + direct + block), got %d", len(obs))
+	if len(obs) != 2 {
+		t.Fatalf("expected 2 outbounds (node + direct), got %d", len(obs))
 	}
 	first, _ := obs[0].(map[string]any)
 	if first["tag"] != "sub-single" {
 		t.Errorf("first outbound tag = %v, want sub-single", first["tag"])
 	}
-	last, _ := obs[2].(map[string]any)
-	if last["tag"] != "block" {
-		t.Errorf("last outbound tag = %v, want block", last["tag"])
+	last, _ := obs[1].(map[string]any)
+	if last["tag"] != "direct" {
+		t.Errorf("last outbound tag = %v, want direct", last["tag"])
 	}
 }
 
@@ -183,14 +183,23 @@ func TestRenderConfig_route_rules_prepended(t *testing.T) {
 	route, _ := cfg["route"].(map[string]any)
 	ruleList, _ := route["rules"].([]any)
 	if len(ruleList) != 2 {
-		t.Fatalf("expected 2 rules (generated + static), got %d", len(ruleList))
+		t.Fatalf("expected 2 rules (sniff + generated), got %d", len(ruleList))
 	}
 
-	// Generated rule should be first.
+	sniff, _ := ruleList[0].(map[string]any)
+	if sniff["action"] != "sniff" {
+		t.Errorf("first rule action = %v, want sniff", sniff["action"])
+	}
+
+	// Generated rule should follow the mandatory sniff action.
 	first, _ := ruleList[0].(map[string]any)
-	ds, _ := first["domain_suffix"].([]any)
+	second, _ := ruleList[1].(map[string]any)
+	ds, _ := second["domain_suffix"].([]any)
 	if len(ds) == 0 || ds[0] != "jira.example.com" {
-		t.Errorf("first rule domain_suffix = %v, want [jira.example.com]", ds)
+		t.Errorf("second rule domain_suffix = %v, want [jira.example.com]", ds)
+	}
+	if first["action"] != "sniff" {
+		t.Errorf("first rule = %v, want sniff action", first)
 	}
 }
 
@@ -232,16 +241,20 @@ func TestRenderConfig_strips_legacy_placeholders(t *testing.T) {
 	}
 
 	obs, _ := cfg["outbounds"].([]any)
-	// 1 node + direct + block = 3; placeholders stripped
-	if len(obs) != 3 {
-		t.Errorf("expected 3 outbounds, got %d", len(obs))
+	// 1 node + direct = 2; placeholders and legacy block stripped
+	if len(obs) != 2 {
+		t.Errorf("expected 2 outbounds, got %d", len(obs))
 	}
 
 	route, _ := cfg["route"].(map[string]any)
 	ruleList, _ := route["rules"].([]any)
-	// No generated rules, placeholder stripped → 0
-	if len(ruleList) != 0 {
-		t.Errorf("expected 0 rules after stripping placeholder, got %d", len(ruleList))
+	// No generated rules, placeholder stripped, mandatory sniff retained.
+	if len(ruleList) != 1 {
+		t.Fatalf("expected 1 sniff rule after stripping placeholder, got %d", len(ruleList))
+	}
+	sniff, _ := ruleList[0].(map[string]any)
+	if sniff["action"] != "sniff" {
+		t.Errorf("rule action = %v, want sniff", sniff["action"])
 	}
 }
 
@@ -305,6 +318,64 @@ func TestRenderConfig_empty_plans_keeps_static_outbounds(t *testing.T) {
 	obs, _ := cfg["outbounds"].([]any)
 	if len(obs) != 1 {
 		t.Errorf("expected 1 outbound (direct), got %d", len(obs))
+	}
+}
+
+func TestRenderConfig_strips_singbox_113_deprecated_fields(t *testing.T) {
+	tmpl := `{
+  "inbounds": [
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "domain_strategy": "ipv4_only",
+      "sniff": true,
+      "sniff_override_destination": false,
+      "address": ["172.16.250.1/30"]
+    }
+  ],
+  "outbounds": [
+    {"type": "direct", "tag": "direct"},
+    {"type": "block", "tag": "block"},
+    {"type": "dns", "tag": "dns-out"}
+  ],
+  "route": {"rules": [], "final": "direct"}
+}`
+
+	data, err := RenderConfig([]byte(tmpl), nil, nil, "direct", "")
+	if err != nil {
+		t.Fatalf("RenderConfig error: %v", err)
+	}
+
+	var cfg map[string]any
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	inbounds, _ := cfg["inbounds"].([]any)
+	inbound, _ := inbounds[0].(map[string]any)
+	for _, key := range []string{"domain_strategy", "sniff", "sniff_override_destination"} {
+		if _, ok := inbound[key]; ok {
+			t.Errorf("deprecated inbound field %q was not stripped", key)
+		}
+	}
+
+	outbounds, _ := cfg["outbounds"].([]any)
+	if len(outbounds) != 1 {
+		t.Fatalf("expected only direct outbound after stripping legacy special outbounds, got %d", len(outbounds))
+	}
+	outbound, _ := outbounds[0].(map[string]any)
+	if outbound["tag"] != "direct" {
+		t.Errorf("outbound tag = %v, want direct", outbound["tag"])
+	}
+
+	route, _ := cfg["route"].(map[string]any)
+	rules, _ := route["rules"].([]any)
+	if len(rules) != 1 {
+		t.Fatalf("expected one sniff rule, got %d", len(rules))
+	}
+	rule, _ := rules[0].(map[string]any)
+	if rule["action"] != "sniff" {
+		t.Errorf("first route action = %v, want sniff", rule["action"])
 	}
 }
 
@@ -427,9 +498,16 @@ func TestRenderConfig_uses_embedded_template(t *testing.T) {
 		t.Fatalf("invalid JSON: %v", err)
 	}
 
-	// Template has direct + block outbounds
+	// Template has direct outbound and a mandatory sniff route rule.
 	obs, _ := cfg["outbounds"].([]any)
-	if len(obs) < 2 {
-		t.Errorf("expected at least 2 outbounds from default template, got %d", len(obs))
+	if len(obs) < 1 {
+		t.Errorf("expected at least 1 outbound from default template, got %d", len(obs))
+	}
+
+	route, _ := cfg["route"].(map[string]any)
+	rules, _ := route["rules"].([]any)
+	first, _ := rules[0].(map[string]any)
+	if first["action"] != "sniff" {
+		t.Errorf("first route action = %v, want sniff", first["action"])
 	}
 }
