@@ -662,13 +662,20 @@ TAGEOF
                     }
                 ' /etc/config/dhcp | sort)
 
-                # Build new_domains from validated input to match what will actually be written
+                # Build new_domains from validated input to match what will actually be written.
+                # Character-class validation is done in shell because OpenWrt's jq is
+                # compiled without ONIGURUMA, so jq's test()/match() are unavailable.
                 new_domains=$(printf '%s' "$input" | jq -r '
                     .domains[]? // empty
                     | select(type == "string")
-                    | select(test("^[A-Za-z0-9.-]+$"))
+                    | select(. != "")
                     | select((startswith(".") | not) and (endswith(".") | not))
-                ' | sort)
+                ' | while IFS= read -r d; do
+                    case "$d" in
+                        ''|*[!A-Za-z0-9.-]*) ;;
+                        *) printf '%s\n' "$d" ;;
+                    esac
+                done | sort)
 
                 # Strip existing vpn_domains ipset blocks
                 stripped=$(awk '
