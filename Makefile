@@ -90,12 +90,13 @@ ALL_PLATFORMS = \
 
 .PHONY: help build build-core build-core-all build-all \
 	build-luci \
+	build-ipk build-ipk-core build-ipk-core-all build-ipk-all build-ipk-luci \
 	docker-apk shell \
 	lint go-build go-test go-lint go-fmt clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
-		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "  TARGET=$(TARGET)  GOARCH=$(GOARCH)  PKG_PLATFORM=$(PKG_PLATFORM)"
 	@echo "  Override: TARGET=ath79/generic make build-core"
@@ -146,6 +147,43 @@ build-luci: ## Build horn-vpn-manager-luci .apk
 	@mkdir -p $(OUTPUT_DIR)
 	PKG_VERSION=$(PKG_VERSION) PKG_RELEASE=$(PKG_RELEASE) \
 		./scripts/package-luci-apk.sh $(LUCI_SRC) $(OUTPUT_DIR)
+
+# ── .ipk packages for opkg (OpenWrt < 25) ───────────────────
+
+build-ipk-core: ## Build horn-vpn-manager .ipk (single platform)
+	$(go-cross-compile)
+	PKG_VERSION=$(PKG_VERSION) PKG_RELEASE=$(PKG_RELEASE) PKG_ARCH=$(PKG_ARCH) PKG_PLATFORM=$(PKG_PLATFORM) \
+		./scripts/package-ipk.sh $(OUTPUT_DIR)/$(GO_BIN) $(GO_PKG_DIR)/files $(OUTPUT_DIR)
+	@rm -f $(OUTPUT_DIR)/$(GO_BIN)
+
+build-ipk-core-all: ## Build horn-vpn-manager .ipk for all platforms
+	@mkdir -p $(OUTPUT_DIR)
+	@for plat in $(ALL_PLATFORMS); do \
+		goarch=$$(echo "$$plat" | cut -d, -f1); \
+		goarm=$$(echo "$$plat" | cut -d, -f2); \
+		gomips=$$(echo "$$plat" | cut -d, -f3); \
+		pkgarch=$$(echo "$$plat" | cut -d, -f4); \
+		label=$$(echo "$$plat" | cut -d, -f5); \
+		echo ""; \
+		echo "========== $$label =========="; \
+		(cd $(GO_PKG_DIR) && GOOS=linux GOARCH=$$goarch GOARM=$$goarm GOMIPS=$$gomips \
+			go build -trimpath -ldflags="-s -w -X main.version=$(PKG_VERSION)" -o ../$(OUTPUT_DIR)/$(GO_BIN) ./cmd/vpn-manager) && \
+		PKG_VERSION=$(PKG_VERSION) PKG_RELEASE=$(PKG_RELEASE) PKG_ARCH=$$pkgarch PKG_PLATFORM=$$label \
+			./scripts/package-ipk.sh $(OUTPUT_DIR)/$(GO_BIN) $(GO_PKG_DIR)/files $(OUTPUT_DIR) && \
+		rm -f $(OUTPUT_DIR)/$(GO_BIN) || exit 1; \
+	done
+	@echo ""
+	@echo ">> All platforms built:"
+	@ls -lh $(OUTPUT_DIR)/horn-vpn-manager_*.ipk
+
+build-ipk-luci: ## Build horn-vpn-manager-luci .ipk
+	@mkdir -p $(OUTPUT_DIR)
+	PKG_VERSION=$(PKG_VERSION) PKG_RELEASE=$(PKG_RELEASE) \
+		./scripts/package-luci-ipk.sh $(LUCI_SRC) $(OUTPUT_DIR)
+
+build-ipk: build-ipk-core build-ipk-luci ## Build .ipk packages (core + luci)
+
+build-ipk-all: build-ipk-core-all build-ipk-luci ## Build .ipk packages for all platforms (core + luci)
 
 # ── Aggregates ───────────────────────────────────────────────
 
