@@ -23,7 +23,10 @@ This repository contains two OpenWrt packages plus local Docker-based build tool
 - `Makefile` — main entry point for local development: builds Docker images, packages, shells, and lint checks
 - `Dockerfile` — OpenWrt SDK builder image
 - `docker/entrypoint.sh` — syncs package sources into the SDK and builds `horn-vpn-manager` / `horn-vpn-manager-luci`
-- `bin/` — local build output (`.apk` artifacts); treat as generated output, not source of truth
+- `scripts/` — packaging helpers (`package-apk.sh`, `package-ipk.sh`, `package-luci-apk.sh`, `package-luci-ipk.sh`) invoked from inside the SDK container
+- `docs/plans/` — design notes and implementation plans
+- `bin/` — local build output (`.apk` and `.ipk` artifacts); treat as generated output, not source of truth
+- `AGENTS.md` is the canonical guidelines file; `CLAUDE.md` is a symlink to it — edit `AGENTS.md`
 
 ### `horn-vpn-manager` (core package)
 
@@ -37,7 +40,7 @@ Package layout:
 - `horn-vpn-manager/files/config.example.json` — annotated config example shipped with the package
 - `horn-vpn-manager/cmd/vpn-manager` — CLI bootstrap
 - `horn-vpn-manager/internal/` — application internals
-- `horn-vpn-manager/testdata/` — fixtures and golden files for parser/config generation tests
+- `horn-vpn-manager/internal/<pkg>/testdata/` — per-package fixtures and golden files (e.g. `internal/subscription/testdata`)
 
 Internal package split:
 
@@ -161,9 +164,16 @@ Design constraints:
 - `make help` — list supported local tasks
 - `make build` — build `.apk` packages for current platform (core + luci)
 - `make build-all` — build `.apk` packages for all platforms (core + luci)
-- `make build-core-all` — build core `.apk` for all platforms only
+- `make build-core` / `make build-core-all` — build core `.apk` for single / all platforms
+- `make build-luci` — build LuCI `.apk` only
+- `make build-ipk` / `make build-ipk-all` — build `.ipk` packages (core + luci) for OpenWrt < 25 with opkg
+- `make build-ipk-core` / `make build-ipk-core-all` / `make build-ipk-luci` — granular `.ipk` builds
 - `make shell` — open an interactive shell inside the SDK container
-- `make lint` — run local static checks configured by the repository, including `golangci-lint` for Go code
+- `make go-build` — build the `vpn-manager` binary natively into `bin/`
+- `make go-test` — run Go tests
+- `make go-fmt` / `make go-lint` — Go formatting check / `golangci-lint`
+- `make lint` — aggregate Go checks (`go-fmt` + `go-lint`)
+- `make clean` — remove build output
 
 Preferred checks before opening a change:
 
@@ -247,7 +257,7 @@ Use short imperative commit messages, preferably scoped:
 PRs should state:
 
 - which package(s) are affected: `horn-vpn-manager`, `horn-vpn-manager-luci`, build tooling
-- whether the change targets the Go core or OpenWrt packaging
+- whether the change targets the Go core or OpenWrt packaging (`.apk` for OpenWrt ≥ 25, `.ipk` for OpenWrt < 25 with opkg)
 - which checks were run
 
 ## Security & Configuration Tips
