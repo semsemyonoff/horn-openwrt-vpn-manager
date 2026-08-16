@@ -585,6 +585,316 @@ function dynList(values, placeholder) {
     };
 }
 
+// ── Fallback chain picker ─────────────────────────────────────────────────────
+// A chain is an ordered list of backup subscription ids. Candidates are read
+// from the live cards on every refresh, so a renamed id or a toggled Enabled
+// checkbox is reflected without reloading the page.
+
+function cardSubId(card) {
+    var idEl = card.querySelector(".vpnsub-sub-id");
+    var id = idEl ? idEl.value.trim() : "";
+    if (id) return id;
+    var nameEl = card.querySelector(".vpnsub-sub-name");
+    return nameEl ? sanitizeId(nameEl.value.trim()) : "";
+}
+
+function cardSubEnabled(card) {
+    var el = card.querySelector(".vpnsub-sub-enabled");
+    return !el || el.checked;
+}
+
+// id → declared backup ids, over every rendered card.
+function chainGraph() {
+    var graph = {};
+    Array.prototype.forEach.call(
+        document.querySelectorAll(".vpnsub-sub-card"),
+        function (card) {
+            var id = cardSubId(card);
+            if (!id) return;
+            graph[id] = Array.prototype.slice
+                .call(card.querySelectorAll(".vpnsub-chain-select"))
+                .map(function (sel) {
+                    return sel._value || "";
+                })
+                .filter(function (v) {
+                    return v !== "";
+                });
+        },
+    );
+    return graph;
+}
+
+// Does `from` reach `target` by following declared chains?
+function chainReaches(graph, from, target) {
+    var seen = {};
+    var stack = [from];
+    while (stack.length) {
+        var cur = stack.pop();
+        if (cur === target) return true;
+        if (seen[cur]) continue;
+        seen[cur] = true;
+        (graph[cur] || []).forEach(function (next) {
+            stack.push(next);
+        });
+    }
+    return false;
+}
+
+// Pickers rendered by the current view. Stale entries (removed cards) are
+// dropped on the next refresh, so no explicit teardown is needed.
+var chainPickers = [];
+
+function refreshChainPickers() {
+    chainPickers = chainPickers.filter(function (p) {
+        return document.getElementById(p.cardId);
+    });
+    chainPickers.forEach(function (p) {
+        p.refresh();
+    });
+}
+
+function makeChainPicker(cardId, values) {
+    var listEl = E("div", { class: "vpnsub-dynlist vpnsub-chain-list" });
+
+    function ownId() {
+        var card = document.getElementById(cardId);
+        return card ? cardSubId(card) : "";
+    }
+
+    // Every other enabled subscription that is not already picked on this card
+    // and cannot reach back to it — self-reference, disabled references,
+    // duplicates and cycles are simply absent from the list rather than
+    // rejected after the fact.
+    function candidates(current) {
+        var own = ownId();
+        var graph = chainGraph();
+        var picked = {};
+        Array.prototype.forEach.call(
+            listEl.querySelectorAll(".vpnsub-chain-select"),
+            function (sel) {
+                if (sel._value && sel._value !== current)
+                    picked[sel._value] = true;
+            },
+        );
+        var out = [];
+        Array.prototype.forEach.call(
+            document.querySelectorAll(".vpnsub-sub-card"),
+            function (card) {
+                var id = cardSubId(card);
+                if (!id || id === own || picked[id]) return;
+                if (!cardSubEnabled(card)) return;
+                if (own && chainReaches(graph, id, own)) return;
+                var nameEl = card.querySelector(".vpnsub-sub-name");
+                var name = nameEl ? nameEl.value.trim() : "";
+                out.push({ id: id, label: name ? name + " (" + id + ")" : id });
+            },
+        );
+        return out;
+    }
+
+    function fillSelect(sel) {
+        var current = sel._value || "";
+        var opts = candidates(current);
+        var known = false;
+        while (sel.firstChild) sel.removeChild(sel.firstChild);
+        if (!current)
+            sel.appendChild(E("option", { value: "" }, "—"));
+        opts.forEach(function (o) {
+            if (o.id === current) known = true;
+            sel.appendChild(E("option", { value: o.id }, o.label));
+        });
+        // A pick that stopped being valid (its subscription was disabled,
+        // renamed or removed) stays visible instead of being silently
+        // rewritten; _validate turns it into a message.
+        if (current && !known)
+            sel.appendChild(E("option", { value: current }, current));
+        sel.value = current;
+        if (current && !known) sel.classList.add("vpnsub-invalid");
+        else sel.classList.remove("vpnsub-invalid");
+    }
+
+    function makeRow(val) {
+        var sel = E("select", {
+            class: "cbi-input-select vpnsub-chain-select",
+            change: function () {
+                sel._value = sel.value;
+                refreshChainPickers();
+            },
+        });
+        sel._value = val || "";
+
+        var up = E(
+            "button",
+            {
+                type: "button",
+                class: "cbi-button vpnsub-chain-move",
+                title: _("Move up"),
+                click: function () {
+                    var prev = row.previousElementSibling;
+                    if (prev) listEl.insertBefore(row, prev);
+                },
+            },
+            "▲",
+        );
+        var down = E(
+            "button",
+            {
+                type: "button",
+                class: "cbi-button vpnsub-chain-move",
+                title: _("Move down"),
+                click: function () {
+                    var next = row.nextElementSibling;
+                    if (next) listEl.insertBefore(next, row);
+                },
+            },
+            "▼",
+        );
+        var remove = E(
+            "button",
+            {
+                type: "button",
+                class: "vpnsub-dynlist-remove cbi-button cbi-button-negative",
+                click: function () {
+                    listEl.removeChild(row);
+                    refreshChainPickers();
+                },
+            },
+            "✕",
+        );
+
+        var row = E("div", { class: "vpnsub-dynlist-row vpnsub-chain-row" }, [
+            sel,
+            up,
+            down,
+            remove,
+        ]);
+        fillSelect(sel);
+        return row;
+    }
+
+    var addBtn = E(
+        "button",
+        {
+            type: "button",
+            class: "vpnsub-dynlist-add cbi-button cbi-button-add",
+            title: _("Add"),
+            click: function () {
+                listEl.appendChild(makeRow(""));
+                refreshChainPickers();
+            },
+        },
+        _("Add"),
+    );
+    var addWrap = E(
+        "div",
+        {
+            class: "cbi-section-create cbi-tblsection-create vpnsub-dynlist-create",
+        },
+        [addBtn],
+    );
+
+    (values || []).forEach(function (v) {
+        listEl.appendChild(makeRow(v));
+    });
+
+    var picker = {
+        cardId: cardId,
+        node: E("div", { class: "vpnsub-dynlist-wrap" }, [listEl, addWrap]),
+        getValue: function () {
+            return Array.prototype.slice
+                .call(listEl.querySelectorAll(".vpnsub-chain-select"))
+                .map(function (sel) {
+                    return sel._value || "";
+                })
+                .filter(function (v) {
+                    return v !== "";
+                });
+        },
+        refresh: function () {
+            Array.prototype.forEach.call(
+                listEl.querySelectorAll(".vpnsub-chain-select"),
+                fillSelect,
+            );
+        },
+    };
+    chainPickers.push(picker);
+    return picker;
+}
+
+// The picker only offers valid candidates, but a chain can still go bad after
+// it was picked — a backup renamed, disabled or removed, or imported config.
+// These checks mirror validateFallback/validateFallbackCycles in the Go core so
+// the problem is named here instead of coming back as a save error.
+function validateChains(subs) {
+    var errs = [];
+    var ids = Object.keys(subs);
+
+    function enabled(id) {
+        var s = subs[id];
+        return !!s && s.enabled !== false && s.enabled !== "false";
+    }
+
+    ids.forEach(function (id) {
+        if (!enabled(id)) return;
+        var fb = subs[id].fallback;
+        if (!fb || !Array.isArray(fb.subscriptions)) return;
+        var seen = {};
+        var prefix = _("Fallback chain of") + ' "' + id + '": ';
+        fb.subscriptions.forEach(function (ref) {
+            if (ref === id)
+                errs.push(prefix + _("a subscription cannot fall back to itself"));
+            else if (!hasOwn(subs, ref))
+                errs.push(prefix + _("unknown subscription") + ' "' + ref + '"');
+            else if (!enabled(ref))
+                errs.push(prefix + _("disabled subscription") + ' "' + ref + '"');
+            if (seen[ref])
+                errs.push(prefix + _("duplicate entry") + ' "' + ref + '"');
+            seen[ref] = true;
+        });
+        if (fb.blacklist_timeout && !isValidDuration(fb.blacklist_timeout))
+            errs.push(
+                prefix +
+                    _("blacklist timeout is not a valid duration (e.g. 1m, 30s)"),
+            );
+    });
+
+    // Cycles of any length, over enabled subscriptions only — a chain through a
+    // disabled subscription is never generated.
+    var graph = {};
+    ids.forEach(function (id) {
+        if (!enabled(id)) return;
+        var fb = subs[id].fallback;
+        graph[id] = ((fb && fb.subscriptions) || []).filter(function (ref) {
+            return ref !== id && enabled(ref);
+        });
+    });
+    var state = {}; // 1 = on the current path, 2 = fully explored
+    ids.sort().forEach(function (start) {
+        if (!graph[start] || state[start]) return;
+        (function walk(id, path) {
+            state[id] = 1;
+            (graph[id] || []).forEach(function (next) {
+                if (state[next] === 1)
+                    errs.push(
+                        _("Fallback chain forms a cycle") +
+                            ": " +
+                            path.concat([next]).join(" → "),
+                    );
+                else if (!state[next]) walk(next, path.concat([next]));
+            });
+            state[id] = 2;
+        })(start, [start]);
+    });
+
+    return errs;
+}
+
+// Go's time.ParseDuration accepts a sequence of decimal-and-unit pairs; the
+// core is authoritative, this only catches typos before the round trip.
+function isValidDuration(s) {
+    return /^(\d+(\.\d+)?(ns|us|µs|ms|s|m|h))+$/.test(s);
+}
+
 // ── ANSI → HTML ───────────────────────────────────────────────────────────────
 
 var ANSI_STYLES = {
@@ -888,6 +1198,7 @@ return view.extend({
         var tagNames = sbData && sbData.tag_names ? sbData.tag_names : {};
 
         self._widgets = {};
+        chainPickers = [];
         self._rawSingbox = Object.assign({}, cfg.singbox || {});
         self._singboxTemplate = (cfg.singbox || {}).template || "";
         var subKeys = Object.keys(cfg.subscriptions || {});
@@ -947,6 +1258,7 @@ return view.extend({
                         i,
                     );
                     subList.appendChild(card);
+                    refreshChainPickers();
                     card.scrollIntoView({ behavior: "smooth" });
                 },
             },
@@ -1941,6 +2253,10 @@ return view.extend({
             importBtn,
         ]);
 
+        // Chain pickers query the live document for candidate subscriptions, so
+        // they can only be filled once LuCI has attached the tree below.
+        setTimeout(refreshChainPickers, 0);
+
         // ── Assemble tabs ─────────────────────────────────────────────────────
         return E("div", { class: "cbi-map" }, [
             E("h2", {}, _("VPN management")),
@@ -2026,6 +2342,8 @@ return view.extend({
         var includeW = dynList(sub.include || [], _("keyword"));
         var excludeW = dynList(sub.exclude || [], _("Russia"));
         var nodesW = dynList(sub.nodes || [], "vless://uuid@host:443?...");
+        var subFallback = sub.fallback || {};
+        var fallbackW = makeChainPicker(cardId, subFallback.subscriptions || []);
         self._widgets[idx] = {
             domains: domainsW,
             domain_urls: domainUrlsW,
@@ -2034,6 +2352,7 @@ return view.extend({
             include: includeW,
             exclude: excludeW,
             nodes: nodesW,
+            fallback: fallbackW,
             // Raw subscription as loaded, so fields this view does not know about
             // (added by a newer core, or hand-edited) survive a save instead of
             // being dropped by the rebuild in _collectConfig.
@@ -2047,6 +2366,7 @@ return view.extend({
             placeholder: _("Subscription name"),
             input: function () {
                 clearError(this);
+                refreshChainPickers();
             },
         });
 
@@ -2059,6 +2379,7 @@ return view.extend({
             input: function () {
                 this._manualEdit = true;
                 clearError(this);
+                refreshChainPickers();
             },
         });
 
@@ -2126,6 +2447,9 @@ return view.extend({
         var enabledInput = E("input", {
             type: "checkbox",
             class: "vpnsub-sub-enabled",
+            change: function () {
+                refreshChainPickers();
+            },
         });
         if (sub.enabled !== false && sub.enabled !== "false")
             enabledInput.checked = true;
@@ -2146,6 +2470,7 @@ return view.extend({
                     var card = document.getElementById(cardId);
                     if (card) card.parentNode.removeChild(card);
                     delete self._widgets[idx];
+                    refreshChainPickers();
                 },
             },
             _("Remove"),
@@ -2169,6 +2494,16 @@ return view.extend({
             value: sub.tolerance != null ? String(sub.tolerance) : "",
             placeholder: "100",
             min: "0",
+        });
+
+        var blacklistTimeoutInput = E("input", {
+            type: "text",
+            class: "cbi-input-text vpnsub-sub-blacklist-timeout",
+            value: subFallback.blacklist_timeout || "",
+            placeholder: _("sing-box default"),
+            input: function () {
+                clearError(this);
+            },
         });
 
         var retriesInput = E("input", {
@@ -2291,6 +2626,25 @@ return view.extend({
             );
         }
 
+        children.push(
+            formRow(
+                _("Fallback chain"),
+                fallbackW.node,
+                _(
+                    "Backup subscriptions tried in order when this one fails to connect; switching providers changes the public egress IP",
+                ),
+            ),
+        );
+        children.push(
+            formRow(
+                _("Blacklist timeout"),
+                blacklistTimeoutInput,
+                _(
+                    "How long a failed subscription is skipped before being retried (e.g. 1m)",
+                ),
+            ),
+        );
+
         children.push(domainsRow);
         children.push(domainUrlsRow);
         children.push(ipRow);
@@ -2365,7 +2719,7 @@ return view.extend({
                 var nodes = w.nodes ? w.nodes.getValue() : [];
 
                 // Start from the subscription as loaded so fields this view does
-                // not render (fallback, and anything a newer core adds) are kept.
+                // not render (anything a newer core adds) are kept.
                 var sub = Object.assign({}, w.raw || {});
                 delete sub.id;
                 sub.name = name;
@@ -2400,6 +2754,24 @@ return view.extend({
                 var retriesRaw = retriesEl ? retriesEl.value.trim() : "";
                 var r = retriesRaw === "" ? NaN : parseInt(retriesRaw, 10);
                 setOrDelete(sub, "retries", isNaN(r) ? null : r);
+
+                // An empty chain drops the whole fallback object — the core
+                // rejects "subscriptions": [], so there is nothing to keep.
+                var chain = w.fallback ? w.fallback.getValue() : [];
+                var btEl = card.querySelector(".vpnsub-sub-blacklist-timeout");
+                var blacklistTimeout = btEl ? btEl.value.trim() : "";
+                if (chain.length) {
+                    var fb = Object.assign({}, sub.fallback || {});
+                    fb.subscriptions = chain;
+                    setOrDelete(
+                        fb,
+                        "blacklist_timeout",
+                        blacklistTimeout || null,
+                    );
+                    sub.fallback = fb;
+                } else {
+                    delete sub.fallback;
+                }
                 if (id) subs[id] = sub;
             },
         );
@@ -2472,6 +2844,16 @@ return view.extend({
                     valid = false;
                 }
 
+                var btEl = card.querySelector(".vpnsub-sub-blacklist-timeout");
+                if (btEl) {
+                    clearError(btEl);
+                    var bt = btEl.value.trim();
+                    if (bt && !isValidDuration(bt)) {
+                        setError(btEl, _("Enter a duration like 1m or 30s"));
+                        valid = false;
+                    }
+                }
+
                 // Reject empty-string include/exclude patterns
                 if (w.include) {
                     var includeVals = w.include.getValue();
@@ -2500,6 +2882,14 @@ return view.extend({
                 E("p", _("Two or more subscriptions have the same ID. Each subscription must have a unique ID.")),
                 "warning",
             );
+            return false;
+        }
+
+        var chainErrs = validateChains(cfg.subscriptions);
+        if (chainErrs.length) {
+            chainErrs.forEach(function (msg) {
+                ui.addNotification(null, E("p", msg), "warning");
+            });
             return false;
         }
 

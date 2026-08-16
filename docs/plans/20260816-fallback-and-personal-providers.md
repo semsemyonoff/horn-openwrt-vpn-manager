@@ -600,11 +600,39 @@ unrelated one such as toggling a log level — silently wipes `nodes`, `fallback
 **Files:**
 - Modify: `horn-vpn-manager-luci/root/www/luci-static/resources/view/horn-vpn-manager/config.js`
 
-- [ ] on every subscription card, add an ordered picker of the other enabled subscriptions
-- [ ] add a `blacklist_timeout` field
-- [ ] prevent self-reference, disabled references, duplicates and cycles in the picker
-- [ ] verify the chain round-trips through save and reload
-- [ ] run `make build`
+- [x] on every subscription card, add an ordered picker of the other enabled subscriptions —
+      `makeChainPicker` renders one `<select>` per chain entry with ▲/▼/✕ controls; candidates are
+      read from the **live cards** on every refresh, so a renamed id or a toggled Enabled checkbox is
+      reflected without reloading the page. Every mutation that can change candidacy (name, id,
+      enabled, add/remove card, add/remove/change a chain row) calls `refreshChainPickers()`.
+- [x] add a `blacklist_timeout` field — per-card text input, validated with `isValidDuration`
+      (mirrors Go's `time.ParseDuration` grammar); empty leaves the key out so sing-box applies its
+      own default
+- [x] prevent self-reference, disabled references, duplicates and cycles in the picker — invalid
+      candidates are simply **absent** from the option list rather than rejected after the fact
+      (`chainGraph()` + `chainReaches()` drop any candidate that can reach back to the declaring
+      subscription). ⚠️ **scope note:** a chain can still go bad *after* being picked — a backup
+      renamed, disabled or removed, or an imported config — so `validateChains()` mirrors the core's
+      `validateFallback` / `validateFallbackCycles` at save time and names the problem locally
+      instead of letting it come back as a save error. A pick that stopped being valid stays visible
+      and marked invalid rather than being silently rewritten.
+- [x] verify the chain round-trips through save and reload — verified by driving the **real**
+      `render` + `_collectConfig` + `_validate` in Node/jsdom (21 assertions, all passing): a config
+      carrying `nodes`, `fallback` (with and without `blacklist_timeout`), `connect_timeout` and an
+      unknown subscription field re-serializes byte-identically (`JSON.stringify` equality, so key
+      order too); chain order survives render+collect; ▼ reorders; clearing every entry drops the
+      whole `fallback` object (the core rejects `"subscriptions": []`); the picker excludes self,
+      disabled, already-picked and cycle-forming candidates while still offering valid ones;
+      toggling Enabled re-filters live pickers; imported cycles and unknown references are rejected
+      by `_validate` with messages naming the cycle path / the missing id. The harness carries a
+      mutation check so it cannot pass vacuously.
+- [x] run `make build` — core `bin/horn-vpn-manager-2.2.1-r1-linux-arm64.apk` and
+      `bin/horn-vpn-manager-luci-2.2.1-r1.apk` both built; `node --check` clean on `config.js`;
+      `go test ./...` still passes
+- [x] ➕ noted for Task 12: the strings added here (`Fallback chain`, `Blacklist timeout`,
+      `Move up`, `Move down`, `sing-box default`, `Enter a duration like 1m or 30s`, and the
+      `validateChains` message fragments) are not yet in the `.po` files — the `po2lmo` count is
+      still 166.
 
 ### Task 12: LuCI — connect_timeout, warnings, i18n, import/export
 
