@@ -210,9 +210,35 @@ func BuildOutbounds(id string, uris []string, interval string, tolerance int, te
 		plan.TagNames[tag] = nodes[0].Name
 	} else {
 		// Multi-node mode: hash-tagged nodes + urltest + selector.
+		//
+		// Providers routinely repeat the same endpoint across a subscription;
+		// duplicates cost an extra urltest probe each and add nothing. Dedup
+		// runs here rather than before the single/multi split so that an
+		// all-duplicate subscription keeps its "<id>-manual" FinalTag instead of
+		// silently collapsing to "<id>-single" and moving route.final.
+		//
+		// The dedup key is the marshalled outbound, not StableHash: the hash
+		// omits ALPN, Mode and HeaderType, each of which changes the rendered
+		// outbound. Tags still come from StableHash so subs-tags.json, saved
+		// selector choices and experimental.cache_file state stay valid — which
+		// is also why the collision suffix below has to stay: two distinct nodes
+		// can share a hash.
 		nodeTags := make([]string, 0, len(nodes))
 		seenTags := make(map[string]int, len(nodes))
+		seenOutbounds := make(map[string]struct{}, len(nodes))
+		duplicates := 0
 		for _, n := range nodes {
+			ob := nodeToOutbound(n, "")
+			key, err := json.Marshal(ob)
+			if err != nil {
+				return nil, fmt.Errorf("marshalling outbound for subscription %q: %w", id, err)
+			}
+			if _, seen := seenOutbounds[string(key)]; seen {
+				duplicates++
+				continue
+			}
+			seenOutbounds[string(key)] = struct{}{}
+
 			hash := vless.StableHash(n)
 			base := fmt.Sprintf("%s-node-%s", id, hash)
 			tag := base
@@ -220,10 +246,13 @@ func BuildOutbounds(id string, uris []string, interval string, tolerance int, te
 				tag = fmt.Sprintf("%s-%d", base, count+1)
 			}
 			seenTags[base]++
-			ob := nodeToOutbound(n, tag)
+			ob.Tag = tag
 			plan.NodeOutbounds = append(plan.NodeOutbounds, ob)
 			plan.TagNames[tag] = n.Name
 			nodeTags = append(nodeTags, tag)
+		}
+		if duplicates > 0 {
+			logx.Detail("  Subscription %s: skipped %d duplicate nodes", id, duplicates)
 		}
 
 		autoTag := id + "-auto"

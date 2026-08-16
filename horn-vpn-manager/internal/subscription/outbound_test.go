@@ -361,6 +361,114 @@ func TestBuildOutbounds_XHTTPTransport(t *testing.T) {
 	})
 }
 
+func TestBuildOutbounds_DeduplicatesIdenticalNodes(t *testing.T) {
+	dup := "vless://uuid1@host1.example.com:443?security=tls&sni=host1.example.com#Node+1"
+	uris := []string{
+		dup,
+		"vless://uuid2@host2.example.com:443?security=tls&sni=host2.example.com#Node+2",
+		dup,
+		dup,
+	}
+	plan, err := subscription.BuildOutbounds("default", uris, "5m", 100, testURL)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(plan.NodeOutbounds) != 2 {
+		t.Fatalf("NodeOutbounds len: got %d want 2", len(plan.NodeOutbounds))
+	}
+	// Duplicates must be dropped, not suffixed.
+	for _, ob := range plan.NodeOutbounds {
+		if strings.HasSuffix(ob.Tag, "-2") || strings.HasSuffix(ob.Tag, "-3") {
+			t.Errorf("duplicate node kept with suffixed tag %q", ob.Tag)
+		}
+	}
+	if len(plan.TagNames) != 4 { // 2 nodes + auto + manual
+		t.Errorf("TagNames len: got %d want 4 (%v)", len(plan.TagNames), plan.TagNames)
+	}
+	if len(plan.URLTestGroup.Outbounds) != 2 {
+		t.Errorf("URLTestGroup Outbounds: got %v want 2 entries", plan.URLTestGroup.Outbounds)
+	}
+	if len(plan.SelectorGroup.Outbounds) != 3 { // auto + 2 nodes
+		t.Errorf("SelectorGroup Outbounds: got %v want 3 entries", plan.SelectorGroup.Outbounds)
+	}
+	// FinalTag must not move to <id>-single even when dedup shrinks the set.
+	if plan.FinalTag != "default-manual" {
+		t.Errorf("FinalTag: got %q want %q", plan.FinalTag, "default-manual")
+	}
+}
+
+func TestBuildOutbounds_DeduplicationKeepsDistinctNodes(t *testing.T) {
+	uris := []string{
+		"vless://uuid1@host1.example.com:443?security=tls&sni=host1.example.com#Node+1",
+		"vless://uuid2@host2.example.com:443?security=tls&sni=host2.example.com#Node+2",
+		"vless://uuid3@host3.example.com:8443?security=reality&pbk=abc123#Node+3",
+	}
+	plan, err := subscription.BuildOutbounds("default", uris, "5m", 100, testURL)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(plan.NodeOutbounds) != 3 {
+		t.Fatalf("NodeOutbounds len: got %d want 3", len(plan.NodeOutbounds))
+	}
+}
+
+func TestBuildOutbounds_DeduplicationIgnoresStableHash(t *testing.T) {
+	// StableHash omits ALPN, xhttp mode and headerType, so nodes agreeing on the
+	// hash can still render different outbounds. Those must both survive dedup,
+	// with the tag collision resolved by the numeric suffix.
+	cases := []struct {
+		name string
+		uris []string
+	}{
+		{
+			name: "alpn",
+			uris: []string{
+				"vless://u@h.example.com:443?security=tls&sni=h.example.com&alpn=h2#A",
+				"vless://u@h.example.com:443?security=tls&sni=h.example.com&alpn=http%2F1.1#B",
+			},
+		},
+		{
+			name: "xhttp mode",
+			uris: []string{
+				"vless://u@h.example.com:443?security=tls&sni=h.example.com&type=xhttp&mode=packet-up#A",
+				"vless://u@h.example.com:443?security=tls&sni=h.example.com&type=xhttp&mode=stream-one#B",
+			},
+		},
+		{
+			name: "headerType",
+			uris: []string{
+				"vless://u@h.example.com:443?security=tls&sni=h.example.com&type=tcp&headerType=http#A",
+				"vless://u@h.example.com:443?security=tls&sni=h.example.com&type=tcp#B",
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			plan, err := subscription.BuildOutbounds("sub", tc.uris, "5m", 100, testURL)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(plan.NodeOutbounds) != 2 {
+				t.Fatalf("NodeOutbounds len: got %d want 2 — dedup dropped a distinct node", len(plan.NodeOutbounds))
+			}
+			first, second := plan.NodeOutbounds[0].Tag, plan.NodeOutbounds[1].Tag
+			if first == second {
+				t.Fatalf("both nodes share tag %q", first)
+			}
+			if second != first+"-2" {
+				t.Errorf("colliding tag: got %q want %q", second, first+"-2")
+			}
+			for _, tag := range []string{first, second} {
+				if _, ok := plan.TagNames[tag]; !ok {
+					t.Errorf("TagNames missing %q", tag)
+				}
+			}
+		})
+	}
+}
+
 func TestBuildOutbounds_NoURIs(t *testing.T) {
 	_, err := subscription.BuildOutbounds("sub", nil, "5m", 100, testURL)
 	if err == nil {

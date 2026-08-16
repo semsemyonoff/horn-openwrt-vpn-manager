@@ -290,21 +290,27 @@ which changes the rendered outbound. Dedup on the marshalled outbound instead.
 - Modify: `horn-vpn-manager/internal/subscription/outbound.go`
 - Modify: `horn-vpn-manager/internal/subscription/outbound_test.go`
 
-- [ ] decide and record in this plan whether dedup runs **inside** the `len(nodes) > 1` branch
-      (leaves a 1-member urltest/selector, `FinalTag` stays `<id>-manual`) or **before** it (an
-      all-duplicate subscription collapses to `<id>-single`, changing `route.final` for existing
-      deployments) — recommendation: **inside**, to avoid silently changing `route.final`
-- [ ] replace the `seenTags` suffix logic (`outbound.go:213-227`) with dedup keyed on
-      `json.Marshal(nodeToOutbound(n, ""))` (tag excluded so it does not affect the key)
-- [ ] keep `StableHash` for tag generation, unchanged, so `subs-tags.json`, saved selector choices
+- [x] **Decision: dedup runs inside the `len(nodes) > 1` branch.** An all-duplicate subscription
+      keeps a 1-member urltest/selector and `FinalTag` stays `<id>-manual`, so `route.final` and
+      existing route rules never move as a side effect of dedup.
+- [x] dedup keyed on the marshalled outbound built with an empty tag (`nodeToOutbound(n, "")`), so
+      the tag does not affect the key; the tag is assigned after the dedup check
+- [x] ⚠️ **scope note:** the `seenTags` suffix logic was **kept, not replaced**. Because tags stay
+      `StableHash`-derived and the hash omits `ALPN` / `Mode` / `HeaderType`, two *distinct* nodes
+      can still collide on a tag; the suffix is what keeps them addressable. Dedup removes the
+      duplicates the suffix used to paper over, so `-2` now only appears for genuine collisions.
+- [x] keep `StableHash` for tag generation, unchanged, so `subs-tags.json`, saved selector choices
       and `experimental.cache_file` state stay valid
-- [ ] report skipped duplicates once via `logx.Detail` (e.g. `skipped N duplicate nodes`), not one
+- [x] report skipped duplicates once via `logx.Detail` (`skipped N duplicate nodes`), not one
       line per duplicate
-- [ ] write tests: byte-identical URIs collapse to one outbound; no `-2` suffix in `nodeTags` or
+- [x] write tests: byte-identical URIs collapse to one outbound; no `-2` suffix in `nodeTags` or
       `TagNames`; distinct nodes unaffected
-- [ ] write a regression test proving two nodes that share a `StableHash` but differ in `ALPN`,
+      (`TestBuildOutbounds_DeduplicatesIdenticalNodes`, `..._DeduplicationKeepsDistinctNodes`)
+- [x] write a regression test proving two nodes that share a `StableHash` but differ in `ALPN`,
       `Mode` or `HeaderType` are **both** kept
-- [ ] run `go test ./...` — must pass before next task
+      (`TestBuildOutbounds_DeduplicationIgnoresStableHash`, one subtest per field)
+- [x] run `go test ./...` — passes; `gofmt -l .` clean; `golangci-lint run` reports the same 10
+      pre-existing `goconst` issues as `HEAD`, none new
 
 ### Task 2: Emit `interrupt_exist_connections` on group outbounds
 
