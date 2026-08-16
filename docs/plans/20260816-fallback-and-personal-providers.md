@@ -318,11 +318,14 @@ which changes the rendered outbound. Dedup on the marshalled outbound instead.
 - Modify: `horn-vpn-manager/internal/subscription/outbound.go`
 - Modify: `horn-vpn-manager/internal/subscription/outbound_test.go`
 
-- [ ] add `InterruptExistConnections bool` with tag `json:"interrupt_exist_connections"` to
+- [x] add `InterruptExistConnections bool` with tag `json:"interrupt_exist_connections"` to
       `URLTestOutbound` and `SelectorOutbound`
-- [ ] set it to `true` on both groups in `BuildOutbounds`, and on `FallbackOutbound` in Task 7
-- [ ] write tests asserting the field is present and `true` in the marshalled JSON for each group
-- [ ] run `go test ./...` — must pass before next task
+- [x] set it to `true` on both groups in `BuildOutbounds`, and on `FallbackOutbound` in Task 7
+      (the `FallbackOutbound` half stays with Task 7, where the type is introduced)
+- [x] write tests asserting the field is present and `true` in the marshalled JSON for each group
+      (`TestBuildOutbounds_GroupsInterruptExistConnections`)
+- [x] run `go test ./...` — passes; `gofmt -l .` clean; `golangci-lint run` reports the same 10
+      pre-existing `goconst` issues, none new
 
 Because this makes every `urltest` re-selection cut live connections, `defaultTolerance`
 (`outbound.go:13`, currently `100`) becomes safety-critical rather than cosmetic. Raising the

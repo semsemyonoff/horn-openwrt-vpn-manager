@@ -148,20 +148,22 @@ func (t *OutboundTransport) MarshalJSON() ([]byte, error) {
 
 // URLTestOutbound is a sing-box urltest outbound group.
 type URLTestOutbound struct {
-	Type      string   `json:"type"`
-	Tag       string   `json:"tag"`
-	Outbounds []string `json:"outbounds"`
-	URL       string   `json:"url"`
-	Interval  string   `json:"interval"`
-	Tolerance int      `json:"tolerance"`
+	Type                      string   `json:"type"`
+	Tag                       string   `json:"tag"`
+	Outbounds                 []string `json:"outbounds"`
+	URL                       string   `json:"url"`
+	Interval                  string   `json:"interval"`
+	Tolerance                 int      `json:"tolerance"`
+	InterruptExistConnections bool     `json:"interrupt_exist_connections"`
 }
 
 // SelectorOutbound is a sing-box selector outbound group.
 type SelectorOutbound struct {
-	Type      string   `json:"type"`
-	Tag       string   `json:"tag"`
-	Outbounds []string `json:"outbounds"`
-	Default   string   `json:"default"`
+	Type                      string   `json:"type"`
+	Tag                       string   `json:"tag"`
+	Outbounds                 []string `json:"outbounds"`
+	Default                   string   `json:"default"`
+	InterruptExistConnections bool     `json:"interrupt_exist_connections"`
 }
 
 // BuildOutbounds generates the sing-box outbound configuration for a subscription
@@ -258,13 +260,19 @@ func BuildOutbounds(id string, uris []string, interval string, tolerance int, te
 		autoTag := id + "-auto"
 		manualTag := id + "-manual"
 
+		// interrupt_exist_connections tears down connections to the previously
+		// selected node when a group re-selects; without it they hang on a node
+		// that has already stopped answering. On urltest it also fires on benign
+		// latency-driven re-selection, so the per-subscription tolerance is what
+		// keeps re-selection tied to genuine degradation.
 		plan.URLTestGroup = &URLTestOutbound{
-			Type:      "urltest",
-			Tag:       autoTag,
-			Outbounds: nodeTags,
-			URL:       testURL,
-			Interval:  interval,
-			Tolerance: tolerance,
+			Type:                      "urltest",
+			Tag:                       autoTag,
+			Outbounds:                 nodeTags,
+			URL:                       testURL,
+			Interval:                  interval,
+			Tolerance:                 tolerance,
+			InterruptExistConnections: true,
 		}
 		plan.TagNames[autoTag] = "Auto"
 
@@ -272,10 +280,11 @@ func BuildOutbounds(id string, uris []string, interval string, tolerance int, te
 		manualOutbounds = append(manualOutbounds, autoTag)
 		manualOutbounds = append(manualOutbounds, nodeTags...)
 		plan.SelectorGroup = &SelectorOutbound{
-			Type:      "selector",
-			Tag:       manualTag,
-			Outbounds: manualOutbounds,
-			Default:   autoTag,
+			Type:                      "selector",
+			Tag:                       manualTag,
+			Outbounds:                 manualOutbounds,
+			Default:                   autoTag,
+			InterruptExistConnections: true,
 		}
 		plan.TagNames[manualTag] = id
 

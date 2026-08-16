@@ -526,3 +526,36 @@ func TestBuildOutbounds_JSONMarshal(t *testing.T) {
 		t.Error("tls block missing from JSON output")
 	}
 }
+
+func TestBuildOutbounds_GroupsInterruptExistConnections(t *testing.T) {
+	uris := []string{
+		"vless://uuid1@host1.example.com:443?security=tls&sni=host1.example.com#Node+1",
+		"vless://uuid2@host2.example.com:443?security=tls&sni=host2.example.com#Node+2",
+	}
+	plan, err := subscription.BuildOutbounds("sub", uris, "5m", 100, testURL)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	groups := map[string]any{
+		"urltest":  plan.URLTestGroup,
+		"selector": plan.SelectorGroup,
+	}
+	for name, group := range groups {
+		data, err := json.Marshal(group)
+		if err != nil {
+			t.Fatalf("marshal %s group: %v", name, err)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(data, &m); err != nil {
+			t.Fatalf("unmarshal %s group: %v", name, err)
+		}
+		v, ok := m["interrupt_exist_connections"]
+		if !ok {
+			t.Fatalf("%s group: interrupt_exist_connections missing from JSON output", name)
+		}
+		if v != true {
+			t.Errorf("%s group: interrupt_exist_connections = %v, want true", name, v)
+		}
+	}
+}
