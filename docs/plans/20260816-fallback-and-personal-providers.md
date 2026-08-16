@@ -720,15 +720,49 @@ unrelated one such as toggling a log level — silently wipes `nodes`, `fallback
 
 ### Task 14: Verify acceptance criteria
 
-- [ ] verify all requirements from Overview are implemented
-- [ ] verify a config with no duplicate nodes and none of the new fields renders unchanged apart
-      from the added group field
-- [ ] verify a config containing duplicate nodes loses exactly the duplicates and keeps nodes that
-      share a `StableHash` but differ in `ALPN` / `Mode` / `HeaderType`
-- [ ] run `gofmt -l .` and `golangci-lint run` inside `horn-vpn-manager/`
-- [ ] run the full test suite: `go test ./...`
-- [ ] run `sh -n` on the rpcd script
-- [ ] run `make lint` and `make build` from the repo root
+Verification method: the two backward-compatibility criteria were checked **differentially** rather
+than by inspection — a `git worktree` at `08016ff` (the last commit before Task 1) built the
+pre-plan binary, both binaries rendered the same config through
+`subscriptions dry-run --debug -c <cfg>` against a local `python3 -m http.server` payload, and the
+generated `out/config.json` files were diffed.
+
+- [x] verify all requirements from Overview are implemented — exercised end to end with the built
+      binary on a config using every new field: inline-node default `personal` with a chain to
+      `provider`, which itself chains to `corp`, plus `singbox.connect_timeout: "3s"`. Result:
+      `route.final = "personal-fallback"`; `personal-fallback` lists
+      `["personal-single", "provider-fallback"]` (nested resolution, order preserved) with
+      `blacklist_timeout: "1m"`; `provider-fallback` lists `["provider-manual", "corp-single"]` and
+      omits `blacklist_timeout` (unset → sing-box default); `provider`'s route rule targets
+      `provider-fallback` while `route.final` stays on the default's chain; `connect_timeout: "3s"`
+      on all 5 node outbounds and on no group; `interrupt_exist_connections: true` on all 4 groups.
+      The HTTP access log shows exactly 2 requests for that run (`main.txt`, `corp.txt`) — the
+      inline-node subscription performed none. `vpn-manager check` on the shipped
+      `config.example.json` exits 0.
+- [x] verify a config with no duplicate nodes and none of the new fields renders unchanged apart
+      from the added group field — pre-plan vs current binary on a legacy config (multi-node default
+      + single-node non-default with `route`), `diff` of the generated `config.json` is **exactly**
+      two added lines: `"interrupt_exist_connections": true` on the `urltest` group and on the
+      `selector` group. Nothing else moved — no `connect_timeout` key, no fallback group, identical
+      tags, rules and ordering.
+- [x] verify a config containing duplicate nodes loses exactly the duplicates and keeps nodes that
+      share a `StableHash` but differ in `ALPN` / `Mode` / `HeaderType` — a 10-URI payload (one node
+      repeated 3×, plus one colliding pair per unhashed field) rendered 10 `vless` outbounds on the
+      pre-plan binary and 8 on the current one; the dropped tags are exactly
+      `main-node-7f045a3f-2` and `-3`, the two byte-identical repeats. All three colliding pairs
+      survive with their `-2` suffix, and every surviving tag is byte-identical to its pre-plan
+      counterpart. `-vvv` reports the single `Subscription main: skipped 2 duplicate nodes` line.
+- [x] run `gofmt -l .` and `golangci-lint run` inside `horn-vpn-manager/` — `gofmt` clean;
+      `golangci-lint` reports 10 issues, all `goconst`. The pre-plan baseline at `08016ff` is
+      **11** issues (10 `goconst` + 1 `gocognit`), so the branch adds none and removes one; the
+      `goconst` set is the same modulo a `vless` occurrence count of 3 → 4.
+- [x] run the full test suite: `go test ./...` — all packages pass
+- [x] run `sh -n` on the rpcd script — ⚠️ macOS `sh` (bash 3.2) reports a syntax error on the
+      pre-existing `case`-inside-`$()`; the identical failure reproduces at `08016ff`, so it is not
+      from this branch. `dash -n` (closest to OpenWrt `ash`) is clean, as recorded in Task 9.
+- [x] run `make lint` and `make build` from the repo root — `make build` produced
+      `bin/horn-vpn-manager-2.2.1-r1-linux-arm64.apk` and `bin/horn-vpn-manager-luci-2.2.1-r1.apk`
+      (203 translated strings per locale). ⚠️ `make lint` exits non-zero on the 10 pre-existing
+      `goconst` issues — same failure at `08016ff`, out of scope here.
 
 ### Task 15: [Final] Update documentation
 
