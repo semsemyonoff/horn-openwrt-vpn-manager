@@ -16,6 +16,83 @@ UNSYNC_ROUTING_FLAG="${CONF_DIR}/.needs-update-routing"
 
 MANUAL_IPS_DEFAULT="${CONF_DIR}/lists/manual-ip.lst"
 
+# Emit an error reply, JSON-escaping the message (core errors quote ids).
+fail_json() {
+    printf '{"error":%s}' "$(printf '%s' "$1" | jq -Rs '.')"
+}
+
+# Structural check of subscription sources: a subscription draws its nodes from
+# a remote url or an inline nodes list, never both, and an enabled one needs
+# exactly one. Kept to shapes and presence only — URI syntax and cross-subscription
+# rules are left to check_with_core.
+check_sub_sources() {
+    local cfg="$1"
+    local bad
+
+    bad=$(echo "$cfg" | jq '[(.subscriptions // {})[] | select((.name | type) != "string" or (.name // "") == "")] | length')
+    if [ "$bad" -gt 0 ]; then
+        printf 'All subscriptions must have a non-empty string name'
+        return 1
+    fi
+
+    bad=$(echo "$cfg" | jq '[(.subscriptions // {})[] | select((.url != null and (.url | type) != "string") or (.nodes != null and (.nodes | type) != "array"))] | length')
+    if [ "$bad" -gt 0 ]; then
+        printf 'Subscription url must be a string and nodes must be an array'
+        return 1
+    fi
+
+    bad=$(echo "$cfg" | jq '[(.subscriptions // {})[] | (.nodes // [])[] | select(type != "string" or . == "")] | length')
+    if [ "$bad" -gt 0 ]; then
+        printf 'Subscription nodes must be non-empty strings'
+        return 1
+    fi
+
+    bad=$(echo "$cfg" | jq '[(.subscriptions // {})[] | select((.url // "") != "" and ((.nodes // []) | length) > 0)] | length')
+    if [ "$bad" -gt 0 ]; then
+        printf 'A subscription takes either a url or inline nodes, not both'
+        return 1
+    fi
+
+    bad=$(echo "$cfg" | jq '[(.subscriptions // {})[] | select(.enabled != false and (.url // "") == "" and ((.nodes // []) | length) == 0)] | length')
+    if [ "$bad" -gt 0 ]; then
+        printf 'Each enabled subscription must have a url or inline nodes'
+        return 1
+    fi
+
+    return 0
+}
+
+# Delegate schema validation of a candidate config to the core binary: vless URI
+# syntax, fallback cross-references and cycle detection are not expressible in
+# OpenWrt's jq, which is built without ONIGURUMA and has no regex support.
+# Prints the core's error message and returns 1 when the candidate is rejected.
+# When the core is unreachable (binary absent, /tmp unwritable) the candidate is
+# accepted on the structural checks alone, as it was before this delegation existed.
+check_with_core() {
+    local cfg="$1"
+    local tmp="/tmp/horn-vpn-manager-check.$$.json"
+    local out
+    local rc
+    local msg
+
+    command -v vpn-manager >/dev/null 2>&1 || return 0
+
+    if ! (umask 077; printf '%s\n' "$cfg" > "$tmp"); then
+        rm -f "$tmp"
+        return 0
+    fi
+    out=$(vpn-manager check -c "$tmp" --no-color 2>&1 >/dev/null)
+    rc=$?
+    rm -f "$tmp"
+    [ "$rc" -eq 0 ] && return 0
+
+    # The core prints its failure as a trailing "error: <msg>" line on stderr.
+    msg=$(printf '%s\n' "$out" | awk 'index($0, "error: ") == 1 { m = substr($0, 8) } END { print m }')
+    [ -n "$msg" ] || msg="config rejected by vpn-manager check"
+    printf '%s' "$msg"
+    return 1
+}
+
 case "$1" in
     list)
         echo '{"get_config":{},"set_config":{"config":"Object"},"set_full_config":{"config":"Object","template_contents":"String"},"run_script":{"dry_run":"Boolean","cached_lists":"Boolean","download_lists":"Boolean","verbosity":"Number"},"get_log":{},"get_syslog":{"lines":"Number"},"test_url":{"url":"String"},"get_sb_status":{},"set_proxy":{"proxy":"String","selected":"String"},"test_delays":{"tags":"Array","url":"String"},"get_template":{},"set_template":{"template":"String"},"reset_template":{},"get_domains_config":{},"set_domains_config":{"config":"Object"},"get_manual_ips":{},"set_manual_ips":{"ips":"String"},"run_routing":{"with_subscriptions":"Boolean","verbosity":"Number"},"get_routing_log":{},"get_manual_domains":{},"set_manual_domains":{"domains":"Array"},"get_sync_status":{}}'
@@ -80,10 +157,9 @@ case "$1" in
                     exit 0
                 fi
 
-                # Validate: all subscriptions must have non-empty string name and url
-                invalid_fields=$(echo "$new_config" | jq '[(.subscriptions // {}) | to_entries[] | select((.value.name | type) != "string" or (.value.url | type) != "string" or (.value.name // "") == "" or (.value.url // "") == "")] | length')
-                if [ "$invalid_fields" -gt 0 ]; then
-                    printf '{"error":"All subscriptions must have a non-empty string name and url"}'
+                # Validate: name, and a url XOR inline nodes as the node source
+                if ! source_err=$(check_sub_sources "$new_config"); then
+                    fail_json "$source_err"
                     exit 0
                 fi
 
@@ -120,6 +196,10 @@ case "$1" in
                     }')
                 if [ -z "$merged" ]; then
                     printf '{"error":"Failed to merge config"}'
+                    exit 0
+                fi
+                if ! core_err=$(check_with_core "$merged"); then
+                    fail_json "$core_err"
                     exit 0
                 fi
                 mkdir -p "$CONF_DIR"
@@ -177,10 +257,9 @@ case "$1" in
                     exit 0
                 fi
 
-                # Validate: all subscriptions must have non-empty string name and url
-                invalid_fields=$(echo "$new_config" | jq '[(.subscriptions // {}) | to_entries[] | select((.value.name | type) != "string" or (.value.url | type) != "string" or (.value.name // "") == "" or (.value.url // "") == "")] | length')
-                if [ "$invalid_fields" -gt 0 ]; then
-                    printf '{"error":"All subscriptions must have a non-empty string name and url"}'
+                # Validate: name, and a url XOR inline nodes as the node source
+                if ! source_err=$(check_sub_sources "$new_config"); then
+                    fail_json "$source_err"
                     exit 0
                 fi
 
@@ -223,6 +302,10 @@ case "$1" in
                     }')
                 if [ -z "$merged" ]; then
                     printf '{"error":"Failed to merge config"}'
+                    exit 0
+                fi
+                if ! core_err=$(check_with_core "$merged"); then
+                    fail_json "$core_err"
                     exit 0
                 fi
 

@@ -531,13 +531,32 @@ read/write plumbing is required. The blocker is validation.
 **Files:**
 - Modify: `horn-vpn-manager-luci/root/usr/libexec/rpcd/horn-vpn-manager`
 
-- [ ] relax the mandatory-`url` rejection to `url` XOR `nodes` in **both** `set_config` (`:83-88`)
-      and `set_full_config` (`:180-183`) — the block is duplicated verbatim
-- [ ] keep sh-level checks structural only (types, XOR presence); delegate schema validation by
+- [x] relax the mandatory-`url` rejection to `url` XOR `nodes` in **both** `set_config` (`:83-88`)
+      and `set_full_config` (`:180-183`) — the duplicated block is now a single `check_sub_sources`
+      helper called from both, so the two paths cannot drift apart again
+- [x] keep sh-level checks structural only (types, XOR presence); delegate schema validation by
       running `vpn-manager check -c <tmp>` on the candidate file and returning its error string,
-      rather than reimplementing cross-reference logic in a regex-less `jq`
-- [ ] implement any string matching with shell `case` or `awk`
-- [ ] run `sh -n` on the script and `make build`
+      rather than reimplementing cross-reference logic in a regex-less `jq` — `check_with_core`
+      validates the **merged** config (not the raw input), so an inline node's URI syntax, a
+      `fallback` cross-reference and `singbox.connect_timeout` are all rejected at save time with
+      the core's own message
+- [x] ⚠️ **scope note:** `check_with_core` accepts the candidate on the structural checks alone when
+      the core is unreachable (binary absent, `/tmp` unwritable). Documented in the function comment;
+      it keeps a LuCI save working exactly as it did before the delegation existed rather than
+      bricking config edits on a partially installed system.
+- [x] error replies go through a `fail_json` helper that JSON-escapes the message — core errors
+      quote subscription ids, which would otherwise break the reply JSON
+- [x] implement any string matching with shell `case` or `awk` — the core's `error: <msg>` line is
+      extracted with `awk`/`index`, no `jq` regex anywhere
+- [x] run `sh -n` on the script and `make build` — `dash -n` clean (macOS `sh` is bash 3.2 and
+      mis-parses a pre-existing `case`-inside-`$()` at `:756`, on `HEAD` too; `dash` is the closest
+      shell to OpenWrt `ash`). `shellcheck -s sh` reports only the 2 pre-existing SC2221/SC2222
+      warnings. `make build-luci` produced `bin/horn-vpn-manager-luci-2.2.1-r1.apk`.
+- [x] validated behaviorally by sourcing both helpers into a `dash` harness: url-only, nodes-only,
+      `{"url":"","nodes":[...]}`, and a disabled sourceless subscription accepted; both-sources,
+      neither-source, empty name, non-array `nodes`, non-string `url` and an empty string inside
+      `nodes` rejected with their specific messages; and `check_with_core` rejecting a malformed
+      URI, a `a → b → a` fallback cycle and an invalid `connect_timeout`, leaving no temp file
 
 ### Task 10: LuCI — stop dropping unknown fields, add inline-node mode
 
