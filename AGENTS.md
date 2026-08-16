@@ -90,6 +90,14 @@ rpcd methods (current):
 
 Removed methods (replaced): `run_getdomains`, `get_domains_log`
 
+LuCI invariants (each one was a real bug):
+
+- **A save must not drop fields the JS does not know about.** `_collectConfig` starts from a copy of the subscription as loaded (`_widgets[idx].raw`) and of `singbox` (`_rawSingbox`), then assigns or deletes known keys via `setOrDelete` — never rebuild either object from an allow-list. A no-op save must leave `config.json` byte-identical.
+- Only write a field whose input was actually rendered: `interval` / `tolerance` inputs exist only for a multi-node subscription with proxy data, so an unguarded write deletes them whenever sing-box is down.
+- rpcd merges `singbox` additively (`$esb + $isb`), so dropping a key on save cannot clear a stored value. Clearing a field that *was* set emits `""` (the core treats empty as unset); a field that was never set stays absent.
+- The rpcd backend keeps sh-level checks structural only (types, presence, XOR) and delegates schema validation to `vpn-manager check -c <tmp>` on the **merged** candidate (`check_with_core`), rather than reimplementing cross-reference logic in a regex-less `jq`. It accepts on the structural checks alone when the core is unreachable, so a partially installed system can still save.
+- Error replies go through `fail_json`, which JSON-escapes the message — core errors quote subscription ids.
+
 ## Config Model
 
 The core config is a single JSON file at `/etc/horn-vpn-manager/config.json`.
@@ -122,6 +130,12 @@ Fallback chains (`fallback`):
 
 - `singbox.connect_timeout` (a `time.ParseDuration` string) is emitted as a dial field on every node outbound; empty omits the field entirely
 - generated `urltest` and `selector` groups always emit `interrupt_exist_connections: true`, so operators should raise per-subscription `tolerance` (~300 ms; the default is 100) to keep `urltest` from cutting live connections on benign latency jitter
+
+Node identity:
+
+- `vless.StableHash` is a **tag** function, not an identity function: it hashes 13 of the `Node`'s 26 fields and omits `ALPN`, `Mode` and `HeaderType`, each of which changes the rendered outbound. Equal hash therefore does not mean identical node.
+- Deduplication in `BuildOutbounds` is keyed on the marshalled outbound (`nodeToOutbound(n, "")`), not on the hash. The `seenTags` `-N` suffix stays, because two genuinely distinct nodes can still collide on a tag.
+- Do not widen what `StableHash` covers: it would rewrite every tag and invalidate `subs-tags.json`, saved selector choices and `experimental.cache_file` state.
 
 Conventions:
 
@@ -253,6 +267,11 @@ Preferred test layout:
 - unit tests near packages
 - `testdata/` for fixtures and golden outputs
 - integration-style tests with `httptest.Server` for fetch/retry scenarios
+
+Non-Go checks:
+
+- LuCI JS has no test harness in the repo. When changing save/validation logic, drive the **real** `render` / `_collectConfig` / `_validate` from `config.js` against a stub DOM (Node, optionally jsdom) rather than asserting on a reimplementation, and include a mutation check — revert the fix and confirm the harness fails — so it cannot pass vacuously. `node --check` on `config.js` is the minimum gate.
+- Gate the rpcd script with `dash -n`, not the host `sh`: macOS `sh` is bash 3.2 and mis-parses a pre-existing `case`-inside-`$()`. `dash` is the closest available shell to OpenWrt `ash`. `shellcheck -s sh` is useful but reports pre-existing SC2221/SC2222.
 
 ## Performance & Binary Size Constraints
 

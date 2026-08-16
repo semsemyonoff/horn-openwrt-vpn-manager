@@ -766,9 +766,25 @@ generated `out/config.json` files were diffed.
 
 ### Task 15: [Final] Update documentation
 
-- [ ] update `AGENTS.md` if new patterns were discovered during implementation
-- [ ] close issue #1 with a note on the delivered schema
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update `AGENTS.md` if new patterns were discovered during implementation — three additions
+      beyond the Task 13 schema documentation, each recording a trap that was hit during
+      implementation rather than restating the feature: **LuCI invariants** (a save must start from
+      the loaded object, not an allow-list; only write a field whose input was actually rendered;
+      rpcd's additive `singbox` merge means clearing needs an explicit `""`; sh checks stay
+      structural and delegate schema validation to `vpn-manager check`; `fail_json` escapes core
+      errors quoting subscription ids), **Node identity** (`StableHash` is a tag function, not an
+      identity function — it omits `ALPN` / `Mode` / `HeaderType`, dedup keys on the marshalled
+      outbound, and widening the hash would invalidate `subs-tags.json` and `cache_file` state), and
+      **Non-Go checks** under Testing Guidelines (drive the real `_collectConfig` / `_validate` with
+      a mutation check instead of asserting on a reimplementation; gate the rpcd script with
+      `dash -n`, since macOS `sh` mis-parses a pre-existing construct). `CLAUDE.md` is a symlink, so
+      only `AGENTS.md` was edited.
+- [x] close issue #1 with a note on the delivered schema — closed with the delivered JSON shape, the
+      four deviations from the proposal (chains on any subscription rather than default-only; inline
+      `nodes`; `connect_timeout`; `interrupt_exist_connections` + dedup), a point-by-point pass over
+      the issue's own acceptance criteria, the two out-of-scope LuCI field-drop bugs found on the
+      way, and the one remaining device-level exercise carried in Post-Completion
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 
