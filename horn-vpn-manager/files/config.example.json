@@ -2,7 +2,8 @@
   "singbox": {
     "log_level": "warn",
     "test_url": "https://www.gstatic.com/generate_204",
-    "template": ""
+    "template": "",
+    "connect_timeout": "3s"
   },
   "fetch": {
     "retries": 3,
@@ -22,14 +23,24 @@
     }
   },
   "subscriptions": {
-    "default": {
-      "name": "Default",
-      "url": "https://example.com/sub",
+    "personal": {
+      "name": "Personal VPS",
+      "nodes": [
+        "vless://11111111-2222-3333-4444-555555555555@203.0.113.10:443?type=tcp&security=reality&sni=example.com&fp=chrome&pbk=PUBLIC_KEY&sid=00112233#Personal"
+      ],
       "default": true,
       "enabled": true,
+      "fallback": {
+        "subscriptions": ["provider"],
+        "blacklist_timeout": "1m"
+      }
+    },
+    "provider": {
+      "name": "Provider",
+      "url": "https://example.com/sub",
       "exclude": ["Russia", "traffic"],
       "interval": "5m",
-      "tolerance": 100
+      "tolerance": 300
     },
     "work": {
       "name": "Work",

@@ -682,24 +682,41 @@ unrelated one such as toggling a log level — silently wipes `nodes`, `fallback
 - Modify: `AGENTS.md`
 - Modify: `horn-vpn-manager/Makefile` (only if the DEPENDS question below is answered yes)
 
-- [ ] add an annotated personal-node subscription, a `fallback` chain, and
-      `singbox.connect_timeout` to the example config
-- [ ] update `README.md` — it documents the config schema in Russian (subscription fields, generated
-      tag naming, singbox settings) and is the user-facing doc
-- [ ] document the new fields in the Config Model section of `AGENTS.md`
+- [x] add an annotated personal-node subscription, a `fallback` chain, and
+      `singbox.connect_timeout` to the example config — the example's default subscription is now
+      inline-node `personal` with a chain to a URL-backed `provider`, whose `tolerance` is raised to
+      `300` per the guidance below. Verified with `vpn-manager check -c
+      horn-vpn-manager/files/config.example.json` (exit 0), so the shipped example is not merely
+      well-formed JSON but passes the same validation a device does.
+- [x] update `README.md` — pipeline steps, the config example, the `singbox` / subscription field
+      lists, the generated-tag list and the LuCI capability list all carry the new fields
+- [x] document the new fields in the Config Model section of `AGENTS.md`
       (`CLAUDE.md` is a symlink — edit `AGENTS.md`)
-- [ ] document that `fallback` requires the sing-box **extended** build and is not an upstream
-      outbound type, noting the deliberate exception to the upstream-docs-as-source-of-truth rule
-- [ ] document that groups now emit `interrupt_exist_connections: true`, and that operators should
+- [x] document that `fallback` requires the sing-box **extended** build and is not an upstream
+      outbound type, noting the deliberate exception to the upstream-docs-as-source-of-truth rule —
+      in `README.md → Зависимости` (next to the existing `xhttp` note) and as an explicit
+      "Documented exception" bullet under the `AGENTS.md` Config Model conventions
+- [x] document that groups now emit `interrupt_exist_connections: true`, and that operators should
       raise per-subscription `tolerance` (~300 ms, default is 100) so `urltest` re-selects only on
-      genuine degradation — otherwise benign latency jitter will cut live downloads, streams and
-      WebSockets. Place this next to the `tolerance` field in `README.md`.
-- [ ] document that `url` and `nodes` are mutually exclusive, that `fallback` works on any
+      genuine degradation — placed directly on the `tolerance` bullet in `README.md`, with the
+      coupling spelled out (benign latency-driven re-selection would cut live downloads, streams and
+      WebSockets), and summarized in `AGENTS.md`
+- [x] document that `url` and `nodes` are mutually exclusive, that `fallback` works on any
       subscription, and what a chain changes (`route.final` for the default, the subscription's own
-      route-rule target otherwise)
-- [ ] document the egress-IP change and the lack of live-session migration
-- [ ] decide whether `horn-vpn-manager/Makefile` should declare a sing-box `DEPENDS` (it currently
-      declares none) and record the decision either way
+      route-rule target otherwise) — new `README.md → Fallback-цепочки` section covering the
+      generated group shape, nested resolution, the validation rules and the degrade-don't-abort
+      policy
+- [x] document the egress-IP change and the lack of live-session migration — in the Behavior list of
+      the new README section and in `AGENTS.md`
+- [x] **Decision: no `DEPENDS` on sing-box.** The stock and extended packages conflict and the
+      extended build is normally installed by hand, so a hard dependency would break installation
+      rather than document a requirement; the extended build is enforced at runtime by the existing
+      `sing-box check` in `ApplySingbox` plus the Task 8 hint. `horn-vpn-manager/Makefile` is
+      therefore unchanged; the decision and its rationale are recorded in `README.md → Зависимости`
+      and in `AGENTS.md`.
+- [x] validation: docs-only task, no new tests. `vpn-manager check` on the example config passes;
+      `gofmt -l .` clean; `go test ./...` passes; `make lint` reports the same 10 pre-existing
+      `goconst` issues, none new
 
 ### Task 14: Verify acceptance criteria
 

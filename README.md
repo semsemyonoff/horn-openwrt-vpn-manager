@@ -13,14 +13,15 @@
 `vpn-manager subscriptions run`:
 
 1. Читает подписки из `config.json`
-2. Скачивает каждую подписку по URL
+2. Скачивает каждую подписку по URL (или берёт узлы из `nodes`, если они заданы inline)
 3. Автоопределяет формат: raw `vless://`, base64, base64url, gzip
-4. Фильтрует узлы по `include` / `exclude`
+4. Фильтрует узлы по `include` / `exclude` и отбрасывает узлы-дубликаты (одинаковые по всем параметрам outbound)
 5. Для multi-node подписок создаёт стабильные node tags, `urltest`-группу `<id>-auto` и selector `<id>-manual`
 6. Для single-node подписок создаёт прямой outbound `<id>-single`
-7. Собирает route rules по `route.domains`, `route.ip_cidrs` и загруженным спискам
-8. Генерирует `sing-box` config из шаблона
-9. Проверяет конфиг через `sing-box check`, сохраняет backup и перезапускает `sing-box`
+7. Для подписок с `fallback` создаёт группу `<id>-fallback` с цепочкой резервных подписок
+8. Собирает route rules по `route.domains`, `route.ip_cidrs` и загруженным спискам
+9. Генерирует `sing-box` config из шаблона
+10. Проверяет конфиг через `sing-box check`, сохраняет backup и перезапускает `sing-box`
 
 `vpn-manager routing run`:
 
@@ -56,6 +57,17 @@ Init script `/etc/init.d/horn-vpn-manager` ждёт доступ в интерн
 
 Для использования `xhttp` нужно использовать [sing-box-extended](https://github.com/shtorm-7/sing-box-extended) вместо обычного.
 
+`sing-box-extended` также обязателен, если хотя бы одна подписка использует `fallback`: outbound типа
+`fallback` **отсутствует в upstream sing-box** и существует только в extended-сборке (проверено на
+`sing-box-extended 1.13.18-extended-2.6.5`). Это осознанное отступление от правила «источник истины —
+[официальная документация sing-box](https://sing-box.sagernet.org/configuration/)». На обычной сборке
+`sing-box check` отклонит конфиг с `unknown outbound type: fallback`, `vpn-manager` не станет применять
+такой конфиг и подскажет, что нужна extended-сборка; текущий рабочий конфиг при этом не меняется.
+
+Пакет не объявляет `DEPENDS` на `sing-box`: выбор между `sing-box` и `sing-box-extended` остаётся за
+пользователем (пакеты конфликтуют, а extended обычно ставится вручную), поэтому жёсткая зависимость
+ломала бы установку. Требование extended-сборки проверяется в рантайме через `sing-box check`.
+
 ## Формат `config.json`
 
 ```json
@@ -63,7 +75,8 @@ Init script `/etc/init.d/horn-vpn-manager` ждёт доступ в интерн
   "singbox": {
     "log_level": "warn",
     "test_url": "https://www.gstatic.com/generate_204",
-    "template": "/etc/horn-vpn-manager/sing-box.template.json"
+    "template": "/etc/horn-vpn-manager/sing-box.template.json",
+    "connect_timeout": "3s"
   },
   "fetch": {
     "retries": 3,
@@ -83,14 +96,24 @@ Init script `/etc/init.d/horn-vpn-manager` ждёт доступ в интерн
     }
   },
   "subscriptions": {
-    "default": {
-      "name": "Default",
-      "url": "https://example.com/sub",
+    "personal": {
+      "name": "Personal VPS",
+      "nodes": [
+        "vless://11111111-2222-3333-4444-555555555555@203.0.113.10:443?type=tcp&security=reality&sni=example.com&fp=chrome&pbk=PUBLIC_KEY&sid=00112233#Personal"
+      ],
       "default": true,
       "enabled": true,
+      "fallback": {
+        "subscriptions": ["provider"],
+        "blacklist_timeout": "1m"
+      }
+    },
+    "provider": {
+      "name": "Provider",
+      "url": "https://example.com/sub",
       "exclude": ["Россия", "traffic", "expire"],
       "interval": "5m",
-      "tolerance": 100
+      "tolerance": 300
     },
     "work": {
       "name": "Work",
@@ -117,6 +140,10 @@ Init script `/etc/init.d/horn-vpn-manager` ждёт доступ в интерн
 - `log_level` — уровень логирования sing-box, по умолчанию `warn`
 - `test_url` — URL для `urltest`, по умолчанию `https://www.gstatic.com/generate_204`
 - `template` — путь к шаблону sing-box; если не указан, используется embedded шаблон из пакета
+- `connect_timeout` — таймаут установки соединения (`time.ParseDuration`, например `3s`), проставляется
+  на каждый node outbound; если пусто, поле не выводится и действует дефолт sing-box. Полезен вместе с
+  `fallback`: без него зависший узел отдаёт `i/o timeout` через ~5 с, и ровно на столько же
+  откладывается переключение на резерв
 
 #### `fetch`
 
@@ -137,14 +164,25 @@ Init script `/etc/init.d/horn-vpn-manager` ждёт доступ в интерн
 Поля подписки:
 
 - `name` — человекочитаемое имя
-- `url` — URL подписки
+- `url` — URL подписки; **взаимоисключающий** с `nodes`
+- `nodes` — список inline `vless://` URI для своего узла (personal provider), когда публиковать
+  subscription-эндпоинт незачем. Ни одного HTTP-запроса такая подписка не делает; `include` / `exclude`,
+  `route`, `default` и `fallback` работают так же, как у подписки с `url`. У включённой подписки должно
+  быть ровно одно из `url` / `nodes` (пустая строка в `url` считается отсутствием)
 - `default` — ровно одна подписка должна иметь `true`; её outbound попадёт в `route.final`
 - `enabled` — использовать ли подписку (default: `true`); дефолтная подписка не может быть отключена
 - `include` — подстроки для включения узлов по имени (если задан, остальные фильтруются)
 - `exclude` — подстроки для исключения узлов по имени
 - `interval` — период `urltest` для multi-node подписки (default: `5m`)
-- `tolerance` — tolerance `urltest` в мс (default: `100`)
+- `tolerance` — tolerance `urltest` в мс (default: `100`). Группы `urltest` и `selector` теперь
+  генерируются с `interrupt_exist_connections: true`: при пересоборе выбора активные соединения со
+  старым узлом рвутся, а не висят до таймаута. Для `urltest` это касается и «безобидных»
+  перевыборов по задержке, поэтому **рекомендуется поднять `tolerance` примерно до `300`** — при
+  дефолтных `100` и типичном разбросе узлов 100–230 мс `urltest` будет переключаться на шуме и рвать
+  живые загрузки, стримы и WebSocket-соединения. С бо́льшим tolerance перевыбор происходит только при
+  реальной деградации, где обрыв как раз и нужен
 - `retries` — override числа повторов для конкретной подписки
+- `fallback` — цепочка резервных подписок, см. [Fallback-цепочки](#fallback-цепочки)
 - `route` — routing policy этой подписки:
   - `domains` — список `domain_suffix` для route rule
   - `domain_urls` — URL-ы со списками доменов (по одному на строку); мерджатся с `domains`, дедуплицируются, валидируются
@@ -157,6 +195,52 @@ Init script `/etc/init.d/horn-vpn-manager` ждёт доступ в интерн
 - multi-node auto (urltest): `<id>-auto`
 - multi-node manual (selector): `<id>-manual`
 - отдельные узлы: `<id>-node-<hash>`
+- fallback-цепочка: `<id>-fallback`
+
+### Fallback-цепочки
+
+`fallback` объявляется на **любой** подписке (не только на дефолтной) и содержит упорядоченный список
+id резервных подписок:
+
+```json
+"fallback": {
+  "subscriptions": ["backup1", "backup2"],
+  "blacklist_timeout": "1m"
+}
+```
+
+Генерируется группа `<id>-fallback`, в которой первым идёт собственный итоговый тег подписки
+(`<id>-single` или `<id>-manual`), затем итоговые теги резервных подписок в объявленном порядке. Если
+резервная подписка сама объявляет цепочку, в группу попадает её `<backup>-fallback`.
+
+Что меняет цепочка:
+
+- у **дефолтной** подписки — `route.final` начинает указывать на `<id>-fallback`;
+- у **недефолтной** — её route rules начинают указывать на `<id>-fallback`, `route.final` не трогается.
+
+Поведение:
+
+- новое соединение сначала идёт через основную подписку;
+- при ошибке дозвона основной outbound помечается недоступным на `blacklist_timeout` (если поле не
+  задано, действует дефолт sing-box), соединение повторяется через следующий в цепочке;
+- пока действует blacklist, новые соединения идут через резерв;
+- после истечения таймаута следующее соединение снова пробует основной outbound;
+- **уже установленные соединения между провайдерами не переносятся**, а переключение на резерв
+  **меняет публичный исходящий IP** — сессии, привязанные к IP (банк-клиенты, авторизации), придётся
+  переустанавливать.
+
+Ограничения (проверяются `vpn-manager check` и при сохранении из LuCI):
+
+- каждый id из `subscriptions` должен существовать и быть включённым, ссылки на саму себя запрещены;
+- дубликаты внутри одной цепочки и пустой список запрещены;
+- циклы любой длины (`a → b → a`, `a → b → c → a`) запрещены;
+- `blacklist_timeout`, если задан, разбирается через `time.ParseDuration`.
+
+Если резервная подписка не дала ни одного узла (например, не скачалась), она молча выбывает из цепочки
+с предупреждением в логе — регенерация конфига из-за резерва не падает. Если выбыли все резервы,
+группа не создаётся и подписка остаётся со своим обычным тегом.
+
+Требуется `sing-box-extended` — см. [Зависимости](#зависимости).
 
 ## Шаблон sing-box
 
@@ -363,6 +447,8 @@ vpn-manager run -v
 Через LuCI можно:
 
 - редактировать `config.json` (subscriptions с полями `include` и `exclude`, routing, singbox settings)
+- переключать подписку между источниками URL и inline `nodes`, задавать `fallback`-цепочку с
+  `blacklist_timeout` и глобальный `singbox.connect_timeout`
 - экспортировать и импортировать конфиг (кнопки "Export config" / "Import config" на любой вкладке)
 - запускать подписки из вкладки **Run**: выбор `--cached-lists` / `--download-lists`, dry-run режим, live log
 - запускать routing из вкладки **Run**: флаг `--with-subscriptions`, live log

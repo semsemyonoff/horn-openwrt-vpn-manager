@@ -96,12 +96,32 @@ The core config is a single JSON file at `/etc/horn-vpn-manager/config.json`.
 
 Top-level structure:
 
-- `singbox` — settings directly related to `sing-box` (log level, test URL, template path)
+- `singbox` — settings directly related to `sing-box` (log level, test URL, template path, `connect_timeout`)
 - `fetch` — global download/runtime settings (retries, timeout, bounded parallelism)
 - `routing` — global routing sources (dnsmasq domains URL, subnet URLs, manual IP file)
 - `subscriptions` — keyed subscription definitions; keys are stable IDs and must remain object keys, not array items
 
-Per-subscription fields: `name`, `url`, `default`, `enabled` (optional, defaults true), `include`, `exclude`, `interval`, `tolerance`, `retries` (optional, overrides global), `route` (optional nested routing)
+Per-subscription fields: `name`, `url`, `nodes`, `default`, `enabled` (optional, defaults true), `include`, `exclude`, `interval`, `tolerance`, `retries` (optional, overrides global), `fallback` (optional chain), `route` (optional nested routing)
+
+Node source (`url` XOR `nodes`):
+
+- `url` and `nodes` are mutually exclusive; an enabled subscription must have exactly one of them (an empty `url` string counts as absent)
+- `nodes` is a list of inline `vless://` URIs for a self-hosted node, validated with `vless.Parse` at config load, and fetched over no HTTP at all
+- everything else (`include`/`exclude`, `route`, `default`, `fallback`) behaves identically for both sources
+
+Fallback chains (`fallback`):
+
+- `fallback: {subscriptions: [...], blacklist_timeout: "1m"}` is allowed on **any** enabled subscription, not just the default one
+- generates a `<id>-fallback` group listing the declaring subscription's own final tag first, then each referenced subscription's final tag in declared order (a backup that itself declares a chain contributes its `<backup>-fallback` tag)
+- on the **default** subscription the chain becomes `route.final`; on a **non-default** one it retargets that subscription's own route rules and leaves `route.final` alone
+- validation rejects unknown/disabled/self/duplicate references, an empty chain, and cycles of any length
+- a backup that produced no plan is dropped from the chain with a warning; regeneration is never aborted over a backup
+- switching to a backup changes the public egress IP and does not migrate established connections
+
+`connect_timeout` and `interrupt_exist_connections`:
+
+- `singbox.connect_timeout` (a `time.ParseDuration` string) is emitted as a dial field on every node outbound; empty omits the field entirely
+- generated `urltest` and `selector` groups always emit `interrupt_exist_connections: true`, so operators should raise per-subscription `tolerance` (~300 ms; the default is 100) to keep `urltest` from cutting live connections on benign latency jitter
 
 Conventions:
 
@@ -109,6 +129,7 @@ Conventions:
 - Explicit field names: `url`, `urls`, `manual_file`, `ip_cidrs`
 - Per-subscription routing lives under a nested `route` object
 - When generating `sing-box` config, use the official `sing-box` documentation as the source of truth: `https://sing-box.sagernet.org/configuration/`
+- **Documented exception:** the `fallback` outbound type does not exist upstream — it is provided only by [`sing-box-extended`](https://github.com/shtorm-7/sing-box-extended), like `xhttp`. A config using `fallback` is rejected by a stock build with `unknown outbound type`, which `ApplySingbox` surfaces with a hint naming the extended-build requirement. `horn-vpn-manager/Makefile` deliberately declares **no** sing-box `DEPENDS`: the stock and extended packages conflict and the extended one is usually installed by hand, so a hard dependency would break installation; the requirement is enforced at runtime by `sing-box check` instead.
 
 ## CLI Model
 
