@@ -642,12 +642,37 @@ unrelated one such as toggling a log level — silently wipes `nodes`, `fallback
 - Modify: `horn-vpn-manager-luci/po/ru/horn-vpn-manager.po`
 - Modify: `horn-vpn-manager-luci/root/www/luci-static/resources/horn-vpn-manager/style.css` (if needed)
 
-- [ ] expose `singbox.connect_timeout` alongside the other sing-box settings
-- [ ] warn that switching providers changes the public egress IP and that established sessions are
-      not migrated
-- [ ] verify import/export round-trips all new fields
-- [ ] add en/ru translations for every new string
-- [ ] run `make build`
+- [x] expose `singbox.connect_timeout` alongside the other sing-box settings — text field in the
+      Global settings section, validated in `_validate` with `isValidDuration`
+      — ⚠️ **scope note:** rpcd merges `singbox` additively (`$esb + $isb`, backend `:189`, `:296`),
+      so simply dropping the key on save would leave a stored value untouched and make the field
+      impossible to clear. Clearing a field that *was* set now emits `""` (the core treats empty as
+      unset, verified with `vpn-manager check`), while a field that was never set stays absent so an
+      untouched save still rewrites nothing.
+- [x] warn that switching providers changes the public egress IP and that established sessions are
+      not migrated — inline warning under the chain picker, shown only while a chain is configured
+      (and repeated in the `Fallback chain` field description); styled via a new
+      `.vpnsub-chain-warning` rule
+- [x] verify import/export round-trips all new fields — export takes `get_config` output verbatim
+      and import hands it to `set_full_config`, so the check was run end to end against the **real**
+      rpcd `jq` merge program: `nodes`, `fallback`, `connect_timeout`, an unknown subscription field
+      and an unknown `singbox` field all survive export → import onto a device whose stored config
+      has none of them, the merged file passes `vpn-manager check`, and re-exporting it reproduces
+      the payload
+- [x] add en/ru translations for every new string — every `_()` literal in `config.js` (226 calls)
+      was extracted and diffed against both `.po` files: no missing msgid, and the two files carry
+      an identical msgid set. `po2lmo` count 166 → 203
+- [x] ➕ **fixed a pre-existing silent field drop found by the round-trip check:** `interval` and
+      `tolerance` inputs are only rendered for a multi-node subscription with proxy data
+      (`config.js:2646`), so saving while sing-box is down deleted both keys from `config.json`.
+      `_collectConfig` now only writes them when the input is actually present. Same class of bug as
+      Task 10, predates this plan.
+- [x] run `make build` — core `bin/horn-vpn-manager-2.2.1-r1-linux-arm64.apk` and
+      `bin/horn-vpn-manager-luci-2.2.1-r1.apk` both built; `node --check` clean on `config.js`;
+      `go test ./...` still passes. Verified with a Node/jsdom harness driving the real `render` +
+      `_collectConfig` + `_validate` (33 assertions, all passing), carrying three mutation checks —
+      against the `singbox` preservation, the `interval` guard and the clear-to-empty rule — so it
+      cannot pass vacuously
 
 ### Task 13: Documentation and example config
 

@@ -797,9 +797,24 @@ function makeChainPicker(cardId, values) {
         listEl.appendChild(makeRow(v));
     });
 
+    // Shown only while a chain is configured: a switch is not transparent to
+    // anything already connected, and it changes the public egress IP.
+    var warnEl = E(
+        "div",
+        { class: "vpnsub-chain-warning" },
+        "⚠️ " +
+            _(
+                "Falling back to a backup changes the public egress IP; established sessions are not migrated and stay on the failed provider until they close.",
+            ),
+    );
+
     var picker = {
         cardId: cardId,
-        node: E("div", { class: "vpnsub-dynlist-wrap" }, [listEl, addWrap]),
+        node: E("div", { class: "vpnsub-dynlist-wrap" }, [
+            listEl,
+            addWrap,
+            warnEl,
+        ]),
         getValue: function () {
             return Array.prototype.slice
                 .call(listEl.querySelectorAll(".vpnsub-chain-select"))
@@ -815,8 +830,14 @@ function makeChainPicker(cardId, values) {
                 listEl.querySelectorAll(".vpnsub-chain-select"),
                 fillSelect,
             );
+            warnEl.style.display = listEl.querySelector(".vpnsub-chain-select")
+                ? ""
+                : "none";
         },
     };
+    warnEl.style.display = listEl.querySelector(".vpnsub-chain-select")
+        ? ""
+        : "none";
     chainPickers.push(picker);
     return picker;
 }
@@ -1225,6 +1246,14 @@ return view.extend({
             placeholder: "https://www.gstatic.com/generate_204",
         });
 
+        var connectTimeoutInput = E("input", {
+            type: "text",
+            class: "cbi-input-text",
+            id: "vpnsub-connect-timeout",
+            value: (cfg.singbox || {}).connect_timeout || "",
+            placeholder: _("sing-box default"),
+        });
+
         var globalSection = E("div", { class: "cbi-section" }, [
             E("legend", {}, _("Global settings")),
             formRow(
@@ -1236,6 +1265,13 @@ return view.extend({
                 _("URL test"),
                 testUrlSettingInput,
                 _("URL used by urltest groups to measure latency"),
+            ),
+            formRow(
+                _("Connect timeout"),
+                connectTimeoutInput,
+                _(
+                    "How long a node may take to establish a connection before it counts as failed (e.g. 3s); shorter values make a fallback chain switch sooner",
+                ),
             ),
         ]);
 
@@ -2747,9 +2783,15 @@ return view.extend({
                 setOrDelete(sub, "route", Object.keys(route).length ? route : null);
                 setOrDelete(sub, "include", include.length ? include : null);
                 setOrDelete(sub, "exclude", exclude.length ? exclude : null);
-                setOrDelete(sub, "interval", interval || null);
-                var tol = toleranceRaw === "" ? NaN : parseInt(toleranceRaw, 10);
-                setOrDelete(sub, "tolerance", isNaN(tol) ? null : tol);
+                // interval/tolerance are only rendered for a multi-node
+                // subscription with proxy data, so when the input is absent the
+                // stored value must be kept rather than deleted — otherwise a save
+                // while sing-box is down would wipe it.
+                if (intervalEl) setOrDelete(sub, "interval", interval || null);
+                if (toleranceEl) {
+                    var tol = toleranceRaw === "" ? NaN : parseInt(toleranceRaw, 10);
+                    setOrDelete(sub, "tolerance", isNaN(tol) ? null : tol);
+                }
                 var retriesEl = card.querySelector(".vpnsub-sub-retries");
                 var retriesRaw = retriesEl ? retriesEl.value.trim() : "";
                 var r = retriesRaw === "" ? NaN : parseInt(retriesRaw, 10);
@@ -2782,6 +2824,17 @@ return view.extend({
         singbox.log_level = level;
         singbox.test_url = testUrl;
         singbox.template = this._singboxTemplate || "";
+        var ctEl = document.getElementById("vpnsub-connect-timeout");
+        var ct = ctEl ? ctEl.value.trim() : "";
+        // rpcd merges singbox additively ($esb + $isb), so dropping the key would
+        // leave the stored value untouched. Clearing a field that was set must
+        // therefore send "" — the core treats empty as unset — while a field that
+        // was never set stays absent, so an untouched save rewrites nothing.
+        setOrDelete(
+            singbox,
+            "connect_timeout",
+            ct || (hasOwn(singbox, "connect_timeout") ? "" : null),
+        );
 
         return {
             singbox: singbox,
@@ -2792,6 +2845,16 @@ return view.extend({
     _validate: function () {
         var self = this;
         var valid = true;
+
+        var ctEl = document.getElementById("vpnsub-connect-timeout");
+        if (ctEl) {
+            clearError(ctEl);
+            var ct = ctEl.value.trim();
+            if (ct && !isValidDuration(ct)) {
+                setError(ctEl, _("Enter a duration like 1m or 30s"));
+                valid = false;
+            }
+        }
 
         Array.prototype.forEach.call(
             document.querySelectorAll(".vpnsub-sub-card"),

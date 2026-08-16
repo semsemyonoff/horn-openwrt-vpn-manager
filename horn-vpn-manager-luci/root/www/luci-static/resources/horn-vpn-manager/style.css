@@ -196,6 +196,12 @@
     padding: 0 0.4em;
 }
 
+.vpnsub-chain-warning {
+    padding-top: 0.35rem;
+    font-size: 90%;
+    opacity: 0.85;
+}
+
 /* ── Test tab ────────────────────────────────────────────────────────────── */
 .vpnsub-test-row-input {
     display: flex;

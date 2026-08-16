@@ -500,3 +500,114 @@ msgstr "This appears to be a full config file. Use the global Import button inst
 
 msgid "keyword"
 msgstr "keyword"
+
+msgid "Move up"
+msgstr "Move up"
+
+msgid "Move down"
+msgstr "Move down"
+
+msgid "Falling back to a backup changes the public egress IP; established sessions are not migrated and stay on the failed provider until they close."
+msgstr "Falling back to a backup changes the public egress IP; established sessions are not migrated and stay on the failed provider until they close."
+
+msgid "Fallback chain of"
+msgstr "Fallback chain of"
+
+msgid "a subscription cannot fall back to itself"
+msgstr "a subscription cannot fall back to itself"
+
+msgid "unknown subscription"
+msgstr "unknown subscription"
+
+msgid "disabled subscription"
+msgstr "disabled subscription"
+
+msgid "duplicate entry"
+msgstr "duplicate entry"
+
+msgid "blacklist timeout is not a valid duration (e.g. 1m, 30s)"
+msgstr "blacklist timeout is not a valid duration (e.g. 1m, 30s)"
+
+msgid "Fallback chain forms a cycle"
+msgstr "Fallback chain forms a cycle"
+
+msgid "sing-box default"
+msgstr "sing-box default"
+
+msgid "Connect timeout"
+msgstr "Connect timeout"
+
+msgid "How long a node may take to establish a connection before it counts as failed (e.g. 3s); shorter values make a fallback chain switch sooner"
+msgstr "How long a node may take to establish a connection before it counts as failed (e.g. 3s); shorter values make a fallback chain switch sooner"
+
+msgid "Template file not found. Save a template to create one."
+msgstr "Template file not found. Save a template to create one."
+
+msgid "default"
+msgstr "default"
+
+msgid "Verbosity"
+msgstr "Verbosity"
+
+msgid "routing config"
+msgstr "routing config"
+
+msgid "manual IPs"
+msgstr "manual IPs"
+
+msgid "manual domains"
+msgstr "manual domains"
+
+msgid "sing-box template"
+msgstr "sing-box template"
+
+msgid "Export incomplete — the following data could not be read and was omitted: "
+msgstr "Export incomplete — the following data could not be read and was omitted: "
+
+msgid "Config and template were saved, but some auxiliary data failed to restore: "
+msgstr "Config and template were saved, but some auxiliary data failed to restore: "
+
+msgid ". Manual IPs/domains may need to be re-imported."
+msgstr ". Manual IPs/domains may need to be re-imported."
+
+msgid "Subscription URL"
+msgstr "Subscription URL"
+
+msgid "Inline nodes"
+msgstr "Inline nodes"
+
+msgid "Nodes"
+msgstr "Nodes"
+
+msgid "One vless:// URI per line — used instead of a subscription URL"
+msgstr "One vless:// URI per line — used instead of a subscription URL"
+
+msgid "Source"
+msgstr "Source"
+
+msgid "Where this subscription's nodes come from"
+msgstr "Where this subscription's nodes come from"
+
+msgid "Fallback chain"
+msgstr "Fallback chain"
+
+msgid "Backup subscriptions tried in order when this one fails to connect; switching providers changes the public egress IP"
+msgstr "Backup subscriptions tried in order when this one fails to connect; switching providers changes the public egress IP"
+
+msgid "Blacklist timeout"
+msgstr "Blacklist timeout"
+
+msgid "How long a failed subscription is skipped before being retried (e.g. 1m)"
+msgstr "How long a failed subscription is skipped before being retried (e.g. 1m)"
+
+msgid "Enter a duration like 1m or 30s"
+msgstr "Enter a duration like 1m or 30s"
+
+msgid "A subscription using inline nodes needs at least one vless:// URI"
+msgstr "A subscription using inline nodes needs at least one vless:// URI"
+
+msgid "Inline nodes must be valid vless:// URIs"
+msgstr "Inline nodes must be valid vless:// URIs"
+
+msgid "The default subscription cannot be disabled"
+msgstr "The default subscription cannot be disabled"
