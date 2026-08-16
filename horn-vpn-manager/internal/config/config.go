@@ -8,6 +8,8 @@ import (
 	"os"
 	"slices"
 	"time"
+
+	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/vless"
 )
 
 const DefaultPath = "/etc/horn-vpn-manager/config.json"
@@ -30,9 +32,13 @@ type Singbox struct {
 }
 
 // Subscription defines a single subscription entry.
+//
+// Nodes carries inline vless:// URIs for a self-hosted provider and is mutually
+// exclusive with a non-empty URL.
 type Subscription struct {
 	Name      string             `json:"name"`
 	URL       string             `json:"url"`
+	Nodes     []string           `json:"nodes,omitempty"`
 	Default   bool               `json:"default"`
 	Enabled   *bool              `json:"enabled"`
 	Include   []string           `json:"include"`
@@ -129,6 +135,8 @@ func (c *Config) validate(hasExplicitManualFile bool) error {
 //   - exactly one subscription must have "default": true
 //   - the default subscription must not be disabled
 //   - no subscription may have an empty string in its exclude list
+//   - a subscription carries either a url or inline nodes, never both; an
+//     enabled one must carry exactly one of them
 func (c *Config) ValidateSubscriptions() error {
 	if len(c.Subscriptions) == 0 {
 		return errors.New("no subscriptions configured")
@@ -154,6 +162,9 @@ func (c *Config) ValidateSubscriptions() error {
 				return fmt.Errorf("subscription %q has invalid interval %q: must be a Go duration (e.g. \"5m\", \"30s\")", id, sub.Interval)
 			}
 		}
+		if err := validateSource(id, sub); err != nil {
+			return err
+		}
 	}
 	if defaultCount == 0 {
 		return errors.New("no default subscription defined (set \"default\": true on one subscription)")
@@ -163,6 +174,30 @@ func (c *Config) ValidateSubscriptions() error {
 	}
 	if !c.Subscriptions[defaultID].IsEnabled() {
 		return fmt.Errorf("default subscription %q cannot be disabled", defaultID)
+	}
+	return nil
+}
+
+// validateSource checks that a subscription draws its nodes from exactly one
+// source: a remote url or an inline nodes list. A disabled subscription with
+// neither is left alone, since it is never fetched.
+func validateSource(id string, sub *Subscription) error {
+	if sub.URL != "" && len(sub.Nodes) > 0 {
+		return fmt.Errorf("subscription %q has both url and nodes: keep the remote url or the inline nodes, not both", id)
+	}
+	if sub.URL == "" && len(sub.Nodes) == 0 {
+		if sub.IsEnabled() {
+			return fmt.Errorf("subscription %q has neither url nor nodes: set a subscription url or add inline vless:// nodes", id)
+		}
+		return nil
+	}
+	for _, uri := range sub.Nodes {
+		if uri == "" {
+			return fmt.Errorf("subscription %q has an empty node: remove it or provide a vless:// URI", id)
+		}
+		if _, err := vless.Parse(uri); err != nil {
+			return fmt.Errorf("subscription %q has an invalid node %q: %w", id, uri, err)
+		}
 	}
 	return nil
 }

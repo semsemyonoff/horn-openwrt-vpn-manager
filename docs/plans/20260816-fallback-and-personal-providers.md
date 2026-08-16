@@ -371,13 +371,20 @@ change, and the reasoning belongs in `README.md` next to the `tolerance` field.
 - Modify: `horn-vpn-manager/internal/config/config.go`
 - Modify: `horn-vpn-manager/internal/config/config_test.go`
 
-- [ ] add `Nodes []string` with tag `json:"nodes,omitempty"` to `Subscription`
-- [ ] in `ValidateSubscriptions`, reject a subscription with both a **non-empty** `url` and `nodes`
-- [ ] reject an enabled subscription with neither; a disabled one with neither must not error
-- [ ] reject empty strings inside `nodes`, matching the existing `include`/`exclude` checks
-- [ ] write tests: `nodes` only; `url` only; `{"url": "", "nodes": [...]}` valid; both non-empty
+- [x] add `Nodes []string` with tag `json:"nodes,omitempty"` to `Subscription`
+- [x] in `ValidateSubscriptions`, reject a subscription with both a **non-empty** `url` and `nodes`
+      — all source checks live in a `validateSource(id, sub)` helper called from the existing loop
+- [x] reject an enabled subscription with neither; a disabled one with neither must not error
+- [x] reject empty strings inside `nodes`, matching the existing `include`/`exclude` checks
+- [x] ⚠️ **scope note:** each entry is also run through `vless.Parse` (per the Validation rules
+      section), so `check` catches a malformed URI at config time rather than mid-pipeline. This
+      adds a `config` → `vless` import; `vless` imports nothing from the module, so no cycle.
+- [x] write tests: `nodes` only; `url` only; `{"url": "", "nodes": [...]}` valid; both non-empty
       (error); neither on an enabled subscription (error); empty string in `nodes` (error)
-- [ ] run `go test ./...` — must pass before next task
+      (`TestValidateSubscriptions_source`, `..._disabled_without_source`, `TestLoad_subscription_nodes`,
+      `TestSubscription_nodes_omitted_when_empty`)
+- [x] run `go test ./...` — passes; `gofmt -l .` clean; `golangci-lint run` reports the same 10
+      pre-existing `goconst` issues, none new
 
 ### Task 5: Pipeline support for inline `nodes`
 

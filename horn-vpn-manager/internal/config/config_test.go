@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -321,6 +322,137 @@ func TestValidateSubscriptions_valid(t *testing.T) {
 	}
 	if err := cfg.ValidateSubscriptions(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+const testNodeURI = "vless://11111111-2222-3333-4444-555555555555@203.0.113.10:443?security=reality&sni=example.com&pbk=abc&fp=chrome&type=tcp#Personal"
+
+func TestLoad_subscription_nodes(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	writeFile(t, path, `{
+		"subscriptions": {
+			"personal": {
+				"name": "Personal",
+				"default": true,
+				"nodes": ["`+testNodeURI+`"]
+			}
+		}
+	}`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	sub := cfg.Subscriptions["personal"]
+	if sub == nil {
+		t.Fatal("subscription 'personal' not found")
+	}
+	if len(sub.Nodes) != 1 || sub.Nodes[0] != testNodeURI {
+		t.Errorf("nodes = %v", sub.Nodes)
+	}
+	if sub.URL != "" {
+		t.Errorf("url = %q, want empty", sub.URL)
+	}
+	if err := cfg.ValidateSubscriptions(); err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}
+
+func TestSubscription_nodes_omitted_when_empty(t *testing.T) {
+	data, err := json.Marshal(&Subscription{Name: "S1", URL: "https://example.com/s1"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(data), "nodes") {
+		t.Errorf("empty nodes must be omitted, got %s", data)
+	}
+}
+
+func TestValidateSubscriptions_source(t *testing.T) {
+	f := false
+	cases := []struct {
+		name    string
+		sub     *Subscription
+		wantErr string
+	}{
+		{
+			name: "url only",
+			sub:  &Subscription{Name: "S1", URL: "https://example.com/s1", Default: true},
+		},
+		{
+			name: "nodes only",
+			sub:  &Subscription{Name: "S1", Default: true, Nodes: []string{testNodeURI}},
+		},
+		{
+			name: "explicitly empty url with nodes",
+			sub:  &Subscription{Name: "S1", URL: "", Default: true, Nodes: []string{testNodeURI}},
+		},
+		{
+			name:    "both url and nodes",
+			sub:     &Subscription{Name: "S1", URL: "https://example.com/s1", Default: true, Nodes: []string{testNodeURI}},
+			wantErr: "both url and nodes",
+		},
+		{
+			name:    "neither on enabled subscription",
+			sub:     &Subscription{Name: "S1", Default: true},
+			wantErr: "neither url nor nodes",
+		},
+		{
+			name:    "empty string in nodes",
+			sub:     &Subscription{Name: "S1", Default: true, Nodes: []string{testNodeURI, ""}},
+			wantErr: "empty node",
+		},
+		{
+			name:    "unparsable node",
+			sub:     &Subscription{Name: "S1", Default: true, Nodes: []string{"https://example.com/not-a-node"}},
+			wantErr: "invalid node",
+		},
+		{
+			name:    "disabled subscription with both",
+			sub:     &Subscription{Name: "S1", URL: "https://example.com/s1", Enabled: &f, Nodes: []string{testNodeURI}},
+			wantErr: "both url and nodes",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			subs := map[string]*Subscription{"s1": tc.sub}
+			if !tc.sub.Default {
+				subs["main"] = &Subscription{Name: "Main", URL: "https://example.com/main", Default: true}
+			}
+			cfg := &Config{Subscriptions: subs}
+
+			err := cfg.ValidateSubscriptions()
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error containing %q", tc.wantErr)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error = %v, want it to contain %q", err, tc.wantErr)
+			}
+			if !strings.Contains(err.Error(), `"s1"`) {
+				t.Errorf("error should name the offending subscription: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateSubscriptions_disabled_without_source(t *testing.T) {
+	f := false
+	cfg := &Config{
+		Subscriptions: map[string]*Subscription{
+			"main":     {Name: "Main", URL: "https://example.com/main", Default: true},
+			"disabled": {Name: "Off", Enabled: &f},
+		},
+	}
+	if err := cfg.ValidateSubscriptions(); err != nil {
+		t.Fatalf("disabled subscription without url or nodes must be accepted: %v", err)
 	}
 }
 
