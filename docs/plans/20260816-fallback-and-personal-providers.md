@@ -4,9 +4,11 @@
 
 Two related changes to `horn-vpn-manager`:
 
-1. **Fallback chains (issue #1)** — the default subscription may declare an ordered list of backup
-   subscriptions. `route.final` points at a generated `fallback` outbound group instead of a single
-   node tag. Plus three adjacent stability fixes found during on-device investigation.
+1. **Fallback chains (issue #1)** — any subscription may declare an ordered list of backup
+   subscriptions. The declaring subscription's final tag becomes a generated `fallback` outbound
+   group instead of a single node tag; for the default subscription that is `route.final`, for the
+   others it is the tag their own route rules point at. Plus three adjacent stability fixes found
+   during on-device investigation.
 2. **Personal providers** — a subscription may carry inline `vless://` node URIs instead of a
    remote subscription `url`, so a self-hosted node can be configured without publishing a
    subscription endpoint.
@@ -161,7 +163,7 @@ Packaging gates from repo root: `make lint`, and `make build` when LuCI files ch
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Who may declare `fallback` | **default subscription only** | Matches issue #1; keeps validation small; `route.final` is the only single point of failure being closed |
+| Who may declare `fallback` | **any subscription** | Issue #1 proposes default-only, but that is too narrow in practice. A personal VPS carries named domains as a *non-default* subscription, so default-only would leave exactly the node that most needs redundancy without any. The subscription that actually failed in production was also non-default. Widening costs one extra validation rule (real cycle detection) and is far cheaper now than retrofitting later. |
 | Personal node schema | **`nodes: []`, mutually exclusive with a non-empty `url`** | A subscription stays one entity, so `route` / `include` / `exclude` / `default` / `fallback` keep working unchanged; validation is a simple XOR |
 | `connect_timeout` | **global, `singbox.connect_timeout`** | One knob; empty default emits nothing, preserving current behavior |
 | `interrupt_exist_connections` | **`true` on all generated groups** (resolved) | Stranding connections on a dead node is never desirable — observed connections hung 22 s and 1 m 25 s after their node stopped answering. **Coupling to be documented:** on `urltest` the field also fires on benign latency-driven re-selections. At the default `tolerance: 100` with an observed node spread of 103–230 ms that is noise, so live downloads/streams/WebSockets would be cut for no reason. The mitigation is `tolerance`, not disabling the flag: it is already a per-subscription config field requiring no code, and raising it (~300 ms) leaves re-selection to genuine degradation, where interrupting is always correct. |
@@ -171,7 +173,7 @@ Packaging gates from repo root: `make lint`, and `make build` when LuCI files ch
 
 ### Generated shape
 
-For a default subscription `primary` (inline single node) with fallback to `backup` (multi-node):
+For a subscription `primary` (inline single node) with fallback to `backup` (multi-node):
 
 ```json
 {
@@ -210,7 +212,7 @@ without special-casing.
       "name": "Self-hosted",
       "default": true,
       "nodes": ["vless://uuid@203.0.113.10:443?..."],  // new; mutually exclusive with non-empty url
-      "fallback": {                                     // new; default subscription only
+      "fallback": {                                     // new; allowed on any subscription
         "subscriptions": ["backup"],
         "blacklist_timeout": "1m"
       }
@@ -257,13 +259,18 @@ type BuildOptions struct {
 - **non-empty** `url` and `nodes` are mutually exclusive; an enabled subscription must have exactly
   one of them (note `config.js:2296` always emits `"url"`, possibly as `""`)
 - every entry in `nodes` must parse via `vless.Parse`; empty strings rejected
-- `fallback` rejected on a non-default subscription
-- each `fallback.subscriptions` entry must exist, be enabled, and not be the default itself
+- `fallback` may be declared on **any** enabled subscription
+- each `fallback.subscriptions` entry must exist, be enabled, and must not be the declaring
+  subscription itself
 - no duplicate entries within one chain; empty chain rejected
+- **no cycles**: a chain may not lead back to any subscription already on the path
 - `blacklist_timeout` and `singbox.connect_timeout`, when set, must parse via `time.ParseDuration`
 
-Cycles cannot occur while only the default may declare a chain and may not reference itself; the
-self-reference check is kept explicit so the constraint survives any future widening of scope.
+Cycle detection is a real requirement, not insurance: with chains allowed on every subscription,
+`a → b → a` is expressible, and so is a longer loop. Validation must walk the chain graph, not just
+compare against the declaring id. A referenced subscription may itself declare a chain, so
+resolution is recursive — the generated `fallback` group lists the referenced subscription's own
+final tag, which may itself be a `fallback` group.
 
 ## What Goes Where
 
@@ -385,39 +392,55 @@ change, and the reasoning belongs in `README.md` next to the `tolerance` field.
 
 - [ ] add the `Fallback` struct and `Fallback *Fallback` with tag `json:"fallback,omitempty"` on
       `Subscription`
-- [ ] reject `fallback` on a non-default subscription
-- [ ] validate each referenced id: exists, enabled, not the default itself
+- [ ] allow `fallback` on any enabled subscription
+- [ ] validate each referenced id: exists, enabled, not the declaring subscription itself
 - [ ] reject duplicate ids within a chain and an empty `subscriptions` list
+- [ ] walk the chain graph and reject cycles of any length (`a → b → a`, `a → b → c → a`)
 - [ ] validate `blacklist_timeout` with `time.ParseDuration` when non-empty
 - [ ] write tests for every rejection path, each asserting an actionable message
 - [ ] write tests for the valid case, including a two-backup chain preserving order
 - [ ] run `go test ./...` — must pass before next task
 
-### Task 7: Generate the `fallback` outbound and point `route.final` at it
+### Task 7: Generate `fallback` outbounds and rewire the tags that point at them
+
+A chain on the **default** subscription changes `route.final`; a chain on a **non-default**
+subscription changes the tag its own route rules point at. Both are the same construction — a group
+tagged `<id>-fallback` that supersedes that subscription's `FinalTag` — so implement it once and
+apply it per subscription.
 
 **Files:**
 - Modify: `horn-vpn-manager/internal/subscription/outbound.go`
 - Modify: `horn-vpn-manager/internal/subscription/subscription.go`
+- Modify: `horn-vpn-manager/internal/subscription/route.go`
 - Modify: `horn-vpn-manager/internal/subscription/outbound_test.go`
 - Modify: `horn-vpn-manager/internal/subscription/subscription_test.go`
+- Modify: `horn-vpn-manager/internal/subscription/route_test.go`
 
-- [ ] add the `FallbackOutbound` type
+- [ ] add the `FallbackOutbound` type, with `InterruptExistConnections` set to `true` per Task 2
 - [ ] add an id→plan association: either an `ID` field on `OutboundPlan` or a
       `map[string]*OutboundPlan` built from `defaultID` and each `subResult.id` — the current
       `plans []*OutboundPlan` (`:198`, `:289`, `:343`) carries no id and cannot resolve references
-- [ ] emit a group tagged `<defaultID>-fallback` whose outbounds are the default's `FinalTag`
-      followed by each referenced subscription's `FinalTag` in declared order
-- [ ] append the group in `collectSingboxParts` (`:425`) and pass its tag as `defaultFinalTag` to
-      `singbox.RenderConfig`
+- [ ] for every subscription declaring a chain, emit a group tagged `<id>-fallback` whose outbounds
+      are that subscription's own `FinalTag` followed by each referenced subscription's `FinalTag`
+      in declared order
+- [ ] resolve references **after** every plan exists, so a backup that itself declares a chain
+      contributes its `<id>-fallback` tag rather than its bare final tag
+- [ ] when the declaring subscription is the default, pass the fallback tag as `defaultFinalTag` to
+      `singbox.RenderConfig`; otherwise rewrite that subscription's generated route rules to target
+      the fallback tag instead of its plain `FinalTag`
+- [ ] append the groups in `collectSingboxParts` (`:425`)
 - [ ] register `plan.TagNames[fallbackTag]` so rpcd `get_sb_status` and `test_url` (which reads
       `subs-tags.json`, backend `:379`, `:392-398`) show a name rather than a bare tag
 - [ ] when a referenced backup produced no plan, drop it from the chain with a `logx.Warn` and
       continue — do **not** abort, matching the existing skip-and-continue policy at `:337-345`
-- [ ] handle the degenerate case where every backup failed: emit no fallback group and fall back to
-      the previous `route.final` behavior, logging why
+- [ ] handle the degenerate case where every backup failed: emit no fallback group and leave the
+      subscription's tag as it was, logging why
 - [ ] emit `blacklist_timeout` only when configured, letting sing-box apply its own default
 - [ ] write tests: single-node primary + multi-node backup resolve to `<id>-single` / `<id>-manual`;
-      order preserved; `route.final` is the fallback tag; tag name registered
+      order preserved; tag name registered
+- [ ] write tests for a chain on the **default** subscription (`route.final` becomes the fallback
+      tag) and on a **non-default** one (its route rules retarget, `route.final` untouched)
+- [ ] write a test for a backup that itself declares a chain (nested resolution)
 - [ ] write tests for the degraded chain, the all-backups-failed case, and unchanged behavior when
       `fallback` is absent
 - [ ] run `go test ./...` — must pass before next task
@@ -481,9 +504,9 @@ unrelated one such as toggling a log level — silently wipes `nodes`, `fallback
 **Files:**
 - Modify: `horn-vpn-manager-luci/root/www/luci-static/resources/view/horn-vpn-manager/config.js`
 
-- [ ] on the default subscription only, add an ordered picker of enabled non-default subscriptions
+- [ ] on every subscription card, add an ordered picker of the other enabled subscriptions
 - [ ] add a `blacklist_timeout` field
-- [ ] prevent self-reference, disabled references and duplicates in the picker
+- [ ] prevent self-reference, disabled references, duplicates and cycles in the picker
 - [ ] verify the chain round-trips through save and reload
 - [ ] run `make build`
 
@@ -522,7 +545,9 @@ unrelated one such as toggling a log level — silently wipes `nodes`, `fallback
       raise per-subscription `tolerance` (~300 ms, default is 100) so `urltest` re-selects only on
       genuine degradation — otherwise benign latency jitter will cut live downloads, streams and
       WebSockets. Place this next to the `tolerance` field in `README.md`.
-- [ ] document that `url` and `nodes` are mutually exclusive and `fallback` is default-only
+- [ ] document that `url` and `nodes` are mutually exclusive, that `fallback` works on any
+      subscription, and what a chain changes (`route.final` for the default, the subscription's own
+      route-rule target otherwise)
 - [ ] document the egress-IP change and the lack of live-session migration
 - [ ] decide whether `horn-vpn-manager/Makefile` should declare a sing-box `DEPENDS` (it currently
       declares none) and record the decision either way
@@ -554,8 +579,9 @@ unrelated one such as toggling a log level — silently wipes `nodes`, `fallback
 build):
 
 - Install the rebuilt core and LuCI packages, then regenerate the sing-box config.
-- Confirm `route.final` points at `<defaultID>-fallback` and the group lists the primary tag
-  followed by each backup's final tag in declared order.
+- Confirm a chain on the default subscription makes `route.final` point at `<id>-fallback`, and a
+  chain on a non-default one retargets that subscription's route rules while `route.final` stays put.
+  In both cases the group must list the primary tag followed by each backup's final tag in order.
 - Confirm duplicate node outbounds are gone from the generated config.
 - Exercise fallback end to end: primary blacklisted on dial failure, new connections served by the
   backup, primary retried after `blacklist_timeout`.
