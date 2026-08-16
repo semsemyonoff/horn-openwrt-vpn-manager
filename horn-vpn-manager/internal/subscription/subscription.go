@@ -88,6 +88,17 @@ func (r *Runner) fetchOptsForSub(sub *config.Subscription) fetch.Options {
 	}
 }
 
+// buildOptsForSub combines the per-subscription group settings with the global
+// sing-box settings into the inputs BuildOutbounds needs.
+func (r *Runner) buildOptsForSub(sub *config.Subscription, testURL string) BuildOptions {
+	return BuildOptions{
+		Interval:       sub.Interval,
+		Tolerance:      sub.Tolerance,
+		TestURL:        testURL,
+		ConnectTimeout: r.Cfg.Singbox.ConnectTimeout,
+	}
+}
+
 // urlHost returns only the scheme and host of a URL for safe logging.
 // Subscription URLs commonly embed auth tokens in the path or query string;
 // logging only the host avoids credential exposure in verbose output.
@@ -268,7 +279,7 @@ func (r *Runner) Run(ctx context.Context) error { //nolint:gocognit,gocyclo // o
 			}
 		}
 
-		plan, buildErr := BuildOutbounds(defaultID, uris, sub.Interval, sub.Tolerance, testURL)
+		plan, buildErr := BuildOutbounds(defaultID, uris, r.buildOptsForSub(sub, testURL))
 		if buildErr != nil {
 			return fmt.Errorf("default subscription %q failed to build outbounds, aborting", defaultID)
 		}
@@ -521,7 +532,7 @@ func (r *Runner) processSub(ctx context.Context, id string, sub *config.Subscrip
 		}
 	}
 
-	plan, buildErr := BuildOutbounds(id, uris, sub.Interval, sub.Tolerance, testURL)
+	plan, buildErr := BuildOutbounds(id, uris, r.buildOptsForSub(sub, testURL))
 	if buildErr != nil {
 		logx.Err("Failed to build outbounds for %s: %v", id, buildErr)
 		return subResult{id: id, err: buildErr}

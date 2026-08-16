@@ -343,18 +343,27 @@ change, and the reasoning belongs in `README.md` next to the `tolerance` field.
 - Modify: `horn-vpn-manager/internal/subscription/subscription.go`
 - Modify: `horn-vpn-manager/internal/subscription/subscription_test.go`
 
-- [ ] add `ConnectTimeout string` with tag `json:"connect_timeout"` to `Singbox`, validated with
+- [x] add `ConnectTimeout string` with tag `json:"connect_timeout"` to `Singbox`, validated with
       `time.ParseDuration` when non-empty, error style matching the existing `interval` message
-- [ ] introduce `BuildOptions` and change `BuildOutbounds(id string, uris []string, opts
+      — ⚠️ **scope note:** validated in `Config.validate()` (runs on every `Load`, so both the
+      routing and subscription pipelines reject it) rather than in `ValidateSubscriptions`, since
+      `connect_timeout` is a global sing-box setting, not a subscription constraint
+- [x] introduce `BuildOptions` and change `BuildOutbounds(id string, uris []string, opts
       BuildOptions)` — the function already takes 5 positionals and the new value is a second
       duration string adjacent to `Interval`
-- [ ] add `ConnectTimeout string` with tag `json:"connect_timeout,omitempty"` to `VLESSOutbound` and
+- [x] add `ConnectTimeout string` with tag `json:"connect_timeout,omitempty"` to `VLESSOutbound` and
       set it in `nodeToOutbound`; empty value must omit the field entirely
-- [ ] update both call sites (`subscription.go:271`, `:524`) to the new signature
-- [ ] write tests: valid duration emitted on every node outbound; empty value omits the field;
-      invalid duration fails config validation
-- [ ] write tests covering both call sites through the pipeline
-- [ ] run `go test ./...` — must pass before next task
+- [x] update both call sites (`subscription.go:271`, `:524`) to the new signature — both now go
+      through a new `Runner.buildOptsForSub(sub, testURL)` helper that merges the per-subscription
+      group settings with `Cfg.Singbox.ConnectTimeout`
+- [x] write tests: valid duration emitted on every node outbound; empty value omits the field;
+      invalid duration fails config validation (`TestBuildOutbounds_ConnectTimeout`,
+      `TestLoad_singbox_connect_timeout`). Also asserted: the dial field is not emitted on group
+      outbounds, and it does not perturb the Task 1 dedup key
+- [x] write tests covering both call sites through the pipeline
+      (`TestRunner_Run_connect_timeout_applied`, default + non-default subscription)
+- [x] run `go test ./...` — passes; `gofmt -l .` clean; `golangci-lint run` reports the same 10
+      pre-existing `goconst` issues, none new
 
 ### Task 4: Config schema and validation for inline `nodes`
 

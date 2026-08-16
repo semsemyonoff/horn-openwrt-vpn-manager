@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -175,6 +176,50 @@ func TestLoad_singbox_section(t *testing.T) {
 	}
 	if cfg.Singbox.Template != "/etc/horn-vpn-manager/sing-box.template.json" {
 		t.Errorf("singbox.template = %q", cfg.Singbox.Template)
+	}
+}
+
+func TestLoad_singbox_connect_timeout(t *testing.T) {
+	cases := []struct {
+		name    string
+		value   string
+		want    string
+		wantErr bool
+	}{
+		{name: "valid duration", value: `"connect_timeout": "3s",`, want: "3s"},
+		{name: "absent", value: "", want: ""},
+		{name: "explicitly empty", value: `"connect_timeout": "",`, want: ""},
+		{name: "invalid duration", value: `"connect_timeout": "3 seconds",`, wantErr: true},
+		{name: "unitless number", value: `"connect_timeout": "3",`, wantErr: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			writeFile(t, path, `{
+				"singbox": {`+tc.value+`"log_level": "warn"},
+				"subscriptions": {
+					"s1": {"name": "S1", "url": "https://example.com/s1", "default": true}
+				}
+			}`)
+
+			cfg, err := Load(path)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected error for invalid connect_timeout")
+				}
+				if !strings.Contains(err.Error(), "connect_timeout") {
+					t.Errorf("error should name the offending field: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if cfg.Singbox.ConnectTimeout != tc.want {
+				t.Errorf("singbox.connect_timeout = %q, want %q", cfg.Singbox.ConnectTimeout, tc.want)
+			}
+		})
 	}
 }
 

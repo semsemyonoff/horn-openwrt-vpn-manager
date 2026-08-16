@@ -465,6 +465,85 @@ func TestRunner_Run_config_written_to_outdir(t *testing.T) {
 	}
 }
 
+// TestRunner_Run_connect_timeout_applied covers both BuildOutbounds call sites:
+// the default subscription (phase 1) and a non-default one (processSub).
+func TestRunner_Run_connect_timeout_applied(t *testing.T) {
+	cases := []struct {
+		name           string
+		connectTimeout string
+		want           any // nil means the field must be absent
+	}{
+		{name: "configured", connectTimeout: "7s", want: "7s"},
+		{name: "unset", connectTimeout: "", want: nil},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mainSrv := newTestServer(t, rawPayload, http.StatusOK)
+			defer mainSrv.Close()
+			extraSrv := newTestServer(t, "vless://uuid3@h3.example.com:443?encryption=none#Node+3\n", http.StatusOK)
+			defer extraSrv.Close()
+
+			cfg := &config.Config{
+				Fetch:   config.Fetch{Retries: 1, TimeoutSeconds: 5, Parallelism: 1},
+				Singbox: config.Singbox{ConnectTimeout: tc.connectTimeout},
+				Subscriptions: map[string]*config.Subscription{
+					"main":  {Name: "Main", URL: mainSrv.URL, Default: true},
+					"extra": {Name: "Extra", URL: extraSrv.URL},
+				},
+			}
+
+			outDir := t.TempDir()
+			runner := NewRunner(cfg, &fakeApplier{})
+			runner.OutDir = outDir
+			runner.DryRun = true
+
+			if err := runner.Run(context.Background()); err != nil {
+				t.Fatalf("Run() error: %v", err)
+			}
+
+			data, err := os.ReadFile(filepath.Join(outDir, "config.json"))
+			if err != nil {
+				t.Fatalf("config.json not written: %v", err)
+			}
+			var generated struct {
+				Outbounds []map[string]any `json:"outbounds"`
+			}
+			if err := json.Unmarshal(data, &generated); err != nil {
+				t.Fatalf("config.json is not valid JSON: %v", err)
+			}
+
+			var vlessCount int
+			for _, ob := range generated.Outbounds {
+				tag, _ := ob["tag"].(string)
+				if ob["type"] != "vless" {
+					if _, ok := ob["connect_timeout"]; ok {
+						t.Errorf("non-vless outbound %q carries connect_timeout", tag)
+					}
+					continue
+				}
+				vlessCount++
+				got, ok := ob["connect_timeout"]
+				if tc.want == nil {
+					if ok {
+						t.Errorf("outbound %q: connect_timeout = %v, want absent", tag, got)
+					}
+					continue
+				}
+				if !ok {
+					t.Errorf("outbound %q: connect_timeout missing", tag)
+				} else if got != tc.want {
+					t.Errorf("outbound %q: connect_timeout = %v, want %v", tag, got, tc.want)
+				}
+			}
+			// 2 nodes from main + 1 from extra: both call sites must be covered.
+			if vlessCount != 3 {
+				t.Errorf("vless outbound count = %d, want 3", vlessCount)
+			}
+		})
+	}
+}
+
 func TestRunner_Run_subs_tags_written(t *testing.T) {
 	srv := newTestServer(t, rawPayload, http.StatusOK)
 	defer srv.Close()

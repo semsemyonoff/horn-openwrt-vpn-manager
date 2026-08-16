@@ -24,6 +24,9 @@ type Singbox struct {
 	LogLevel string `json:"log_level"`
 	TestURL  string `json:"test_url"`
 	Template string `json:"template"`
+	// ConnectTimeout is emitted as connect_timeout on every generated node
+	// outbound. Empty means "omit the field", leaving sing-box's own default.
+	ConnectTimeout string `json:"connect_timeout"`
 }
 
 // Subscription defines a single subscription entry.
@@ -111,6 +114,11 @@ func (c *Config) validate(hasExplicitManualFile bool) error {
 	hasSubs := len(c.Subscriptions) > 0
 	if !hasRouting && !hasSubs {
 		return errors.New("config must have at least routing (domains.url, subnets.urls, or subnets.manual_file) or subscriptions configured")
+	}
+	if c.Singbox.ConnectTimeout != "" {
+		if _, err := time.ParseDuration(c.Singbox.ConnectTimeout); err != nil {
+			return fmt.Errorf("singbox has invalid connect_timeout %q: must be a Go duration (e.g. \"3s\", \"500ms\")", c.Singbox.ConnectTimeout)
+		}
 	}
 	return nil
 }

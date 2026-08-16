@@ -10,11 +10,15 @@ import (
 
 const testURL = "https://www.gstatic.com/generate_204"
 
+// buildOpts are the explicit-value options used by tests that do not exercise
+// defaulting or connect_timeout.
+var buildOpts = subscription.BuildOptions{Interval: "5m", Tolerance: 100, TestURL: testURL}
+
 func TestBuildOutbounds_SingleNode(t *testing.T) {
 	uris := []string{
 		"vless://uuid1@host1.example.com:443?security=tls&sni=host1.example.com#Node+1",
 	}
-	plan, err := subscription.BuildOutbounds("default", uris, "5m", 100, testURL)
+	plan, err := subscription.BuildOutbounds("default", uris, buildOpts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -65,7 +69,7 @@ func TestBuildOutbounds_MultiNode(t *testing.T) {
 		"vless://uuid2@host2.example.com:443?security=tls&sni=host2.example.com#Node+2",
 		"vless://uuid3@host3.example.com:8443?security=reality&pbk=abc123#Node+3",
 	}
-	plan, err := subscription.BuildOutbounds("default", uris, "5m", 100, testURL)
+	plan, err := subscription.BuildOutbounds("default", uris, buildOpts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -151,11 +155,11 @@ func TestBuildOutbounds_TagsAreStable(t *testing.T) {
 		"vless://uuid1@host1.example.com:443?security=tls&sni=host1.example.com#Node+1",
 		"vless://uuid2@host2.example.com:443?security=tls&sni=host2.example.com#Node+2",
 	}
-	p1, err := subscription.BuildOutbounds("sub", uris, "", 0, testURL)
+	p1, err := subscription.BuildOutbounds("sub", uris, subscription.BuildOptions{TestURL: testURL})
 	if err != nil {
 		t.Fatalf("first call error: %v", err)
 	}
-	p2, err := subscription.BuildOutbounds("sub", uris, "", 0, testURL)
+	p2, err := subscription.BuildOutbounds("sub", uris, subscription.BuildOptions{TestURL: testURL})
 	if err != nil {
 		t.Fatalf("second call error: %v", err)
 	}
@@ -172,7 +176,7 @@ func TestBuildOutbounds_Defaults(t *testing.T) {
 		"vless://uuid1@host1.example.com:443?security=tls#A",
 		"vless://uuid2@host2.example.com:443?security=tls#B",
 	}
-	plan, err := subscription.BuildOutbounds("sub", uris, "", 0, testURL)
+	plan, err := subscription.BuildOutbounds("sub", uris, subscription.BuildOptions{TestURL: testURL})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -184,11 +188,97 @@ func TestBuildOutbounds_Defaults(t *testing.T) {
 	}
 }
 
+func TestBuildOutbounds_ConnectTimeout(t *testing.T) {
+	single := []string{
+		"vless://uuid1@host1.example.com:443?security=tls&sni=host1.example.com#Node+1",
+	}
+	multi := []string{
+		"vless://uuid1@host1.example.com:443?security=tls&sni=host1.example.com#Node+1",
+		"vless://uuid2@host2.example.com:443?security=tls&sni=host2.example.com#Node+2",
+	}
+
+	t.Run("emitted on every node outbound", func(t *testing.T) {
+		for name, uris := range map[string][]string{"single-node": single, "multi-node": multi} {
+			t.Run(name, func(t *testing.T) {
+				opts := subscription.BuildOptions{Interval: "5m", Tolerance: 100, TestURL: testURL, ConnectTimeout: "3s"}
+				plan, err := subscription.BuildOutbounds("sub", uris, opts)
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if len(plan.NodeOutbounds) != len(uris) {
+					t.Fatalf("NodeOutbounds len: got %d want %d", len(plan.NodeOutbounds), len(uris))
+				}
+				for _, ob := range plan.NodeOutbounds {
+					if ob.ConnectTimeout != "3s" {
+						t.Errorf("%s: ConnectTimeout = %q, want %q", ob.Tag, ob.ConnectTimeout, "3s")
+					}
+					m := marshalToMap(t, ob)
+					if m["connect_timeout"] != "3s" {
+						t.Errorf("%s: connect_timeout in JSON = %v, want 3s", ob.Tag, m["connect_timeout"])
+					}
+				}
+			})
+		}
+	})
+
+	t.Run("empty value omits the field", func(t *testing.T) {
+		plan, err := subscription.BuildOutbounds("sub", multi, buildOpts)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		for _, ob := range plan.NodeOutbounds {
+			m := marshalToMap(t, ob)
+			if _, ok := m["connect_timeout"]; ok {
+				t.Errorf("%s: connect_timeout present in JSON with empty option: %v", ob.Tag, m["connect_timeout"])
+			}
+		}
+	})
+
+	t.Run("not set on group outbounds", func(t *testing.T) {
+		opts := subscription.BuildOptions{Interval: "5m", Tolerance: 100, TestURL: testURL, ConnectTimeout: "3s"}
+		plan, err := subscription.BuildOutbounds("sub", multi, opts)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		for name, group := range map[string]any{"urltest": plan.URLTestGroup, "selector": plan.SelectorGroup} {
+			if _, ok := marshalToMap(t, group)["connect_timeout"]; ok {
+				t.Errorf("%s group: connect_timeout is a dial field and must not appear on a group", name)
+			}
+		}
+	})
+
+	t.Run("does not affect dedup", func(t *testing.T) {
+		dup := "vless://uuid1@host1.example.com:443?security=tls&sni=host1.example.com#Node+1"
+		uris := []string{dup, "vless://uuid2@host2.example.com:443?security=tls&sni=host2.example.com#Node+2", dup}
+		opts := subscription.BuildOptions{Interval: "5m", Tolerance: 100, TestURL: testURL, ConnectTimeout: "3s"}
+		plan, err := subscription.BuildOutbounds("sub", uris, opts)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(plan.NodeOutbounds) != 2 {
+			t.Errorf("NodeOutbounds len: got %d want 2", len(plan.NodeOutbounds))
+		}
+	})
+}
+
+func marshalToMap(t *testing.T, v any) map[string]any {
+	t.Helper()
+	data, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	return m
+}
+
 func TestBuildOutbounds_TLSBlock(t *testing.T) {
 	uris := []string{
 		"vless://uuid@server.example.com:443?security=tls&sni=server.example.com&fp=chrome#TLS+Node",
 	}
-	plan, err := subscription.BuildOutbounds("sub", uris, "5m", 100, testURL)
+	plan, err := subscription.BuildOutbounds("sub", uris, buildOpts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -214,7 +304,7 @@ func TestBuildOutbounds_RealityBlock(t *testing.T) {
 	uris := []string{
 		"vless://uuid@server.example.com:8443?security=reality&pbk=mypubkey&sid=myshortid&sni=www.example.com#Reality+Node",
 	}
-	plan, err := subscription.BuildOutbounds("sub", uris, "5m", 100, testURL)
+	plan, err := subscription.BuildOutbounds("sub", uris, buildOpts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -240,7 +330,7 @@ func TestBuildOutbounds_WSTransport(t *testing.T) {
 	uris := []string{
 		"vless://uuid@server.example.com:443?security=tls&sni=cdn.example.com&type=ws&path=%2Fws&host=cdn.example.com#WS+Node",
 	}
-	plan, err := subscription.BuildOutbounds("sub", uris, "5m", 100, testURL)
+	plan, err := subscription.BuildOutbounds("sub", uris, buildOpts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -277,7 +367,7 @@ func TestBuildOutbounds_GRPCTransport(t *testing.T) {
 	uris := []string{
 		"vless://uuid@server.example.com:443?security=tls&type=grpc&serviceName=myGRPC#GRPC+Node",
 	}
-	plan, err := subscription.BuildOutbounds("sub", uris, "5m", 100, testURL)
+	plan, err := subscription.BuildOutbounds("sub", uris, buildOpts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -304,7 +394,7 @@ func TestBuildOutbounds_XHTTPTransport(t *testing.T) {
 		uris := []string{
 			"vless://uuid@server.example.com:443?security=tls&sni=server.example.com&type=xhttp&path=%2Fpath#XHTTP+Node",
 		}
-		plan, err := subscription.BuildOutbounds("sub", uris, "5m", 100, testURL)
+		plan, err := subscription.BuildOutbounds("sub", uris, buildOpts)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -340,7 +430,7 @@ func TestBuildOutbounds_XHTTPTransport(t *testing.T) {
 		uris := []string{
 			"vless://uuid@server.example.com:443?security=tls&sni=server.example.com&type=xhttp&mode=stream-up&alpn=h3#XHTTP+Node",
 		}
-		plan, err := subscription.BuildOutbounds("sub", uris, "5m", 100, testURL)
+		plan, err := subscription.BuildOutbounds("sub", uris, buildOpts)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -369,7 +459,7 @@ func TestBuildOutbounds_DeduplicatesIdenticalNodes(t *testing.T) {
 		dup,
 		dup,
 	}
-	plan, err := subscription.BuildOutbounds("default", uris, "5m", 100, testURL)
+	plan, err := subscription.BuildOutbounds("default", uris, buildOpts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -404,7 +494,7 @@ func TestBuildOutbounds_DeduplicationKeepsDistinctNodes(t *testing.T) {
 		"vless://uuid2@host2.example.com:443?security=tls&sni=host2.example.com#Node+2",
 		"vless://uuid3@host3.example.com:8443?security=reality&pbk=abc123#Node+3",
 	}
-	plan, err := subscription.BuildOutbounds("default", uris, "5m", 100, testURL)
+	plan, err := subscription.BuildOutbounds("default", uris, buildOpts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -446,7 +536,7 @@ func TestBuildOutbounds_DeduplicationIgnoresStableHash(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			plan, err := subscription.BuildOutbounds("sub", tc.uris, "5m", 100, testURL)
+			plan, err := subscription.BuildOutbounds("sub", tc.uris, buildOpts)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -470,7 +560,7 @@ func TestBuildOutbounds_DeduplicationIgnoresStableHash(t *testing.T) {
 }
 
 func TestBuildOutbounds_NoURIs(t *testing.T) {
-	_, err := subscription.BuildOutbounds("sub", nil, "5m", 100, testURL)
+	_, err := subscription.BuildOutbounds("sub", nil, buildOpts)
 	if err == nil {
 		t.Error("expected error for empty URI list, got nil")
 	}
@@ -478,7 +568,7 @@ func TestBuildOutbounds_NoURIs(t *testing.T) {
 
 func TestBuildOutbounds_InvalidURI(t *testing.T) {
 	uris := []string{"not-a-vless-uri"}
-	_, err := subscription.BuildOutbounds("sub", uris, "5m", 100, testURL)
+	_, err := subscription.BuildOutbounds("sub", uris, buildOpts)
 	if err == nil {
 		t.Error("expected error for invalid URI, got nil")
 	}
@@ -488,7 +578,7 @@ func TestBuildOutbounds_PacketEncoding(t *testing.T) {
 	uris := []string{
 		"vless://uuid@server.example.com:443?security=tls#Node",
 	}
-	plan, err := subscription.BuildOutbounds("sub", uris, "5m", 100, testURL)
+	plan, err := subscription.BuildOutbounds("sub", uris, buildOpts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -503,7 +593,7 @@ func TestBuildOutbounds_JSONMarshal(t *testing.T) {
 	uris := []string{
 		"vless://uuid@server.example.com:443?security=tls&sni=server.example.com#Test+Node",
 	}
-	plan, err := subscription.BuildOutbounds("sub", uris, "5m", 100, testURL)
+	plan, err := subscription.BuildOutbounds("sub", uris, buildOpts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -532,7 +622,7 @@ func TestBuildOutbounds_GroupsInterruptExistConnections(t *testing.T) {
 		"vless://uuid1@host1.example.com:443?security=tls&sni=host1.example.com#Node+1",
 		"vless://uuid2@host2.example.com:443?security=tls&sni=host2.example.com#Node+2",
 	}
-	plan, err := subscription.BuildOutbounds("sub", uris, "5m", 100, testURL)
+	plan, err := subscription.BuildOutbounds("sub", uris, buildOpts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

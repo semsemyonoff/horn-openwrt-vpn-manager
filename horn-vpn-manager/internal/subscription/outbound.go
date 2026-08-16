@@ -58,6 +58,9 @@ type VLESSOutbound struct {
 	PacketEncoding string             `json:"packet_encoding,omitempty"`
 	TLS            *OutboundTLS       `json:"tls,omitempty"`
 	Transport      *OutboundTransport `json:"transport,omitempty"`
+	// ConnectTimeout is a sing-box dial field. A failing dial otherwise hangs
+	// for the OS default, delaying any fallback switch by the same amount.
+	ConnectTimeout string `json:"connect_timeout,omitempty"`
 }
 
 // OutboundTLS is the TLS block for a sing-box VLESS outbound.
@@ -166,6 +169,20 @@ type SelectorOutbound struct {
 	InterruptExistConnections bool     `json:"interrupt_exist_connections"`
 }
 
+// BuildOptions carries the non-identifying inputs of BuildOutbounds. They are
+// grouped rather than passed positionally because Interval and ConnectTimeout
+// are adjacent duration strings and would be trivial to transpose.
+type BuildOptions struct {
+	// Interval is the urltest probe interval; empty means defaultInterval.
+	Interval string
+	// Tolerance is the urltest switch tolerance in ms; zero means defaultTolerance.
+	Tolerance int
+	// TestURL is the urltest probe URL.
+	TestURL string
+	// ConnectTimeout is set on every node outbound; empty omits the field.
+	ConnectTimeout string
+}
+
 // BuildOutbounds generates the sing-box outbound configuration for a subscription
 // from its VLESS URIs. The id parameter is the stable subscription key used to
 // derive outbound tags.
@@ -173,15 +190,17 @@ type SelectorOutbound struct {
 // For a single node, one VLESSOutbound is produced with tag "<id>-single".
 // For multiple nodes, per-node outbounds tagged "<id>-node-<hash>" are produced
 // alongside a urltest group "<id>-auto" and a selector group "<id>-manual".
-func BuildOutbounds(id string, uris []string, interval string, tolerance int, testURL string) (*OutboundPlan, error) {
+func BuildOutbounds(id string, uris []string, opts BuildOptions) (*OutboundPlan, error) {
 	if len(uris) == 0 {
 		return nil, fmt.Errorf("no URIs for subscription %q", id)
 	}
 
 	// Apply defaults matching legacy shell behavior.
+	interval := opts.Interval
 	if interval == "" {
 		interval = defaultInterval
 	}
+	tolerance := opts.Tolerance
 	if tolerance == 0 {
 		tolerance = defaultTolerance
 	}
@@ -206,7 +225,7 @@ func BuildOutbounds(id string, uris []string, interval string, tolerance int, te
 	if len(nodes) == 1 {
 		// Single-node mode: use <id>-single tag directly.
 		tag := id + "-single"
-		ob := nodeToOutbound(nodes[0], tag)
+		ob := nodeToOutbound(nodes[0], tag, opts.ConnectTimeout)
 		plan.NodeOutbounds = append(plan.NodeOutbounds, ob)
 		plan.FinalTag = tag
 		plan.TagNames[tag] = nodes[0].Name
@@ -230,7 +249,7 @@ func BuildOutbounds(id string, uris []string, interval string, tolerance int, te
 		seenOutbounds := make(map[string]struct{}, len(nodes))
 		duplicates := 0
 		for _, n := range nodes {
-			ob := nodeToOutbound(n, "")
+			ob := nodeToOutbound(n, "", opts.ConnectTimeout)
 			key, err := json.Marshal(ob)
 			if err != nil {
 				return nil, fmt.Errorf("marshalling outbound for subscription %q: %w", id, err)
@@ -269,7 +288,7 @@ func BuildOutbounds(id string, uris []string, interval string, tolerance int, te
 			Type:                      "urltest",
 			Tag:                       autoTag,
 			Outbounds:                 nodeTags,
-			URL:                       testURL,
+			URL:                       opts.TestURL,
 			Interval:                  interval,
 			Tolerance:                 tolerance,
 			InterruptExistConnections: true,
@@ -295,14 +314,16 @@ func BuildOutbounds(id string, uris []string, interval string, tolerance int, te
 }
 
 // nodeToOutbound converts a parsed VLESS node into a typed sing-box VLESSOutbound.
-func nodeToOutbound(n *vless.Node, tag string) *VLESSOutbound {
+// An empty connectTimeout omits the connect_timeout field entirely.
+func nodeToOutbound(n *vless.Node, tag, connectTimeout string) *VLESSOutbound {
 	ob := &VLESSOutbound{
-		Type:       "vless",
-		Tag:        tag,
-		Server:     n.Server,
-		ServerPort: n.Port,
-		UUID:       n.UUID,
-		Flow:       n.Flow,
+		Type:           "vless",
+		Tag:            tag,
+		Server:         n.Server,
+		ServerPort:     n.Port,
+		UUID:           n.UUID,
+		Flow:           n.Flow,
+		ConnectTimeout: connectTimeout,
 	}
 	// packet_encoding is incompatible with XTLS flow (e.g. xtls-rprx-vision).
 	// Only set it when flow is absent.
