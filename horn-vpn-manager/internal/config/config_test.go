@@ -456,6 +456,264 @@ func TestValidateSubscriptions_disabled_without_source(t *testing.T) {
 	}
 }
 
+func TestLoad_subscription_fallback(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	writeFile(t, path, `{
+		"subscriptions": {
+			"personal": {
+				"name": "Personal",
+				"url": "https://example.com/personal",
+				"default": true,
+				"fallback": {
+					"subscriptions": ["backup", "spare"],
+					"blacklist_timeout": "1m"
+				}
+			},
+			"backup": {"name": "Backup", "url": "https://example.com/backup"},
+			"spare": {"name": "Spare", "url": "https://example.com/spare"}
+		}
+	}`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	fb := cfg.Subscriptions["personal"].Fallback
+	if fb == nil {
+		t.Fatal("fallback not parsed")
+	}
+	if got := strings.Join(fb.Subscriptions, ","); got != "backup,spare" {
+		t.Errorf("chain order = %q, want \"backup,spare\"", got)
+	}
+	if fb.BlacklistTimeout != "1m" {
+		t.Errorf("blacklist_timeout = %q", fb.BlacklistTimeout)
+	}
+	if err := cfg.ValidateSubscriptions(); err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}
+
+func TestSubscription_fallback_omitted_when_absent(t *testing.T) {
+	data, err := json.Marshal(&Subscription{Name: "S1", URL: "https://example.com/s1"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(data), "fallback") {
+		t.Errorf("absent fallback must be omitted, got %s", data)
+	}
+}
+
+func TestValidateSubscriptions_fallback(t *testing.T) {
+	f := false
+	// Every case declares the chain on "s1"; "backup" and "off" exist as targets.
+	cases := []struct {
+		name    string
+		sub     *Subscription
+		wantErr string
+	}{
+		{
+			name: "single backup",
+			sub:  &Subscription{Name: "S1", URL: "https://example.com/s1", Default: true, Fallback: &Fallback{Subscriptions: []string{"backup"}}},
+		},
+		{
+			name: "backup on a non-default subscription",
+			sub:  &Subscription{Name: "S1", URL: "https://example.com/s1", Fallback: &Fallback{Subscriptions: []string{"backup"}}},
+		},
+		{
+			name: "inline nodes with a chain",
+			sub:  &Subscription{Name: "S1", Default: true, Nodes: []string{testNodeURI}, Fallback: &Fallback{Subscriptions: []string{"backup"}}},
+		},
+		{
+			name: "valid blacklist_timeout",
+			sub:  &Subscription{Name: "S1", URL: "https://example.com/s1", Default: true, Fallback: &Fallback{Subscriptions: []string{"backup"}, BlacklistTimeout: "90s"}},
+		},
+		{
+			name:    "empty chain",
+			sub:     &Subscription{Name: "S1", URL: "https://example.com/s1", Default: true, Fallback: &Fallback{}},
+			wantErr: "empty fallback chain",
+		},
+		{
+			name:    "empty id in chain",
+			sub:     &Subscription{Name: "S1", URL: "https://example.com/s1", Default: true, Fallback: &Fallback{Subscriptions: []string{""}}},
+			wantErr: "empty id in its fallback chain",
+		},
+		{
+			name:    "self reference",
+			sub:     &Subscription{Name: "S1", URL: "https://example.com/s1", Default: true, Fallback: &Fallback{Subscriptions: []string{"s1"}}},
+			wantErr: "lists itself",
+		},
+		{
+			name:    "duplicate backup",
+			sub:     &Subscription{Name: "S1", URL: "https://example.com/s1", Default: true, Fallback: &Fallback{Subscriptions: []string{"backup", "backup"}}},
+			wantErr: `lists "backup" twice`,
+		},
+		{
+			name:    "unknown backup",
+			sub:     &Subscription{Name: "S1", URL: "https://example.com/s1", Default: true, Fallback: &Fallback{Subscriptions: []string{"ghost"}}},
+			wantErr: `unknown subscription "ghost"`,
+		},
+		{
+			name:    "disabled backup",
+			sub:     &Subscription{Name: "S1", URL: "https://example.com/s1", Default: true, Fallback: &Fallback{Subscriptions: []string{"off"}}},
+			wantErr: `disabled subscription "off"`,
+		},
+		{
+			name:    "invalid blacklist_timeout",
+			sub:     &Subscription{Name: "S1", URL: "https://example.com/s1", Default: true, Fallback: &Fallback{Subscriptions: []string{"backup"}, BlacklistTimeout: "1 minute"}},
+			wantErr: "invalid fallback blacklist_timeout",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			subs := map[string]*Subscription{
+				"s1":     tc.sub,
+				"backup": {Name: "Backup", URL: "https://example.com/backup"},
+				"off":    {Name: "Off", URL: "https://example.com/off", Enabled: &f},
+			}
+			if !tc.sub.Default {
+				subs["main"] = &Subscription{Name: "Main", URL: "https://example.com/main", Default: true}
+			}
+			cfg := &Config{Subscriptions: subs}
+
+			err := cfg.ValidateSubscriptions()
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error containing %q", tc.wantErr)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error = %v, want it to contain %q", err, tc.wantErr)
+			}
+			if !strings.Contains(err.Error(), `"s1"`) {
+				t.Errorf("error should name the declaring subscription: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateSubscriptions_fallback_chain_order_preserved(t *testing.T) {
+	cfg := &Config{
+		Subscriptions: map[string]*Subscription{
+			"main": {
+				Name: "Main", URL: "https://example.com/main", Default: true,
+				Fallback: &Fallback{Subscriptions: []string{"b2", "b1"}},
+			},
+			"b1": {Name: "B1", URL: "https://example.com/b1"},
+			"b2": {Name: "B2", URL: "https://example.com/b2"},
+		},
+	}
+	if err := cfg.ValidateSubscriptions(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := strings.Join(cfg.Subscriptions["main"].Fallback.Subscriptions, ","); got != "b2,b1" {
+		t.Errorf("validation must not reorder the chain, got %q", got)
+	}
+}
+
+func TestValidateSubscriptions_fallback_disabled_declarer_unvalidated(t *testing.T) {
+	f := false
+	cfg := &Config{
+		Subscriptions: map[string]*Subscription{
+			"main": {Name: "Main", URL: "https://example.com/main", Default: true},
+			"off": {
+				Name: "Off", URL: "https://example.com/off", Enabled: &f,
+				Fallback: &Fallback{Subscriptions: []string{"ghost", "ghost"}},
+			},
+		},
+	}
+	if err := cfg.ValidateSubscriptions(); err != nil {
+		t.Fatalf("a disabled subscription's chain is never generated and must not be validated: %v", err)
+	}
+}
+
+func TestValidateSubscriptions_fallback_cycles(t *testing.T) {
+	f := false
+	cases := []struct {
+		name    string
+		subs    map[string]*Subscription
+		wantErr string
+	}{
+		{
+			name: "two-node cycle",
+			subs: map[string]*Subscription{
+				"a": {Name: "A", URL: "https://example.com/a", Default: true, Fallback: &Fallback{Subscriptions: []string{"b"}}},
+				"b": {Name: "B", URL: "https://example.com/b", Fallback: &Fallback{Subscriptions: []string{"a"}}},
+			},
+			wantErr: "a -> b -> a",
+		},
+		{
+			name: "three-node cycle",
+			subs: map[string]*Subscription{
+				"a": {Name: "A", URL: "https://example.com/a", Default: true, Fallback: &Fallback{Subscriptions: []string{"b"}}},
+				"b": {Name: "B", URL: "https://example.com/b", Fallback: &Fallback{Subscriptions: []string{"c"}}},
+				"c": {Name: "C", URL: "https://example.com/c", Fallback: &Fallback{Subscriptions: []string{"a"}}},
+			},
+			wantErr: "a -> b -> c -> a",
+		},
+		{
+			name: "cycle not involving the entry point",
+			subs: map[string]*Subscription{
+				"a": {Name: "A", URL: "https://example.com/a", Default: true, Fallback: &Fallback{Subscriptions: []string{"b"}}},
+				"b": {Name: "B", URL: "https://example.com/b", Fallback: &Fallback{Subscriptions: []string{"c"}}},
+				"c": {Name: "C", URL: "https://example.com/c", Fallback: &Fallback{Subscriptions: []string{"b"}}},
+			},
+			wantErr: "b -> c -> b",
+		},
+		{
+			name: "linear chain is not a cycle",
+			subs: map[string]*Subscription{
+				"a": {Name: "A", URL: "https://example.com/a", Default: true, Fallback: &Fallback{Subscriptions: []string{"b"}}},
+				"b": {Name: "B", URL: "https://example.com/b", Fallback: &Fallback{Subscriptions: []string{"c"}}},
+				"c": {Name: "C", URL: "https://example.com/c"},
+			},
+		},
+		{
+			name: "diamond is not a cycle",
+			subs: map[string]*Subscription{
+				"a": {Name: "A", URL: "https://example.com/a", Default: true, Fallback: &Fallback{Subscriptions: []string{"b", "c"}}},
+				"b": {Name: "B", URL: "https://example.com/b", Fallback: &Fallback{Subscriptions: []string{"d"}}},
+				"c": {Name: "C", URL: "https://example.com/c", Fallback: &Fallback{Subscriptions: []string{"d"}}},
+				"d": {Name: "D", URL: "https://example.com/d"},
+			},
+		},
+		{
+			name: "cycle broken by a disabled subscription",
+			subs: map[string]*Subscription{
+				"a": {Name: "A", URL: "https://example.com/a", Default: true, Fallback: &Fallback{Subscriptions: []string{"b"}}},
+				"b": {Name: "B", URL: "https://example.com/b", Enabled: &f, Fallback: &Fallback{Subscriptions: []string{"a"}}},
+			},
+			// "a" referencing the disabled "b" is rejected by validateFallback,
+			// with the more specific message.
+			wantErr: `disabled subscription "b"`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &Config{Subscriptions: tc.subs}
+			err := cfg.ValidateSubscriptions()
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error containing %q", tc.wantErr)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error = %v, want it to contain %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestLoad_manual_file_only_routing(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")

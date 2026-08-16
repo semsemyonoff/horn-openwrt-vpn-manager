@@ -421,16 +421,30 @@ change, and the reasoning belongs in `README.md` next to the `tolerance` field.
 - Modify: `horn-vpn-manager/internal/config/config.go`
 - Modify: `horn-vpn-manager/internal/config/config_test.go`
 
-- [ ] add the `Fallback` struct and `Fallback *Fallback` with tag `json:"fallback,omitempty"` on
+- [x] add the `Fallback` struct and `Fallback *Fallback` with tag `json:"fallback,omitempty"` on
       `Subscription`
-- [ ] allow `fallback` on any enabled subscription
-- [ ] validate each referenced id: exists, enabled, not the declaring subscription itself
-- [ ] reject duplicate ids within a chain and an empty `subscriptions` list
-- [ ] walk the chain graph and reject cycles of any length (`a → b → a`, `a → b → c → a`)
-- [ ] validate `blacklist_timeout` with `time.ParseDuration` when non-empty
-- [ ] write tests for every rejection path, each asserting an actionable message
-- [ ] write tests for the valid case, including a two-backup chain preserving order
-- [ ] run `go test ./...` — must pass before next task
+- [x] allow `fallback` on any enabled subscription
+- [x] validate each referenced id: exists, enabled, not the declaring subscription itself
+      — ⚠️ **scope note:** a chain declared on a **disabled** subscription is left unvalidated, the
+      same way `validateSource` skips a disabled subscription with no source: it is never generated,
+      so rejecting the config over it would block an otherwise healthy run
+- [x] reject duplicate ids within a chain and an empty `subscriptions` list (also an empty id string)
+- [x] walk the chain graph and reject cycles of any length (`a → b → a`, `a → b → c → a`) —
+      `validateFallbackCycles()` runs a three-colour DFS over enabled subscriptions, seeded in sorted
+      id order so the reported cycle path does not depend on map iteration order. References that
+      `validateFallback` already rejects (unknown, disabled) are skipped so the more specific error
+      wins.
+- [x] validate `blacklist_timeout` with `time.ParseDuration` when non-empty
+- [x] write tests for every rejection path, each asserting an actionable message
+      (`TestValidateSubscriptions_fallback`: empty chain, empty id, self-reference, duplicate,
+      unknown, disabled, invalid `blacklist_timeout`; `..._fallback_cycles`: 2-node, 3-node, cycle
+      not touching the DFS entry point, plus linear-chain and diamond negatives)
+- [x] write tests for the valid case, including a two-backup chain preserving order
+      (`TestLoad_subscription_fallback`, `..._fallback_chain_order_preserved`,
+      `TestSubscription_fallback_omitted_when_absent`,
+      `TestValidateSubscriptions_fallback_disabled_declarer_unvalidated`)
+- [x] run `go test ./...` — passes; `gofmt -l .` clean; `golangci-lint run` reports the same 10
+      pre-existing `goconst` issues, none new
 
 ### Task 7: Generate `fallback` outbounds and rewire the tags that point at them
 
