@@ -376,6 +376,10 @@ func (r *Runner) Run(ctx context.Context) error { //nolint:gocognit,gocyclo // o
 		return errors.New("default subscription produced no outbound tag; check that the default subscription has either a url or inline nodes configured")
 	}
 
+	if tag := r.applyFallbackChains(plans, defaultID, tagNames); tag != "" {
+		defaultFinalTag = tag
+	}
+
 	// Render the final sing-box config from the template and all outbound plans.
 	templatePath := r.TemplatePath
 	if templatePath == "" {
@@ -443,6 +447,90 @@ func (r *Runner) Run(ctx context.Context) error { //nolint:gocognit,gocyclo // o
 	return nil
 }
 
+// applyFallbackChains generates a fallback group for every enabled subscription
+// that declares a chain and produced a plan, storing it on that plan and
+// registering its tag name. A non-default subscription's route rules are
+// retargeted at its group; for the default subscription the group tag is
+// returned so it can become route.final. Returns "" when the default
+// subscription got no group.
+//
+// A backup that produced no plan (download or build failure) is dropped from the
+// chain with a warning rather than aborting the run, matching the skip-and-continue
+// policy applied to failed subscriptions. When every backup is gone the group is
+// not emitted at all and the subscription keeps its own final tag.
+func (r *Runner) applyFallbackChains(plans []*OutboundPlan, defaultID string, tagNames map[string]string) string {
+	byID := make(map[string]*OutboundPlan, len(plans))
+	for _, plan := range plans {
+		byID[plan.ID] = plan
+	}
+
+	// Which subscriptions end up with a group has to be settled before any
+	// reference is resolved: a backup declaring a chain of its own contributes
+	// its fallback tag, not its bare final tag. Config validation rejects
+	// cycles, so a single resolution pass is enough.
+	ids := slices.Sorted(maps.Keys(r.Cfg.Subscriptions))
+	chains := make(map[string][]string, len(ids))
+	for _, id := range ids {
+		sub := r.Cfg.Subscriptions[id]
+		if sub == nil || sub.Fallback == nil || !sub.IsEnabled() || byID[id] == nil {
+			continue
+		}
+		backups := make([]string, 0, len(sub.Fallback.Subscriptions))
+		for _, ref := range sub.Fallback.Subscriptions {
+			if byID[ref] == nil {
+				logx.Warn("Subscription %s: fallback backup %q produced no outbounds, dropping it from the chain", id, ref)
+				continue
+			}
+			backups = append(backups, ref)
+		}
+		if len(backups) == 0 {
+			logx.Warn("Subscription %s: every fallback backup failed, keeping %s as its outbound", id, byID[id].FinalTag)
+			continue
+		}
+		chains[id] = backups
+	}
+
+	var defaultTag string
+	for _, id := range ids {
+		backups, ok := chains[id]
+		if !ok {
+			continue
+		}
+		plan := byID[id]
+		tag := fallbackTag(id)
+
+		outbounds := make([]string, 0, len(backups)+1)
+		outbounds = append(outbounds, plan.FinalTag)
+		for _, ref := range backups {
+			if _, nested := chains[ref]; nested {
+				outbounds = append(outbounds, fallbackTag(ref))
+				continue
+			}
+			outbounds = append(outbounds, byID[ref].FinalTag)
+		}
+
+		plan.FallbackGroup = &FallbackOutbound{
+			Type:                      "fallback",
+			Tag:                       tag,
+			Outbounds:                 outbounds,
+			BlacklistTimeout:          r.Cfg.Subscriptions[id].Fallback.BlacklistTimeout,
+			InterruptExistConnections: true,
+		}
+		name := id + " (fallback)"
+		plan.TagNames[tag] = name
+		tagNames[tag] = name
+
+		logx.Detail("  Subscription %s: fallback chain: %s -> [%s]", id, tag, strings.Join(outbounds, ", "))
+
+		if id == defaultID {
+			defaultTag = tag
+			continue
+		}
+		RetargetRouteRules(plan.RouteRules, tag)
+	}
+	return defaultTag
+}
+
 // collectSingboxParts flattens outbound plans into the two slices expected by
 // singbox.RenderConfig: all outbounds (nodes, urltest, selector) and all route rules.
 func collectSingboxParts(plans []*OutboundPlan) (outbounds, routeRules []any) {
@@ -455,6 +543,9 @@ func collectSingboxParts(plans []*OutboundPlan) (outbounds, routeRules []any) {
 		}
 		if plan.SelectorGroup != nil {
 			outbounds = append(outbounds, plan.SelectorGroup)
+		}
+		if plan.FallbackGroup != nil {
+			outbounds = append(outbounds, plan.FallbackGroup)
 		}
 		for _, r := range plan.RouteRules {
 			routeRules = append(routeRules, r)

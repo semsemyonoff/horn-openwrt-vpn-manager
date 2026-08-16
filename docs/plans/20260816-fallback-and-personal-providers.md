@@ -461,34 +461,41 @@ apply it per subscription.
 - Modify: `horn-vpn-manager/internal/subscription/subscription_test.go`
 - Modify: `horn-vpn-manager/internal/subscription/route_test.go`
 
-- [ ] add the `FallbackOutbound` type, with `InterruptExistConnections` set to `true` per Task 2
-- [ ] add an id→plan association: either an `ID` field on `OutboundPlan` or a
-      `map[string]*OutboundPlan` built from `defaultID` and each `subResult.id` — the current
-      `plans []*OutboundPlan` (`:198`, `:289`, `:343`) carries no id and cannot resolve references
-- [ ] for every subscription declaring a chain, emit a group tagged `<id>-fallback` whose outbounds
+- [x] add the `FallbackOutbound` type, with `InterruptExistConnections` set to `true` per Task 2
+- [x] add an id→plan association: an `ID` field on `OutboundPlan`, set by `BuildOutbounds`, from
+      which `applyFallbackChains` builds the `map[string]*OutboundPlan` it needs
+- [x] for every subscription declaring a chain, emit a group tagged `<id>-fallback` whose outbounds
       are that subscription's own `FinalTag` followed by each referenced subscription's `FinalTag`
       in declared order
-- [ ] resolve references **after** every plan exists, so a backup that itself declares a chain
-      contributes its `<id>-fallback` tag rather than its bare final tag
-- [ ] when the declaring subscription is the default, pass the fallback tag as `defaultFinalTag` to
+- [x] resolve references **after** every plan exists, so a backup that itself declares a chain
+      contributes its `<id>-fallback` tag rather than its bare final tag — `applyFallbackChains`
+      first settles which subscriptions get a group, then resolves member tags in a second pass;
+      config validation rejects cycles, so one resolution pass suffices. Subscriptions are walked in
+      sorted id order so log output does not depend on map iteration order.
+- [x] when the declaring subscription is the default, pass the fallback tag as `defaultFinalTag` to
       `singbox.RenderConfig`; otherwise rewrite that subscription's generated route rules to target
-      the fallback tag instead of its plain `FinalTag`
-- [ ] append the groups in `collectSingboxParts` (`:425`)
-- [ ] register `plan.TagNames[fallbackTag]` so rpcd `get_sb_status` and `test_url` (which reads
+      the fallback tag instead of its plain `FinalTag` (new `RetargetRouteRules` in `route.go`)
+- [x] append the groups in `collectSingboxParts` (`:425`)
+- [x] register `plan.TagNames[fallbackTag]` so rpcd `get_sb_status` and `test_url` (which reads
       `subs-tags.json`, backend `:379`, `:392-398`) show a name rather than a bare tag
-- [ ] when a referenced backup produced no plan, drop it from the chain with a `logx.Warn` and
+- [x] when a referenced backup produced no plan, drop it from the chain with a `logx.Warn` and
       continue — do **not** abort, matching the existing skip-and-continue policy at `:337-345`
-- [ ] handle the degenerate case where every backup failed: emit no fallback group and leave the
+- [x] handle the degenerate case where every backup failed: emit no fallback group and leave the
       subscription's tag as it was, logging why
-- [ ] emit `blacklist_timeout` only when configured, letting sing-box apply its own default
-- [ ] write tests: single-node primary + multi-node backup resolve to `<id>-single` / `<id>-manual`;
-      order preserved; tag name registered
-- [ ] write tests for a chain on the **default** subscription (`route.final` becomes the fallback
+- [x] emit `blacklist_timeout` only when configured, letting sing-box apply its own default
+- [x] write tests: single-node primary + multi-node backup resolve to `<id>-single` / `<id>-manual`;
+      order preserved; tag name registered (`TestRunner_Run_fallback_on_default`,
+      `TestFallbackOutbound_JSONMarshal`, `TestBuildOutbounds_PlanCarriesID`, `TestRetargetRouteRules`)
+- [x] write tests for a chain on the **default** subscription (`route.final` becomes the fallback
       tag) and on a **non-default** one (its route rules retarget, `route.final` untouched)
-- [ ] write a test for a backup that itself declares a chain (nested resolution)
-- [ ] write tests for the degraded chain, the all-backups-failed case, and unchanged behavior when
-      `fallback` is absent
-- [ ] run `go test ./...` — must pass before next task
+      (`TestRunner_Run_fallback_on_default`, `..._fallback_on_non_default`)
+- [x] write a test for a backup that itself declares a chain (nested resolution)
+      (`TestRunner_Run_fallback_nested`)
+- [x] write tests for the degraded chain, the all-backups-failed case, and unchanged behavior when
+      `fallback` is absent (`TestRunner_Run_fallback_degraded`, `..._fallback_all_backups_failed`,
+      `..._no_fallback_unchanged`)
+- [x] run `go test ./...` — passes; `gofmt -l .` clean; `golangci-lint run` reports the same 10
+      pre-existing `goconst` issues as `HEAD`, none new
 
 ### Task 8: Enrich the apply-time error for builds without `fallback` support
 

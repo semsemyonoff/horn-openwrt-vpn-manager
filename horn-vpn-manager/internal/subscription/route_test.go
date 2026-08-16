@@ -133,6 +133,33 @@ func TestBuildRouteRules_MultiNodeOutbound(t *testing.T) {
 	}
 }
 
+// TestRetargetRouteRules verifies every rule is repointed, which is what a
+// fallback chain on a non-default subscription needs.
+func TestRetargetRouteRules(t *testing.T) {
+	route := &config.SubscriptionRoute{
+		Domains: []string{"corp.example.com"},
+		IPCIDRs: []string{"10.0.0.0/8"},
+	}
+	rules := subscription.BuildRouteRules(route, "corp-manual")
+	if len(rules) != 2 {
+		t.Fatalf("expected 2 rules, got %d", len(rules))
+	}
+	subscription.RetargetRouteRules(rules, "corp-fallback")
+	for i, rule := range rules {
+		if rule.Outbound != "corp-fallback" {
+			t.Errorf("rule[%d] outbound: got %q want corp-fallback", i, rule.Outbound)
+		}
+	}
+	// Match conditions must survive the retarget untouched.
+	if len(rules[0].DomainSuffix) != 1 || len(rules[1].IPCIDR) != 1 {
+		t.Errorf("retarget altered match conditions: %+v %+v", rules[0], rules[1])
+	}
+}
+
+func TestRetargetRouteRules_NoRules(t *testing.T) {
+	subscription.RetargetRouteRules(nil, "corp-fallback") // must not panic
+}
+
 // TestBuildRouteRules_JSONShape verifies that domain and IP rules have the
 // correct JSON structure and do not cross-contaminate fields.
 func TestBuildRouteRules_JSONShape(t *testing.T) {

@@ -19,6 +19,10 @@ const (
 // OutboundPlan holds the sing-box outbound configuration generated for a single
 // subscription. It covers both node outbounds and group outbounds.
 type OutboundPlan struct {
+	// ID is the subscription key this plan was generated from. Fallback chains
+	// reference subscriptions by id, so plans must stay resolvable by it.
+	ID string
+
 	// NodeOutbounds holds individual VLESS node outbounds.
 	// Single-node: one entry tagged "<id>-single".
 	// Multi-node: entries tagged "<id>-node-<hash>".
@@ -31,6 +35,11 @@ type OutboundPlan struct {
 	// SelectorGroup is the manual-select group for multi-node subscriptions.
 	// Nil for single-node subscriptions.
 	SelectorGroup *SelectorOutbound
+
+	// FallbackGroup is the chain group generated when the subscription declares
+	// a fallback. Nil otherwise. When set it supersedes FinalTag as the tag
+	// route.final (default subscription) or the route rules point at.
+	FallbackGroup *FallbackOutbound
 
 	// FinalTag is the routing outbound tag to use in route rules:
 	// "<id>-single" for single-node, "<id>-manual" for multi-node.
@@ -169,6 +178,27 @@ type SelectorOutbound struct {
 	InterruptExistConnections bool     `json:"interrupt_exist_connections"`
 }
 
+// FallbackOutbound is a sing-box fallback outbound group: connections try each
+// outbound in order and an outbound that fails to dial is skipped for
+// BlacklistTimeout. Unlike urltest it reacts to dial failure rather than probe
+// latency, which is the only way to leave a node that still answers probes but
+// stalls under load.
+//
+// fallback is not an upstream sing-box outbound type — it exists only in the
+// extended build. A stock build rejects it at `sing-box check` time with
+// "unknown outbound type", which system.ApplySingbox surfaces before the live
+// config is replaced.
+type FallbackOutbound struct {
+	Type                      string   `json:"type"`
+	Tag                       string   `json:"tag"`
+	Outbounds                 []string `json:"outbounds"`
+	BlacklistTimeout          string   `json:"blacklist_timeout,omitempty"`
+	InterruptExistConnections bool     `json:"interrupt_exist_connections"`
+}
+
+// fallbackTag returns the generated fallback group tag for a subscription id.
+func fallbackTag(id string) string { return id + "-fallback" }
+
 // BuildOptions carries the non-identifying inputs of BuildOutbounds. They are
 // grouped rather than passed positionally because Interval and ConnectTimeout
 // are adjacent duration strings and would be trivial to transpose.
@@ -206,6 +236,7 @@ func BuildOutbounds(id string, uris []string, opts BuildOptions) (*OutboundPlan,
 	}
 
 	plan := &OutboundPlan{
+		ID:       id,
 		TagNames: make(map[string]string),
 	}
 

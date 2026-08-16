@@ -43,3 +43,13 @@ func BuildRouteRules(route *config.SubscriptionRoute, finalTag string) []*RouteR
 	}
 	return rules
 }
+
+// RetargetRouteRules points every rule at outbound. Used when a non-default
+// subscription declares a fallback chain: its rules must reach the generated
+// fallback group instead of the subscription's own final tag, which is only the
+// first member of that group.
+func RetargetRouteRules(rules []*RouteRule, outbound string) {
+	for _, r := range rules {
+		r.Outbound = outbound
+	}
+}

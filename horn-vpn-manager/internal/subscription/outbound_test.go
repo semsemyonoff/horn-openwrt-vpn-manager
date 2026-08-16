@@ -617,6 +617,68 @@ func TestBuildOutbounds_JSONMarshal(t *testing.T) {
 	}
 }
 
+func TestBuildOutbounds_PlanCarriesID(t *testing.T) {
+	uris := []string{"vless://uuid@host.example.com:443?encryption=none#Node"}
+	plan, err := subscription.BuildOutbounds("personal", uris, buildOpts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if plan.ID != "personal" {
+		t.Errorf("plan.ID: got %q want %q", plan.ID, "personal")
+	}
+}
+
+func TestFallbackOutbound_JSONMarshal(t *testing.T) {
+	cases := []struct {
+		name             string
+		blacklistTimeout string
+		wantTimeout      any // nil means the field must be absent
+	}{
+		{name: "with blacklist_timeout", blacklistTimeout: "1m", wantTimeout: "1m"},
+		{name: "without blacklist_timeout", blacklistTimeout: "", wantTimeout: nil},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			group := &subscription.FallbackOutbound{
+				Type:                      "fallback",
+				Tag:                       "primary-fallback",
+				Outbounds:                 []string{"primary-single", "backup-manual"},
+				BlacklistTimeout:          tc.blacklistTimeout,
+				InterruptExistConnections: true,
+			}
+			data, err := json.Marshal(group)
+			if err != nil {
+				t.Fatalf("marshal fallback group: %v", err)
+			}
+			var m map[string]any
+			if err := json.Unmarshal(data, &m); err != nil {
+				t.Fatalf("unmarshal fallback group: %v", err)
+			}
+			if m["type"] != "fallback" {
+				t.Errorf("type: got %v want fallback", m["type"])
+			}
+			if m["tag"] != "primary-fallback" {
+				t.Errorf("tag: got %v want primary-fallback", m["tag"])
+			}
+			outbounds, _ := m["outbounds"].([]any)
+			if len(outbounds) != 2 || outbounds[0] != "primary-single" || outbounds[1] != "backup-manual" {
+				t.Errorf("outbounds: got %v want [primary-single backup-manual]", m["outbounds"])
+			}
+			got, ok := m["blacklist_timeout"]
+			switch {
+			case tc.wantTimeout == nil && ok:
+				t.Errorf("blacklist_timeout = %v, want absent", got)
+			case tc.wantTimeout != nil && got != tc.wantTimeout:
+				t.Errorf("blacklist_timeout = %v, want %v", got, tc.wantTimeout)
+			}
+			if m["interrupt_exist_connections"] != true {
+				t.Errorf("interrupt_exist_connections = %v, want true", m["interrupt_exist_connections"])
+			}
+		})
+	}
+}
+
 func TestBuildOutbounds_GroupsInterruptExistConnections(t *testing.T) {
 	uris := []string{
 		"vless://uuid1@host1.example.com:443?security=tls&sni=host1.example.com#Node+1",
