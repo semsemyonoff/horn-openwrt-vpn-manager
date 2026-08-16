@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -183,6 +184,78 @@ func TestApplySingbox_check_failure(t *testing.T) {
 	}
 	if _, err := os.Stat(finalPath); err == nil {
 		t.Errorf("final config should not exist after check failure with no prior config")
+	}
+}
+
+// checkFailureError runs ApplySingbox against a sing-box check that fails with
+// the given output and returns the resulting error.
+func checkFailureError(t *testing.T, checkOutput string) error {
+	t.Helper()
+	dir := t.TempDir()
+	stagingPath := filepath.Join(dir, "config.json.new")
+	finalPath := filepath.Join(dir, "config.json")
+	writeFile(t, stagingPath, []byte(`{}`))
+
+	cmd := &fakeRunner{
+		runFunc: func(name string, _ ...string) ([]byte, error) {
+			if name == "sing-box" {
+				return []byte(checkOutput), fmt.Errorf("exit 1")
+			}
+			return nil, nil
+		},
+	}
+
+	err := (&OpenWrt{Cmd: cmd}).ApplySingbox(stagingPath, finalPath)
+	if err == nil {
+		t.Fatal("expected error when sing-box check fails")
+	}
+	// The failure must stay hard: no promotion, no restart.
+	if _, statErr := os.Stat(finalPath); statErr == nil {
+		t.Errorf("final config should not exist after check failure")
+	}
+	for _, call := range cmd.calls {
+		if call[0] == "/etc/init.d/sing-box" {
+			t.Errorf("sing-box restart should not be called after check failure")
+		}
+	}
+	return err
+}
+
+func TestApplySingbox_check_failure_fallback_hint(t *testing.T) {
+	cases := []string{
+		"FATAL[0000] decode config at config.json: outbound[2]: unknown outbound type: fallback",
+		"unknown type: fallback",
+		"UNKNOWN OUTBOUND TYPE: FALLBACK",
+	}
+	for _, out := range cases {
+		t.Run(out, func(t *testing.T) {
+			err := checkFailureError(t, out)
+			if !strings.Contains(err.Error(), "extended build") {
+				t.Errorf("error = %q, want extended-build hint", err)
+			}
+			// The original sing-box output must survive alongside the hint.
+			if !strings.Contains(err.Error(), strings.TrimSpace(out)) {
+				t.Errorf("error = %q, want original check output preserved", err)
+			}
+		})
+	}
+}
+
+func TestApplySingbox_check_failure_unrelated_not_hinted(t *testing.T) {
+	cases := map[string]string{
+		"no fallback mentioned": "decode config: outbound[0]: missing server address",
+		// A fallback group rejected for some other reason is a real config bug,
+		// not a missing extended build.
+		"fallback but known type": `decode config: outbound[2]: fallback: empty outbounds`,
+		"unknown other type":      "decode config: outbound[1]: unknown outbound type: hysteria2",
+	}
+	for name, out := range cases {
+		t.Run(name, func(t *testing.T) {
+			err := checkFailureError(t, out)
+			if strings.Contains(err.Error(), "extended build") {
+				t.Errorf("error = %q, want no extended-build hint", err)
+			}
+		})
 	}
 }
 

@@ -92,11 +92,30 @@ func (o *OpenWrt) ApplyDomains(cacheFile, dnsmasqDir string) error {
 	return nil
 }
 
+// singboxFallbackHint explains a sing-box check failure caused by the generated
+// "fallback" outbound group: it is not an upstream outbound type and exists only
+// in the extended build.
+const singboxFallbackHint = `"fallback" outbounds require the sing-box extended build (sing-box-extended); ` +
+	`install it, or remove the "fallback" chains from config.json`
+
+// isUnknownFallbackType reports whether msg is sing-box rejecting the "fallback"
+// outbound type itself, as opposed to any other complaint about a fallback group.
+func isUnknownFallbackType(msg string) bool {
+	low := strings.ToLower(msg)
+	if !strings.Contains(low, "fallback") {
+		return false
+	}
+	return strings.Contains(low, "unknown outbound type") || strings.Contains(low, "unknown type")
+}
+
 // ApplySingbox validates the config at stagingPath with sing-box check, then
 // atomically renames it to finalPath and restarts sing-box. On validation
 // failure the staging file is removed and finalPath is left untouched.
 // On restart failure, the previous config is restored from a backup so the
 // router is not left in an inconsistent state.
+//
+// This check only runs on a real apply: --dry-run and --debug never reach here,
+// so it does not replace verifying a fallback-using config on the device.
 func (o *OpenWrt) ApplySingbox(stagingPath, finalPath string) error {
 	logx.Info("Validating sing-box config...")
 	out, err := o.Cmd.Run("sing-box", "check", "-c", stagingPath)
@@ -104,6 +123,10 @@ func (o *OpenWrt) ApplySingbox(stagingPath, finalPath string) error {
 		_ = os.Remove(stagingPath)
 		msg := strings.TrimSpace(string(out))
 		logx.Err("sing-box config validation failed: %s", msg)
+		if isUnknownFallbackType(msg) {
+			logx.Err("%s", singboxFallbackHint)
+			return fmt.Errorf("sing-box check failed: %s: %s: %w", msg, singboxFallbackHint, err)
+		}
 		return fmt.Errorf("sing-box check failed: %s: %w", msg, err)
 	}
 	logx.OK("sing-box config validation passed")

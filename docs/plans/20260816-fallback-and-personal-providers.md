@@ -507,14 +507,21 @@ process execution into the pure-rendering `internal/singbox` package.
 - Modify: `horn-vpn-manager/internal/system/system.go`
 - Modify: `horn-vpn-manager/internal/system/system_test.go`
 
-- [ ] when a check failure mentions an unknown `fallback` outbound, wrap the error with a hint naming
-      the extended-build requirement; leave all other failures untouched
-- [ ] keep the failure explicit — no silent degradation to the previous `route.final`, per the
-      project rule against silent fallbacks that hide failure
-- [ ] note in the code comment that `--dry-run` and `--debug` never reach `ApplySingbox`, so this is
+- [x] when a check failure mentions an unknown `fallback` outbound, wrap the error with a hint naming
+      the extended-build requirement; leave all other failures untouched — `isUnknownFallbackType`
+      requires both `fallback` and an `unknown outbound type` / `unknown type` phrasing
+      (case-insensitive), so a fallback group rejected for a real config bug is not mis-hinted
+- [x] keep the failure explicit — no silent degradation to the previous `route.final`, per the
+      project rule against silent fallbacks that hide failure; the original `sing-box` output is
+      preserved in the wrapped error alongside the hint
+- [x] note in the code comment that `--dry-run` and `--debug` never reach `ApplySingbox`, so this is
       not a substitute for the Post-Completion device check
-- [ ] write tests using the existing `Cmd` fake for both the hinted and unhinted failure paths
-- [ ] run `go test ./...` — must pass before next task
+- [x] write tests using the existing `Cmd` fake for both the hinted and unhinted failure paths
+      (`TestApplySingbox_check_failure_fallback_hint`,
+      `..._check_failure_unrelated_not_hinted`; both assert the failure stays hard — no promotion,
+      no restart)
+- [x] run `go test ./...` — passes; `gofmt -l .` clean; `golangci-lint run` reports the same 10
+      pre-existing `goconst` issues, none new
 
 ### Task 9: rpcd backend — allow inline-node subscriptions
 
