@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -229,24 +230,35 @@ func (r *Runner) Run(ctx context.Context) error { //nolint:gocognit,gocyclo // o
 		sub := r.Cfg.Subscriptions[defaultID]
 		enabledCount++
 
-		opts := r.fetchOptsForSub(sub)
+		var uris []string
+		if len(sub.Nodes) > 0 {
+			logx.Info("Subscription %s: %s inline node(s)", logx.Bold(defaultID), strconv.Itoa(len(sub.Nodes)))
+			uris = slices.Clone(sub.Nodes)
+		} else {
+			opts := r.fetchOptsForSub(sub)
 
-		logx.Info("Downloading subscription %s...", logx.Bold(defaultID))
-		logx.Detail("  URL: %s", urlHost(sub.URL))
-		data, dlErr := fetch.Download(ctx, sub.URL, opts)
-		if dlErr != nil {
-			if ctx.Err() != nil {
-				return fmt.Errorf("interrupted: %w", ctx.Err())
+			logx.Info("Downloading subscription %s...", logx.Bold(defaultID))
+			logx.Detail("  URL: %s", urlHost(sub.URL))
+			data, dlErr := fetch.Download(ctx, sub.URL, opts)
+			if dlErr != nil {
+				if ctx.Err() != nil {
+					return fmt.Errorf("interrupted: %w", ctx.Err())
+				}
+				return fmt.Errorf("default subscription %q failed to download, aborting", defaultID)
 			}
-			return fmt.Errorf("default subscription %q failed to download, aborting", defaultID)
-		}
 
-		decoded, decErr := DecodePayload(data)
-		if decErr != nil {
-			return fmt.Errorf("default subscription %q failed to decode, aborting", defaultID)
+			decoded, decErr := DecodePayload(data)
+			if decErr != nil {
+				return fmt.Errorf("default subscription %q failed to decode, aborting", defaultID)
+			}
+			// Only URL-backed results belong in the cache: keying an inline
+			// subscription under "" would hand its nodes to every other
+			// inline subscription on lookup.
+			if sub.URL != "" {
+				urlCache[sub.URL] = decoded
+			}
+			uris = decoded
 		}
-		urlCache[sub.URL] = decoded
-		uris := decoded
 
 		if len(sub.Include) > 0 {
 			before := len(uris)
@@ -323,8 +335,8 @@ func (r *Runner) Run(ctx context.Context) error { //nolint:gocognit,gocyclo // o
 			continue
 		}
 		enabledCount++
-		if sub.URL == "" {
-			logx.Warn("Subscription %s has no URL configured, skipping", id)
+		if sub.URL == "" && len(sub.Nodes) == 0 {
+			logx.Warn("Subscription %s has neither url nor nodes configured, skipping", id)
 			continue
 		}
 		jobs = append(jobs, subJob{id: id, sub: sub})
@@ -361,7 +373,7 @@ func (r *Runner) Run(ctx context.Context) error { //nolint:gocognit,gocyclo // o
 	}
 
 	if defaultFinalTag == "" {
-		return errors.New("default subscription produced no outbound tag; check that the default subscription has a URL configured")
+		return errors.New("default subscription produced no outbound tag; check that the default subscription has either a url or inline nodes configured")
 	}
 
 	// Render the final sing-box config from the template and all outbound plans.
@@ -468,19 +480,24 @@ type subResult struct {
 	err  error
 }
 
-// processSub downloads, decodes, filters, and builds outbounds for a single
-// non-default subscription. It is safe to call concurrently from multiple
-// goroutines. urlCache is read-only: if the subscription URL matches a cached
-// entry (e.g. from the default subscription), the cached URIs are reused.
+// processSub resolves, filters, and builds outbounds for a single non-default
+// subscription. Nodes come either from the inline list or from a download. It is
+// safe to call concurrently from multiple goroutines. urlCache is read-only: if
+// the subscription URL matches a cached entry (e.g. from the default
+// subscription), the cached URIs are reused.
 func (r *Runner) processSub(ctx context.Context, id string, sub *config.Subscription, testURL string, urlCache map[string][]string) subResult {
 	opts := r.fetchOptsForSub(sub)
 
 	var uris []string
-	if cached, ok := urlCache[sub.URL]; ok {
+	cached, cacheHit := urlCache[sub.URL]
+	switch {
+	case len(sub.Nodes) > 0:
+		logx.Info("Subscription %s: %s inline node(s)", logx.Bold(id), strconv.Itoa(len(sub.Nodes)))
+		uris = slices.Clone(sub.Nodes)
+	case sub.URL != "" && cacheHit:
 		logx.Info("Subscription %s: reusing cached nodes from %s", logx.Bold(id), urlHost(sub.URL))
-		uris = make([]string, len(cached))
-		copy(uris, cached)
-	} else {
+		uris = slices.Clone(cached)
+	default:
 		logx.Info("Downloading subscription %s...", logx.Bold(id))
 		logx.Detail("  URL: %s", urlHost(sub.URL))
 		data, dlErr := fetch.Download(ctx, sub.URL, opts)

@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/config"
@@ -244,6 +246,107 @@ func TestIntegration_RoutingAndSubscriptions_coexist(t *testing.T) {
 	for _, name := range []string{"domains.lst", "subnets.lst", "vpn-ip-list.lst"} {
 		if _, err := os.Stat(filepath.Join(outDir, name)); err == nil {
 			t.Errorf("subscriptions pipeline must not write routing list file %s", name)
+		}
+	}
+}
+
+// TestIntegration_Run_inline_nodes_no_http verifies an inline-node subscription
+// performs no HTTP request. The inline subscription is the default one, so it is
+// processed first in phase 1, where a download would otherwise be unconditional;
+// the only request the run may make is the one for the URL-backed subscription.
+func TestIntegration_Run_inline_nodes_no_http(t *testing.T) {
+	var mu sync.Mutex
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests++
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(singleNodePayload))
+	}))
+	defer srv.Close()
+
+	cfg := &config.Config{
+		Fetch: config.Fetch{Retries: 1, TimeoutSeconds: 5, Parallelism: 1},
+		Subscriptions: map[string]*config.Subscription{
+			"personal": {
+				Name:    "Self-hosted",
+				Default: true,
+				Nodes:   []string{"vless://uuid-self@vps.example.com:443?encryption=none#Self+Hosted"},
+			},
+			"provider": {Name: "Provider", URL: srv.URL},
+		},
+	}
+
+	outDir := t.TempDir()
+	applier := &fakeApplier{}
+	runner := NewRunner(cfg, applier)
+	runner.OutDir = outDir
+
+	if err := runner.Run(context.Background()); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	mu.Lock()
+	got := requests
+	mu.Unlock()
+	if got != 1 {
+		t.Errorf("expected exactly 1 HTTP request (provider only), got %d", got)
+	}
+
+	generated := readConfig(t, filepath.Join(outDir, "config.json"))
+	tags := collectOutboundTags(generated)
+	for _, tag := range []string{"personal-single", "provider-single"} {
+		if !tags[tag] {
+			t.Errorf("expected outbound %q, got tags: %v", tag, tags)
+		}
+	}
+
+	routeSection, _ := generated["route"].(map[string]any)
+	if routeSection == nil {
+		t.Fatal("expected route section in generated config")
+	}
+	if final, _ := routeSection["final"].(string); final != "personal-single" {
+		t.Errorf("route.final = %q, want personal-single", final)
+	}
+}
+
+// TestIntegration_Run_inline_nodes_only verifies a config whose every subscription
+// is inline renders and applies without any network access at all.
+func TestIntegration_Run_inline_nodes_only(t *testing.T) {
+	cfg := &config.Config{
+		Fetch: config.Fetch{Retries: 1, TimeoutSeconds: 5, Parallelism: 1},
+		Subscriptions: map[string]*config.Subscription{
+			"personal": {
+				Name:    "Self-hosted",
+				Default: true,
+				Nodes: []string{
+					"vless://uuid-self1@vps1.example.com:443?encryption=none#VPS+1",
+					"vless://uuid-self2@vps2.example.com:443?encryption=none#VPS+2",
+				},
+			},
+		},
+	}
+
+	outDir := t.TempDir()
+	applier := &fakeApplier{}
+	runner := NewRunner(cfg, applier)
+	runner.OutDir = outDir
+	runner.ConfigDir = t.TempDir()
+
+	if err := runner.Run(context.Background()); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	if len(applier.applySingboxCalls) != 1 {
+		t.Fatalf("expected 1 ApplySingbox call, got %d", len(applier.applySingboxCalls))
+	}
+
+	// Two inline nodes must produce the same group shape as a downloaded multi-node sub.
+	tags := collectOutboundTags(readConfig(t, filepath.Join(outDir, "config.json")))
+	for _, tag := range []string{"personal-auto", "personal-manual"} {
+		if !tags[tag] {
+			t.Errorf("expected outbound %q, got tags: %v", tag, tags)
 		}
 	}
 }

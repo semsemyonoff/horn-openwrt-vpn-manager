@@ -617,6 +617,125 @@ func TestRunner_Run_shared_url_downloaded_once(t *testing.T) {
 	}
 }
 
+// inline node URIs used by the inline-subscription tests.
+const (
+	inlineNodeA = "vless://uuid-a@a.example.com:443?encryption=none#Alpha"
+	inlineNodeB = "vless://uuid-b@b.example.com:443?encryption=none#Beta"
+	inlineNodeC = "vless://uuid-c@c.example.com:443?encryption=none#Gamma"
+)
+
+// TestRunner_Run_inline_nodes_distinct_per_subscription guards the urlCache[""]
+// collision: an inline subscription must never inherit another one's nodes just
+// because both have an empty url.
+func TestRunner_Run_inline_nodes_distinct_per_subscription(t *testing.T) {
+	cfg := &config.Config{
+		Fetch: config.Fetch{Retries: 1, TimeoutSeconds: 5, Parallelism: 1},
+		Subscriptions: map[string]*config.Subscription{
+			"personal": {Name: "Personal", Default: true, Nodes: []string{inlineNodeA}},
+			"backup":   {Name: "Backup", Nodes: []string{inlineNodeB}},
+		},
+	}
+
+	outDir := t.TempDir()
+	runner := NewRunner(cfg, &fakeApplier{})
+	runner.OutDir = outDir
+	runner.DryRun = true
+
+	if err := runner.Run(context.Background()); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	for _, tc := range []struct{ id, want, notWant string }{
+		{id: "personal", want: "uuid-a", notWant: "uuid-b"},
+		{id: "backup", want: "uuid-b", notWant: "uuid-a"},
+	} {
+		data, err := os.ReadFile(filepath.Join(outDir, tc.id+"-nodes.txt"))
+		if err != nil {
+			t.Fatalf("nodes file for %s not written: %v", tc.id, err)
+		}
+		content := string(data)
+		if !strings.Contains(content, tc.want) {
+			t.Errorf("%s nodes file missing %q, got %q", tc.id, tc.want, content)
+		}
+		if strings.Contains(content, tc.notWant) {
+			t.Errorf("%s nodes file leaked %q from another subscription, got %q", tc.id, tc.notWant, content)
+		}
+	}
+
+	// Both subscriptions are single-node, so each yields its own -single outbound.
+	generated := readConfig(t, filepath.Join(outDir, "config.json"))
+	tags := collectOutboundTags(generated)
+	for _, tag := range []string{"personal-single", "backup-single"} {
+		if !tags[tag] {
+			t.Errorf("expected outbound %q, got tags: %v", tag, tags)
+		}
+	}
+}
+
+// TestRunner_Run_inline_nodes_filtering verifies include/exclude apply to inline
+// nodes exactly as they do to downloaded ones, at both call sites.
+func TestRunner_Run_inline_nodes_filtering(t *testing.T) {
+	all := []string{inlineNodeA, inlineNodeB, inlineNodeC}
+	cfg := &config.Config{
+		Fetch: config.Fetch{Retries: 1, TimeoutSeconds: 5, Parallelism: 1},
+		Subscriptions: map[string]*config.Subscription{
+			"main":  {Name: "Main", Default: true, Nodes: all, Include: []string{"alpha", "beta"}},
+			"extra": {Name: "Extra", Nodes: all, Exclude: []string{"gamma"}},
+		},
+	}
+
+	outDir := t.TempDir()
+	runner := NewRunner(cfg, &fakeApplier{})
+	runner.OutDir = outDir
+	runner.DryRun = true
+
+	if err := runner.Run(context.Background()); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	for _, id := range []string{"main", "extra"} {
+		data, err := os.ReadFile(filepath.Join(outDir, id+"-nodes.txt"))
+		if err != nil {
+			t.Fatalf("nodes file for %s not written: %v", id, err)
+		}
+		content := string(data)
+		for _, want := range []string{"uuid-a", "uuid-b"} {
+			if !strings.Contains(content, want) {
+				t.Errorf("%s: filtered nodes missing %q, got %q", id, want, content)
+			}
+		}
+		if strings.Contains(content, "uuid-c") {
+			t.Errorf("%s: filter did not drop Gamma, got %q", id, content)
+		}
+	}
+}
+
+// TestRunner_Run_inline_nodes_skipped_when_disabled_sibling_has_no_source verifies a
+// disabled sourceless subscription is skipped while inline ones still render.
+func TestRunner_Run_inline_nodes_skipped_when_disabled_sibling_has_no_source(t *testing.T) {
+	cfg := &config.Config{
+		Fetch: config.Fetch{Retries: 1, TimeoutSeconds: 5, Parallelism: 1},
+		Subscriptions: map[string]*config.Subscription{
+			"main":       {Name: "Main", Default: true, Nodes: []string{inlineNodeA}},
+			"sourceless": {Name: "Sourceless", Enabled: new(bool)},
+		},
+	}
+
+	outDir := t.TempDir()
+	runner := NewRunner(cfg, &fakeApplier{})
+	runner.OutDir = outDir
+	runner.DryRun = true
+
+	if err := runner.Run(context.Background()); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	tags := collectOutboundTags(readConfig(t, filepath.Join(outDir, "config.json")))
+	if !tags["main-single"] {
+		t.Errorf("expected main-single outbound, got tags: %v", tags)
+	}
+}
+
 func TestRunner_Run_invalid_config_returns_error(t *testing.T) {
 	// No subscriptions → ValidateSubscriptions should fail
 	cfg := &config.Config{

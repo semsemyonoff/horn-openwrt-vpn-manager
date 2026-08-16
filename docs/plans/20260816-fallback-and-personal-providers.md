@@ -393,21 +393,27 @@ change, and the reasoning belongs in `README.md` next to the `tolerance` field.
 - Modify: `horn-vpn-manager/internal/subscription/subscription_test.go`
 - Modify: `horn-vpn-manager/internal/subscription/integration_test.go`
 
-- [ ] at both download sites (`:225`, `:475`) use `sub.Nodes` directly when non-empty, performing no
-      HTTP request
-- [ ] guard `urlCache[sub.URL] = decoded` (`:237`) so an inline default never writes `urlCache[""]`
+- [x] at both download sites (`:225`, `:475`) use `sub.Nodes` directly when non-empty, performing no
+      HTTP request — `processSub` now selects the source with a three-way `switch`
+      (inline / cache hit / download)
+- [x] guard `urlCache[sub.URL] = decoded` (`:237`) so an inline default never writes `urlCache[""]`
       — otherwise the lookup at `:468` returns the default's nodes for any *other* inline
-      subscription
-- [ ] relax the empty-URL skip (`:315`) so a subscription with `nodes` is not skipped; keep the
+      subscription. The lookup side is guarded too (`sub.URL != "" && cacheHit`), so an empty key
+      can never match even if one were written.
+- [x] relax the empty-URL skip (`:315`) so a subscription with `nodes` is not skipped; keep the
       warning only when both are absent
-- [ ] update the error text at `:353` — "check that the default subscription has a URL configured"
+- [x] update the error text at `:353` — "check that the default subscription has a URL configured"
       is wrong once `nodes` exists
-- [ ] ensure `include`/`exclude` filtering applies to inline nodes exactly as to downloaded ones
-- [ ] write a test "two inline-node subscriptions produce distinct node sets" covering the
-      `urlCache[""]` collision
-- [ ] write an integration test with `httptest.Server` asserting **zero** requests for an
-      inline-node subscription
-- [ ] run `go test ./...` — must pass before next task
+- [x] ensure `include`/`exclude` filtering applies to inline nodes exactly as to downloaded ones
+      (filters run after source selection, unchanged, at both call sites)
+- [x] write a test "two inline-node subscriptions produce distinct node sets" covering the
+      `urlCache[""]` collision (`TestRunner_Run_inline_nodes_distinct_per_subscription`); plus
+      `..._inline_nodes_filtering` and `..._inline_nodes_skipped_when_disabled_sibling_has_no_source`
+- [x] write an integration test with `httptest.Server` asserting **zero** requests for an
+      inline-node subscription (`TestIntegration_Run_inline_nodes_no_http`: inline default +
+      URL-backed non-default, exactly 1 request total; plus `..._inline_nodes_only`)
+- [x] run `go test ./...` — passes; `gofmt -l .` clean; `golangci-lint run` reports the same 10
+      pre-existing `goconst` issues, none new
 
 ### Task 6: Config schema and validation for `fallback`
 
