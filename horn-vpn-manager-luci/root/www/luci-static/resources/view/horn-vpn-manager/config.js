@@ -658,6 +658,29 @@ function isValidUrl(s) {
     return /^https?:\/\/.+/.test(s);
 }
 
+// Minimal client-side vless:// sanity check. vless.Parse in the Go core is
+// authoritative — this only catches obvious typos before the round trip.
+function isValidNodeUri(s) {
+    if (s.indexOf("vless://") !== 0) return false;
+    try {
+        new URL(s);
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+// Assign when a value is present, drop the key when it is not, so an emptied
+// field removes itself from a preserved object instead of lingering.
+function setOrDelete(obj, key, value) {
+    if (value === null || value === undefined) delete obj[key];
+    else obj[key] = value;
+}
+
+function hasOwn(obj, key) {
+    return Object.prototype.hasOwnProperty.call(obj, key);
+}
+
 // ── Collapsible dynList row ───────────────────────────────────────────────────
 function makeCollapsible(label, widget, description) {
     var badge = E("span", { class: "vpnsub-count-badge" });
@@ -865,6 +888,7 @@ return view.extend({
         var tagNames = sbData && sbData.tag_names ? sbData.tag_names : {};
 
         self._widgets = {};
+        self._rawSingbox = Object.assign({}, cfg.singbox || {});
         self._singboxTemplate = (cfg.singbox || {}).template || "";
         var subKeys = Object.keys(cfg.subscriptions || {});
         self._subIdx = subKeys.length;
@@ -2001,6 +2025,7 @@ return view.extend({
         );
         var includeW = dynList(sub.include || [], _("keyword"));
         var excludeW = dynList(sub.exclude || [], _("Russia"));
+        var nodesW = dynList(sub.nodes || [], "vless://uuid@host:443?...");
         self._widgets[idx] = {
             domains: domainsW,
             domain_urls: domainUrlsW,
@@ -2008,6 +2033,11 @@ return view.extend({
             ip_urls: ipUrlsW,
             include: includeW,
             exclude: excludeW,
+            nodes: nodesW,
+            // Raw subscription as loaded, so fields this view does not know about
+            // (added by a newer core, or hand-edited) survive a save instead of
+            // being dropped by the rebuild in _collectConfig.
+            raw: sub,
         };
 
         var nameInput = E("input", {
@@ -2050,6 +2080,37 @@ return view.extend({
                 clearError(this);
             },
         });
+
+        // Source mode — a subscription is defined either by a remote URL or by
+        // inline vless:// nodes, never both (the core rejects that combination).
+        var sourceSel = E("select", {
+            class: "cbi-input-select vpnsub-sub-source",
+            change: function () {
+                updateSourceVisibility();
+            },
+        });
+        [
+            ["url", _("Subscription URL")],
+            ["nodes", _("Inline nodes")],
+        ].forEach(function (o) {
+            sourceSel.appendChild(E("option", { value: o[0] }, o[1]));
+        });
+        sourceSel.value =
+            Array.isArray(sub.nodes) && sub.nodes.length ? "nodes" : "url";
+
+        var urlRow = formRow(_("URL"), urlInput);
+        var nodesRow = formRow(
+            _("Nodes"),
+            nodesW.node,
+            _("One vless:// URI per line — used instead of a subscription URL"),
+        );
+
+        function updateSourceVisibility() {
+            var useNodes = sourceSel.value === "nodes";
+            urlRow.style.display = useNodes ? "none" : "";
+            nodesRow.style.display = useNodes ? "" : "none";
+        }
+        updateSourceVisibility();
 
         var defInput = E("input", {
             type: "radio",
@@ -2176,7 +2237,13 @@ return view.extend({
                 _("Unique identifier used in tag names (e.g. {code}-manual)"),
             ),
             formRow(_("Name"), nameInput),
-            formRow(_("URL"), urlInput),
+            formRow(
+                _("Source"),
+                sourceSel,
+                _("Where this subscription's nodes come from"),
+            ),
+            urlRow,
+            nodesRow,
             formRow(
                 _("Retries"),
                 retriesInput,
@@ -2293,34 +2360,59 @@ return view.extend({
                 var interval = intervalEl ? intervalEl.value.trim() : "";
                 var toleranceRaw = toleranceEl ? toleranceEl.value.trim() : "";
 
-                var sub = { name: name, url: url };
-                if (isDef) sub.default = true;
-                if (!isEnabled) sub.enabled = false;
-                var route = {};
-                if (domains.length) route.domains = domains;
-                if (domainUrls.length) route.domain_urls = domainUrls;
-                if (ip.length) route.ip_cidrs = ip;
-                if (ipUrls.length) route.ip_urls = ipUrls;
-                if (Object.keys(route).length) sub.route = route;
-                if (include.length) sub.include = include;
-                if (exclude.length) sub.exclude = exclude;
-                if (interval) sub.interval = interval;
-                if (toleranceRaw !== "") {
-                    var tol = parseInt(toleranceRaw, 10);
-                    if (!isNaN(tol)) sub.tolerance = tol;
+                var sourceEl = card.querySelector(".vpnsub-sub-source");
+                var useNodes = !!sourceEl && sourceEl.value === "nodes";
+                var nodes = w.nodes ? w.nodes.getValue() : [];
+
+                // Start from the subscription as loaded so fields this view does
+                // not render (fallback, and anything a newer core adds) are kept.
+                var sub = Object.assign({}, w.raw || {});
+                delete sub.id;
+                sub.name = name;
+                if (useNodes) {
+                    delete sub.url;
+                    sub.nodes = nodes;
+                } else {
+                    sub.url = url;
+                    delete sub.nodes;
                 }
+                // Only emit the redundant halves ("default": false, "enabled":
+                // true) when the file already carried them, so an untouched save
+                // does not rewrite config.json.
+                if (isDef || hasOwn(sub, "default")) sub.default = isDef;
+                if (!isEnabled || hasOwn(sub, "enabled")) sub.enabled = isEnabled;
+                var route = Object.assign({}, sub.route || {});
+                setOrDelete(route, "domains", domains.length ? domains : null);
+                setOrDelete(
+                    route,
+                    "domain_urls",
+                    domainUrls.length ? domainUrls : null,
+                );
+                setOrDelete(route, "ip_cidrs", ip.length ? ip : null);
+                setOrDelete(route, "ip_urls", ipUrls.length ? ipUrls : null);
+                setOrDelete(sub, "route", Object.keys(route).length ? route : null);
+                setOrDelete(sub, "include", include.length ? include : null);
+                setOrDelete(sub, "exclude", exclude.length ? exclude : null);
+                setOrDelete(sub, "interval", interval || null);
+                var tol = toleranceRaw === "" ? NaN : parseInt(toleranceRaw, 10);
+                setOrDelete(sub, "tolerance", isNaN(tol) ? null : tol);
                 var retriesEl = card.querySelector(".vpnsub-sub-retries");
                 var retriesRaw = retriesEl ? retriesEl.value.trim() : "";
-                if (retriesRaw !== "") {
-                    var r = parseInt(retriesRaw, 10);
-                    if (!isNaN(r)) sub.retries = r;
-                }
+                var r = retriesRaw === "" ? NaN : parseInt(retriesRaw, 10);
+                setOrDelete(sub, "retries", isNaN(r) ? null : r);
                 if (id) subs[id] = sub;
             },
         );
 
+        // Same preservation rule as for subscriptions: keep singbox keys this
+        // view does not render (connect_timeout and anything added later).
+        var singbox = Object.assign({}, this._rawSingbox || {});
+        singbox.log_level = level;
+        singbox.test_url = testUrl;
+        singbox.template = this._singboxTemplate || "";
+
         return {
-            singbox: { log_level: level, test_url: testUrl, template: this._singboxTemplate || "" },
+            singbox: singbox,
             subscriptions: subs,
         };
     },
@@ -2360,7 +2452,19 @@ return view.extend({
                     }
                 }
 
-                if (!url) {
+                var sourceEl = card.querySelector(".vpnsub-sub-source");
+                var useNodes = !!sourceEl && sourceEl.value === "nodes";
+
+                if (useNodes) {
+                    var nodeVals = w.nodes ? w.nodes.getValue() : [];
+                    if (!nodeVals.length) {
+                        ui.addNotification(null, E("p", _("A subscription using inline nodes needs at least one vless:// URI")), "warning");
+                        valid = false;
+                    } else if (nodeVals.some(function (v) { return !isValidNodeUri(v); })) {
+                        ui.addNotification(null, E("p", _("Inline nodes must be valid vless:// URIs")), "warning");
+                        valid = false;
+                    }
+                } else if (!url) {
                     setError(urlEl, _("URL is required"));
                     valid = false;
                 } else if (!isValidUrl(url)) {

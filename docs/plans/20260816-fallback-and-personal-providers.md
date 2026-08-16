@@ -568,14 +568,32 @@ unrelated one such as toggling a log level — silently wipes `nodes`, `fallback
 **Files:**
 - Modify: `horn-vpn-manager-luci/root/www/luci-static/resources/view/horn-vpn-manager/config.js`
 
-- [ ] preserve unknown subscription and `singbox` fields across a save instead of rebuilding from an
-      allow-list
-- [ ] let a subscription be defined by inline `vless://` nodes instead of a URL, switching the card
-      between modes and hiding the irrelevant field
-- [ ] keep client-side URI checking minimal — `vless://` prefix plus a `new URL()` sanity check; the
-      authoritative error comes from Go, do not reimplement `vless.Parse` in JS
-- [ ] verify a no-op save round-trips `config.json` unchanged
-- [ ] run `make build`
+- [x] preserve unknown subscription and `singbox` fields across a save instead of rebuilding from an
+      allow-list — each card keeps the subscription as loaded in `_widgets[idx].raw` and
+      `_collectConfig` starts from a copy of it; `_rawSingbox` does the same for `singbox`. Known
+      fields are then assigned or deleted via a `setOrDelete` helper, so clearing a field still
+      removes it.
+- [x] let a subscription be defined by inline `vless://` nodes instead of a URL, switching the card
+      between modes and hiding the irrelevant field — a `Source` select toggles the URL row against
+      a `nodes` dynList, and the losing field's key is deleted on save so the two are never both
+      written (the core rejects that combination)
+- [x] keep client-side URI checking minimal — `isValidNodeUri` is a `vless://` prefix test plus
+      `new URL()`; `vless.Parse` is not reimplemented in JS
+- [x] verify a no-op save round-trips `config.json` unchanged — verified by driving the **real**
+      `_collectConfig` source, extracted from `config.js`, against a stub DOM in Node: a config
+      carrying `nodes`, `fallback`, `connect_timeout` and an unknown subscription field re-serializes
+      identically (`JSON.stringify` equality, so key order too). The harness was mutation-checked
+      against the pre-fix logic to confirm it is not vacuous.
+- [x] ⚠️ **scope note:** the round-trip check surfaced two further droppers beyond the allow-list
+      rebuild — an explicit `"enabled": true` and `"default": false` were deleted on save. Both are
+      semantically redundant, but they made an untouched save rewrite `config.json`. Now emitted only
+      when the file already carried them (`hasOwn` guard).
+- [x] ➕ noted for Task 12: the strings added here (`Source`, `Inline nodes`, `Nodes`, and the two
+      inline-node validation messages) are not yet in the `.po` files — the `po2lmo` count is
+      unchanged at 166.
+- [x] run `make build` — core `bin/horn-vpn-manager-2.2.1-r1-linux-arm64.apk` and
+      `bin/horn-vpn-manager-luci-2.2.1-r1.apk` both built; `node --check` clean on `config.js`;
+      `go test ./...` still passes
 
 ### Task 11: LuCI — fallback chain editor
 
