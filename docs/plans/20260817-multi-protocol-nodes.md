@@ -366,18 +366,45 @@ Notes:
 - Modify: `horn-vpn-manager/internal/subscription/outbound.go`
 - Modify: `horn-vpn-manager/internal/vless/vless_test.go`
 
-- [ ] move `VLESSOutbound`, `OutboundTransport` (with its custom `MarshalJSON`), `nodeToOutbound`
+- [x] move `VLESSOutbound`, `OutboundTransport` (with its custom `MarshalJSON`), `nodeToOutbound`
       and `buildTransport` from `internal/subscription/outbound.go` into `internal/vless`,
       preserving field order and the per-transport JSON shapes verbatim
-- [ ] add methods on `*Node`: `Type()`, `Server()`, `Port()`, `Name()`, `StableHash()` (delegating
+- [x] add methods on `*Node`: `Type()`, `Server()`, `Port()`, `Name()`, `StableHash()` (delegating
       to the existing function so the string layout is untouched) and `Outbound(tag, ct string) any`
       wrapping the moved `nodeToOutbound`, keeping `packet_encoding: xudp`
-- [ ] keep `Parse` and `StableHash` exported and behaviour-identical
-- [ ] add a golden test asserting `StableHash` output for a fixed URI set, commenting what breaks if
+- [x] keep `Parse` and `StableHash` exported and behaviour-identical
+- [x] add a golden test asserting `StableHash` output for a fixed URI set, commenting what breaks if
       it changes
-- [ ] write tests asserting the contract methods return the parsed values and that the moved
+- [x] write tests asserting the contract methods return the parsed values and that the moved
       outbound marshals identically
-- [ ] run `go test ./...` including the Task 1 golden — must be byte-identical before task 4
+- [x] run `go test ./...` including the Task 1 golden — must be byte-identical before task 4
+
+Notes:
+- ⚠️ **Scope deviation, applies to Task 4 as well:** `proto.Node` requires `Server()`, `Port()` and
+  `Name()` methods, and a Go type cannot carry a field and a method under the same name. The `Node`
+  fields are therefore **unexported**, with an accessor per field (`UUID()`, `Flow()`, `SNI()`, …);
+  `Parse` is the only constructor. Task 4 must define the hysteria2 `Node` the same way — the field
+  list in that task means "these values", not "these exported fields".
+- Renamed on the move to avoid stutter inside the package: `VLESSOutbound` → `vless.Outbound`,
+  `OutboundTransport` → `vless.Transport`. `nodeToOutbound` became exported as `vless.NewOutbound`
+  because `BuildOutbounds` still calls it directly and still needs the concrete type; the
+  `(*Node).Outbound` contract method is a one-line delegation to it. A package-level type `Outbound`
+  and a method named `Outbound` on `Node` do not collide — method names are scoped to their type.
+- `OutboundPlan.NodeOutbounds` is `[]*vless.Outbound` for now; Task 6 turns it into `[]any`.
+- `internal/subscription` keeps `protoVLESS`, `transportTCP`, `transportGRPC`, `securityTLS` and
+  `securityReality` because `jsondecode.go` still uses them; `transportHTTP`, `transportXHTTP` and
+  `packetEncoding` moved out entirely.
+- `TestStableHash_Golden` pins four URIs against md5 values computed **outside Go** (`printf … |
+  md5sum`), and records the exact hash input per case so a failure can be re-derived by hand. It also
+  asserts the method and the function agree. The old `TestStableHash_KnownValue` folded into its
+  first case.
+- `TestNewOutbound_MarshalJSON` pins exact bytes for ten shapes, including the tagless dedup form
+  (`"tag":""` must keep rendering) and `type=h2` rendering as `"type":"http"`.
+- Mutation-checked: perturbing `packetEncoding` fails 17 subtests across `vless` and `subscription`;
+  perturbing the `vless|` hash prefix fails the hash golden.
+- ⚠️ Correction to the Task 1 note: the "24 pre-existing `staticcheck` SA5011 findings" were a
+  golangci-lint **cache artifact**. After `golangci-lint cache clean`, `make lint` reports 0 issues
+  both on the branch baseline and with this task applied.
 
 ### Task 4: Add the hysteria2 protocol package
 

@@ -89,17 +89,17 @@ func TestDecodePayload_json_v2ray_array(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse uri[0]=%q: %v", uris[0], err)
 	}
-	if n0.UUID != "11111111-1111-1111-1111-111111111111" ||
-		n0.Server != "h1.example.com" ||
-		n0.Port != 8443 ||
-		n0.Name != "Hungary" ||
-		n0.Security != "reality" ||
-		n0.SNI != "sni.example.com" ||
-		n0.PublicKey != "pubkey-hu" ||
-		n0.ShortID != "sidhu1" ||
-		n0.Fingerprint != "chrome" ||
-		n0.Flow != "xtls-rprx-vision" ||
-		n0.TransportType != "tcp" {
+	if n0.UUID() != "11111111-1111-1111-1111-111111111111" ||
+		n0.Server() != "h1.example.com" ||
+		n0.Port() != 8443 ||
+		n0.Name() != "Hungary" ||
+		n0.Security() != "reality" ||
+		n0.SNI() != "sni.example.com" ||
+		n0.PublicKey() != "pubkey-hu" ||
+		n0.ShortID() != "sidhu1" ||
+		n0.Fingerprint() != "chrome" ||
+		n0.Flow() != "xtls-rprx-vision" ||
+		n0.TransportType() != "tcp" {
 		t.Errorf("uri[0] parsed fields mismatch: %+v", n0)
 	}
 
@@ -107,7 +107,7 @@ func TestDecodePayload_json_v2ray_array(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse uri[1]=%q: %v", uris[1], err)
 	}
-	if n1.Server != "h2.example.com" || n1.Port != 443 || n1.Name != "Canada" {
+	if n1.Server() != "h2.example.com" || n1.Port() != 443 || n1.Name() != "Canada" {
 		t.Errorf("uri[1] parsed fields mismatch: %+v", n1)
 	}
 }
@@ -134,7 +134,7 @@ func TestDecodePayload_json_single_object(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse uri: %v", err)
 	}
-	if n.Name != "Solo" || n.Security != "" || n.TransportType != "tcp" {
+	if n.Name() != "Solo" || n.Security() != "" || n.TransportType() != "tcp" {
 		t.Errorf("unexpected fields: %+v", n)
 	}
 }
@@ -188,14 +188,14 @@ func TestDecodePayload_json_ws_tls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse uri: %v", err)
 	}
-	if n.TransportType != "ws" || n.Path != "/vl" || n.Host != "ws.example.com" {
+	if n.TransportType() != "ws" || n.Path() != "/vl" || n.Host() != "ws.example.com" {
 		t.Errorf("ws transport mismatch: %+v", n)
 	}
-	if n.Security != "tls" || n.SNI != "ws.example.com" || n.Fingerprint != "firefox" {
+	if n.Security() != "tls" || n.SNI() != "ws.example.com" || n.Fingerprint() != "firefox" {
 		t.Errorf("tls fields mismatch: %+v", n)
 	}
-	if len(n.ALPN) != 2 || n.ALPN[0] != "h2" || n.ALPN[1] != "http/1.1" {
-		t.Errorf("alpn mismatch: %+v", n.ALPN)
+	if len(n.ALPN()) != 2 || n.ALPN()[0] != "h2" || n.ALPN()[1] != "http/1.1" {
+		t.Errorf("alpn mismatch: %+v", n.ALPN())
 	}
 }
 
@@ -223,7 +223,7 @@ func TestDecodePayload_json_grpc(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse uri: %v", err)
 	}
-	if n.TransportType != "grpc" || n.ServiceName != "gvs" {
+	if n.TransportType() != "grpc" || n.ServiceName() != "gvs" {
 		t.Errorf("grpc transport mismatch: %+v", n)
 	}
 }
@@ -267,7 +267,7 @@ func TestDecodePayload_json_remarks_with_non_ascii(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse uri: %v", err)
 	}
-	if n.Name != "🇭🇺Венгрия" {
-		t.Errorf("fragment round-trip mismatch: got %q", n.Name)
+	if n.Name() != "🇭🇺Венгрия" {
+		t.Errorf("fragment round-trip mismatch: got %q", n.Name())
 	}
 }

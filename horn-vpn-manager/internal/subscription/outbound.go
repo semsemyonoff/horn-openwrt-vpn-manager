@@ -5,21 +5,17 @@ import (
 	"fmt"
 
 	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/logx"
-	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/proto"
 	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/vless"
 )
 
 const (
 	defaultInterval  = "5m"
 	defaultTolerance = 100
-	packetEncoding   = "xudp"
 
 	protoVLESS = "vless"
 
-	transportTCP   = "tcp"
-	transportHTTP  = "http"
-	transportXHTTP = "xhttp"
-	transportGRPC  = "grpc"
+	transportTCP  = "tcp"
+	transportGRPC = "grpc"
 
 	securityTLS     = "tls"
 	securityReality = "reality"
@@ -35,7 +31,7 @@ type OutboundPlan struct {
 	// NodeOutbounds holds individual VLESS node outbounds.
 	// Single-node: one entry tagged "<id>-single".
 	// Multi-node: entries tagged "<id>-node-<hash>".
-	NodeOutbounds []*VLESSOutbound
+	NodeOutbounds []*vless.Outbound
 
 	// URLTestGroup is the auto-select group for multi-node subscriptions.
 	// Nil for single-node subscriptions.
@@ -63,85 +59,6 @@ type OutboundPlan struct {
 	// and for subscriptions with no route config. Domains and IP CIDRs are
 	// stored as separate rules to preserve OR match semantics in sing-box.
 	RouteRules []*RouteRule
-}
-
-// VLESSOutbound is a typed sing-box VLESS outbound configuration.
-type VLESSOutbound struct {
-	Type           string             `json:"type"`
-	Tag            string             `json:"tag"`
-	Server         string             `json:"server"`
-	ServerPort     int                `json:"server_port"`
-	UUID           string             `json:"uuid"`
-	Flow           string             `json:"flow,omitempty"`
-	PacketEncoding string             `json:"packet_encoding,omitempty"`
-	TLS            *proto.OutboundTLS `json:"tls,omitempty"`
-	Transport      *OutboundTransport `json:"transport,omitempty"`
-	// ConnectTimeout is a sing-box dial field. A failing dial otherwise hangs
-	// for the OS default, delaying any fallback switch by the same amount.
-	ConnectTimeout string `json:"connect_timeout,omitempty"`
-}
-
-// OutboundTransport is the transport-layer config for a sing-box outbound.
-// Different transport types use different subsets of fields. MarshalJSON
-// produces the correct per-type JSON shape.
-type OutboundTransport struct {
-	Type string
-
-	// ws
-	WSPath    string
-	WSHeaders map[string]string
-
-	// http / h2
-	HTTPHosts []string
-	HTTPPath  string
-
-	// grpc
-	ServiceName string
-
-	// xhttp
-	XHTTPHost     string
-	XHTTPPath     string
-	XHTTPMode     string
-	XPaddingBytes string
-}
-
-// MarshalJSON emits transport JSON in the shape sing-box expects per transport type.
-func (t *OutboundTransport) MarshalJSON() ([]byte, error) {
-	m := map[string]any{"type": t.Type}
-	switch t.Type {
-	case "ws":
-		if t.WSPath != "" {
-			m["path"] = t.WSPath
-		}
-		if len(t.WSHeaders) > 0 {
-			m["headers"] = t.WSHeaders
-		}
-	case transportHTTP:
-		if len(t.HTTPHosts) > 0 {
-			m["host"] = t.HTTPHosts
-		}
-		if t.HTTPPath != "" {
-			m["path"] = t.HTTPPath
-		}
-	case transportGRPC:
-		if t.ServiceName != "" {
-			m["service_name"] = t.ServiceName
-		}
-	case transportXHTTP:
-		if t.XHTTPMode != "" {
-			m["mode"] = t.XHTTPMode
-		}
-		if t.XHTTPHost != "" {
-			m["host"] = t.XHTTPHost
-		}
-		if t.XHTTPPath != "" {
-			m["path"] = t.XHTTPPath
-		}
-		if t.XPaddingBytes != "" {
-			m["x_padding_bytes"] = t.XPaddingBytes
-		}
-	}
-	return json.Marshal(m)
 }
 
 // URLTestOutbound is a sing-box urltest outbound group.
@@ -208,7 +125,7 @@ type BuildOptions struct {
 // from its VLESS URIs. The id parameter is the stable subscription key used to
 // derive outbound tags.
 //
-// For a single node, one VLESSOutbound is produced with tag "<id>-single".
+// For a single node, one vless.Outbound is produced with tag "<id>-single".
 // For multiple nodes, per-node outbounds tagged "<id>-node-<hash>" are produced
 // alongside a urltest group "<id>-auto" and a selector group "<id>-manual".
 func BuildOutbounds(id string, uris []string, opts BuildOptions) (*OutboundPlan, error) {
@@ -247,10 +164,10 @@ func BuildOutbounds(id string, uris []string, opts BuildOptions) (*OutboundPlan,
 	if len(nodes) == 1 {
 		// Single-node mode: use <id>-single tag directly.
 		tag := id + "-single"
-		ob := nodeToOutbound(nodes[0], tag, opts.ConnectTimeout)
+		ob := vless.NewOutbound(nodes[0], tag, opts.ConnectTimeout)
 		plan.NodeOutbounds = append(plan.NodeOutbounds, ob)
 		plan.FinalTag = tag
-		plan.TagNames[tag] = nodes[0].Name
+		plan.TagNames[tag] = nodes[0].Name()
 	} else {
 		// Multi-node mode: hash-tagged nodes + urltest + selector.
 		//
@@ -271,7 +188,7 @@ func BuildOutbounds(id string, uris []string, opts BuildOptions) (*OutboundPlan,
 		seenOutbounds := make(map[string]struct{}, len(nodes))
 		duplicates := 0
 		for _, n := range nodes {
-			ob := nodeToOutbound(n, "", opts.ConnectTimeout)
+			ob := vless.NewOutbound(n, "", opts.ConnectTimeout)
 			key, err := json.Marshal(ob)
 			if err != nil {
 				return nil, fmt.Errorf("marshalling outbound for subscription %q: %w", id, err)
@@ -297,7 +214,7 @@ func BuildOutbounds(id string, uris []string, opts BuildOptions) (*OutboundPlan,
 			}
 			ob.Tag = tag
 			plan.NodeOutbounds = append(plan.NodeOutbounds, ob)
-			plan.TagNames[tag] = n.Name
+			plan.TagNames[tag] = n.Name()
 			nodeTags = append(nodeTags, tag)
 		}
 		if duplicates > 0 {
@@ -339,107 +256,4 @@ func BuildOutbounds(id string, uris []string, opts BuildOptions) (*OutboundPlan,
 	}
 
 	return plan, nil
-}
-
-// nodeToOutbound converts a parsed VLESS node into a typed sing-box VLESSOutbound.
-// An empty connectTimeout omits the connect_timeout field entirely.
-func nodeToOutbound(n *vless.Node, tag, connectTimeout string) *VLESSOutbound {
-	ob := &VLESSOutbound{
-		Type:           protoVLESS,
-		Tag:            tag,
-		Server:         n.Server,
-		ServerPort:     n.Port,
-		UUID:           n.UUID,
-		Flow:           n.Flow,
-		ConnectTimeout: connectTimeout,
-	}
-	// packet_encoding is incompatible with XTLS flow (e.g. xtls-rprx-vision).
-	// Only set it when flow is absent.
-	if n.Flow == "" {
-		ob.PacketEncoding = packetEncoding
-	}
-
-	// TLS block: generate only when security is explicitly "tls" or "reality".
-	// An empty security field means plaintext — do not inject TLS.
-	if n.Security == securityTLS || n.Security == securityReality {
-		alpn := n.ALPN
-		if len(alpn) == 0 && n.TransportType == transportXHTTP {
-			alpn = []string{"h2"}
-		}
-		tls := &proto.OutboundTLS{
-			Enabled:    true,
-			Insecure:   false,
-			ServerName: n.SNI,
-			ALPN:       alpn,
-		}
-		if n.Fingerprint != "" {
-			tls.UTLS = &proto.UTLSConfig{
-				Enabled:     true,
-				Fingerprint: n.Fingerprint,
-			}
-		}
-		if n.Security == securityReality && n.PublicKey != "" {
-			tls.Reality = &proto.RealityTLS{
-				Enabled:   true,
-				PublicKey: n.PublicKey,
-				ShortID:   n.ShortID,
-			}
-		}
-		ob.TLS = tls
-	}
-
-	// Transport block.
-	ob.Transport = buildTransport(n)
-
-	return ob
-}
-
-// buildTransport constructs the transport block from a parsed VLESS node.
-// Returns nil when no explicit transport is needed (plain TCP).
-func buildTransport(n *vless.Node) *OutboundTransport {
-	// Determine effective transport type, matching legacy shell logic.
-	effType := n.TransportType
-	if n.TransportType == transportTCP && n.HeaderType == transportHTTP {
-		effType = transportHTTP
-	}
-	// h2 is an alias for http transport.
-	if n.TransportType == "h2" {
-		effType = transportHTTP
-	}
-
-	switch effType {
-	case "ws":
-		t := &OutboundTransport{Type: "ws", WSPath: n.Path}
-		if n.Host != "" {
-			t.WSHeaders = map[string]string{"Host": n.Host}
-		}
-		return t
-	case transportHTTP:
-		t := &OutboundTransport{Type: transportHTTP, HTTPPath: n.Path}
-		if n.Host != "" {
-			t.HTTPHosts = []string{n.Host}
-		}
-		return t
-	case transportGRPC:
-		return &OutboundTransport{Type: transportGRPC, ServiceName: n.ServiceName}
-	case transportXHTTP:
-		mode := n.Mode
-		if mode == "" {
-			mode = "auto"
-		}
-		return &OutboundTransport{
-			Type:          transportXHTTP,
-			XHTTPMode:     mode,
-			XHTTPHost:     n.Host,
-			XHTTPPath:     n.Path,
-			XPaddingBytes: "100-1000",
-		}
-	case "quic":
-		// QUIC transport is not a standalone transport block in sing-box VLESS;
-		// treat as plain TCP so sing-box check does not fail.
-		return nil
-	default:
-		// plain tcp or no transport; no transport block needed
-		return nil
-	}
 }
