@@ -199,6 +199,26 @@ test("a disabled inline-node subscription with no nodes emits no empty array", (
     assert.strictEqual(sub.enabled, false);
 });
 
+test("a disabled sourceless subscription emits no empty url", () => {
+    const ctx = loadView();
+    // A sourceless card falls back to URL mode, so a no-op save must not add a
+    // "url": "" the stored config never had.
+    mountSubscriptions(ctx, [
+        { id: "a", name: "A", url: "https://a/s", default: true },
+        { id: "b", name: "B", enabled: false },
+        { id: "c", name: "C", enabled: false, url: "" },
+    ]);
+
+    assert.notStrictEqual(
+        ctx.view._validate(),
+        false,
+        "should be saveable: " + notificationTexts(ctx),
+    );
+    const subs = ctx.view._collectConfig().subscriptions;
+    assert.ok(!("url" in subs.b), 'must not write "url": ""');
+    assert.strictEqual(subs.c.url, "", "a stored empty url must survive as-is");
+});
+
 test("a vless:// URI without host or uuid is rejected", () => {
     const ctx = loadView();
     mountSubscriptions(ctx, [

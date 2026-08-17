@@ -2827,7 +2827,12 @@ return view.extend({
                     // empty "nodes": [] carries no more meaning than no key at all.
                     setOrDelete(sub, "nodes", nodes.length ? nodes : null);
                 } else {
-                    sub.url = url;
+                    // A sourceless card lands in URL mode, and a disabled one
+                    // may legitimately stay that way, so an empty input must not
+                    // plant a "url": "" the file never carried. An explicit empty
+                    // url that was stored is kept as-is.
+                    if (url || hasOwn(sub, "url")) sub.url = url;
+                    else delete sub.url;
                     delete sub.nodes;
                 }
                 // Only emit the redundant halves ("default": false, "enabled":
