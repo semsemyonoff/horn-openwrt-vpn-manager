@@ -51,6 +51,11 @@ expect_sources ok "disabled with no source" \
     '{"subscriptions":{"a":{"name":"A","enabled":false}}}'
 expect_sources ok "no subscriptions at all" '{"subscriptions":{}}'
 expect_sources ok "subscriptions key absent" '{}'
+# JSON reaches jq through `printf '%s\n'`, never `echo`: dash's builtin echo
+# expands backslash escapes, so `echo` would turn the \\ and \t below back into
+# a bare backslash and a raw control character and jq would reject the payload.
+expect_sources ok "name carrying backslash and tab escapes" \
+    '{"subscriptions":{"a":{"name":"home\\vps\tnode","url":"https://a.invalid/s"}}}'
 
 expect_sources bad "url and nodes together" \
     '{"subscriptions":{"a":{"name":"A","url":"https://a.invalid/s","nodes":["vless://u@h:443"]}}}'

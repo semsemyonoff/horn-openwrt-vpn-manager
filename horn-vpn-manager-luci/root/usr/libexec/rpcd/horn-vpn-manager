@@ -36,37 +36,37 @@ check_sub_sources() {
 
     # Runs first so the later filters, which index into each subscription, have
     # a shape they can work with and a bad payload gets a message that names it.
-    bad=$(echo "$cfg" | jq 'if ((.subscriptions // {}) | type) != "object" then 1 else [(.subscriptions // {})[] | select(type != "object")] | length end' 2>/dev/null)
+    bad=$(printf '%s\n' "$cfg" | jq 'if ((.subscriptions // {}) | type) != "object" then 1 else [(.subscriptions // {})[] | select(type != "object")] | length end' 2>/dev/null)
     if [ "${bad:-1}" != 0 ]; then
         printf 'Subscriptions must be an object of subscription objects'
         return 1
     fi
 
-    bad=$(echo "$cfg" | jq '[(.subscriptions // {})[] | select((.name | type) != "string" or (.name // "") == "")] | length' 2>/dev/null)
+    bad=$(printf '%s\n' "$cfg" | jq '[(.subscriptions // {})[] | select((.name | type) != "string" or (.name // "") == "")] | length' 2>/dev/null)
     if [ "${bad:-1}" != 0 ]; then
         printf 'All subscriptions must have a non-empty string name'
         return 1
     fi
 
-    bad=$(echo "$cfg" | jq '[(.subscriptions // {})[] | select((.url != null and (.url | type) != "string") or (.nodes != null and (.nodes | type) != "array"))] | length' 2>/dev/null)
+    bad=$(printf '%s\n' "$cfg" | jq '[(.subscriptions // {})[] | select((.url != null and (.url | type) != "string") or (.nodes != null and (.nodes | type) != "array"))] | length' 2>/dev/null)
     if [ "${bad:-1}" != 0 ]; then
         printf 'Subscription url must be a string and nodes must be an array'
         return 1
     fi
 
-    bad=$(echo "$cfg" | jq '[(.subscriptions // {})[] | (.nodes // [])[] | select(type != "string" or . == "")] | length' 2>/dev/null)
+    bad=$(printf '%s\n' "$cfg" | jq '[(.subscriptions // {})[] | (.nodes // [])[] | select(type != "string" or . == "")] | length' 2>/dev/null)
     if [ "${bad:-1}" != 0 ]; then
         printf 'Subscription nodes must be non-empty strings'
         return 1
     fi
 
-    bad=$(echo "$cfg" | jq '[(.subscriptions // {})[] | select((.url // "") != "" and ((.nodes // []) | length) > 0)] | length' 2>/dev/null)
+    bad=$(printf '%s\n' "$cfg" | jq '[(.subscriptions // {})[] | select((.url // "") != "" and ((.nodes // []) | length) > 0)] | length' 2>/dev/null)
     if [ "${bad:-1}" != 0 ]; then
         printf 'A subscription takes either a url or inline nodes, not both'
         return 1
     fi
 
-    bad=$(echo "$cfg" | jq '[(.subscriptions // {})[] | select(.enabled != false and (.url // "") == "" and ((.nodes // []) | length) == 0)] | length' 2>/dev/null)
+    bad=$(printf '%s\n' "$cfg" | jq '[(.subscriptions // {})[] | select(.enabled != false and (.url // "") == "" and ((.nodes // []) | length) == 0)] | length' 2>/dev/null)
     if [ "${bad:-1}" != 0 ]; then
         printf 'Each enabled subscription must have a url or inline nodes'
         return 1
@@ -136,28 +136,28 @@ case "$1" in
 
             set_config)
                 read -r input
-                if ! echo "$input" | jq -e '.config' > /dev/null 2>&1; then
+                if ! printf '%s\n' "$input" | jq -e '.config' > /dev/null 2>&1; then
                     printf '{"error":"Invalid config JSON"}'
                     exit 0
                 fi
-                new_config=$(echo "$input" | jq '.config')
+                new_config=$(printf '%s\n' "$input" | jq '.config')
 
                 # Validate: subscriptions must be an object, not an array
-                sub_type=$(echo "$new_config" | jq -r '(.subscriptions) | type')
+                sub_type=$(printf '%s\n' "$new_config" | jq -r '(.subscriptions) | type')
                 if [ "$sub_type" != "object" ]; then
                     printf '{"error":"subscriptions must be a keyed object, not an array"}'
                     exit 0
                 fi
 
                 # Validate: subscriptions must be a non-empty object
-                sub_count=$(echo "$new_config" | jq '(.subscriptions // {}) | length')
+                sub_count=$(printf '%s\n' "$new_config" | jq '(.subscriptions // {}) | length')
                 if [ "$sub_count" -eq 0 ]; then
                     printf '{"error":"At least one subscription is required"}'
                     exit 0
                 fi
 
                 # Validate: exactly one default subscription
-                def_count=$(echo "$new_config" | jq '[(.subscriptions // {})[] | select(.default == true)] | length')
+                def_count=$(printf '%s\n' "$new_config" | jq '[(.subscriptions // {})[] | select(.default == true)] | length')
                 if [ "$def_count" -eq 0 ]; then
                     printf '{"error":"At least one enabled default subscription is required"}'
                     exit 0
@@ -168,7 +168,7 @@ case "$1" in
                 fi
 
                 # Validate: default subscription must not be disabled
-                def_disabled=$(echo "$new_config" | jq '[(.subscriptions // {})[] | select(.default == true and .enabled == false)] | length')
+                def_disabled=$(printf '%s\n' "$new_config" | jq '[(.subscriptions // {})[] | select(.default == true and .enabled == false)] | length')
                 if [ "$def_disabled" -gt 0 ]; then
                     printf '{"error":"Default subscription cannot be disabled"}'
                     exit 0
@@ -181,14 +181,14 @@ case "$1" in
                 fi
 
                 # Validate: include and exclude must be arrays of strings if present
-                invalid_filter_type=$(echo "$new_config" | jq '[(.subscriptions // {})[] | select((.include != null and (.include | type) != "array") or (.exclude != null and (.exclude | type) != "array"))] | length')
+                invalid_filter_type=$(printf '%s\n' "$new_config" | jq '[(.subscriptions // {})[] | select((.include != null and (.include | type) != "array") or (.exclude != null and (.exclude | type) != "array"))] | length')
                 if [ "$invalid_filter_type" -gt 0 ]; then
                     printf '{"error":"Include and exclude filters must be arrays"}'
                     exit 0
                 fi
 
                 # Validate: include and exclude filter entries must be non-empty strings
-                invalid_filter_entries=$(echo "$new_config" | jq '[(.subscriptions // {})[] | ((.include // []) + (.exclude // []))[] | select(type != "string" or . == "")] | length')
+                invalid_filter_entries=$(printf '%s\n' "$new_config" | jq '[(.subscriptions // {})[] | ((.include // []) + (.exclude // []))[] | select(type != "string" or . == "")] | length')
                 if [ "$invalid_filter_entries" -gt 0 ]; then
                     printf '{"error":"Include and exclude filter entries must be non-empty strings"}'
                     exit 0
@@ -227,37 +227,37 @@ case "$1" in
 
             set_full_config)
                 read -r input
-                if ! echo "$input" | jq -e '.config' > /dev/null 2>&1; then
+                if ! printf '%s\n' "$input" | jq -e '.config' > /dev/null 2>&1; then
                     printf '{"error":"Invalid config JSON"}'
                     exit 0
                 fi
-                new_config=$(echo "$input" | jq '.config')
+                new_config=$(printf '%s\n' "$input" | jq '.config')
 
                 # Validate template contents before any writes
-                tmpl_contents=$(echo "$input" | jq -r '.template_contents // ""')
+                tmpl_contents=$(printf '%s\n' "$input" | jq -r '.template_contents // ""')
                 if [ -n "$tmpl_contents" ]; then
-                    if ! echo "$tmpl_contents" | jq -e '.' > /dev/null 2>&1; then
+                    if ! printf '%s\n' "$tmpl_contents" | jq -e '.' > /dev/null 2>&1; then
                         printf '{"error":"Invalid template JSON"}'
                         exit 0
                     fi
                 fi
 
                 # Validate: subscriptions must be an object, not an array
-                sub_type=$(echo "$new_config" | jq -r '(.subscriptions) | type')
+                sub_type=$(printf '%s\n' "$new_config" | jq -r '(.subscriptions) | type')
                 if [ "$sub_type" != "object" ]; then
                     printf '{"error":"subscriptions must be a keyed object, not an array"}'
                     exit 0
                 fi
 
                 # Validate: subscriptions must be a non-empty object
-                sub_count=$(echo "$new_config" | jq '(.subscriptions // {}) | length')
+                sub_count=$(printf '%s\n' "$new_config" | jq '(.subscriptions // {}) | length')
                 if [ "$sub_count" -eq 0 ]; then
                     printf '{"error":"At least one subscription is required"}'
                     exit 0
                 fi
 
                 # Validate: exactly one default subscription
-                def_count=$(echo "$new_config" | jq '[(.subscriptions // {})[] | select(.default == true)] | length')
+                def_count=$(printf '%s\n' "$new_config" | jq '[(.subscriptions // {})[] | select(.default == true)] | length')
                 if [ "$def_count" -eq 0 ]; then
                     printf '{"error":"At least one enabled default subscription is required"}'
                     exit 0
@@ -268,7 +268,7 @@ case "$1" in
                 fi
 
                 # Validate: default subscription must not be disabled
-                def_disabled=$(echo "$new_config" | jq '[(.subscriptions // {})[] | select(.default == true and .enabled == false)] | length')
+                def_disabled=$(printf '%s\n' "$new_config" | jq '[(.subscriptions // {})[] | select(.default == true and .enabled == false)] | length')
                 if [ "$def_disabled" -gt 0 ]; then
                     printf '{"error":"Default subscription cannot be disabled"}'
                     exit 0
@@ -281,14 +281,14 @@ case "$1" in
                 fi
 
                 # Validate: include and exclude must be arrays of strings if present
-                invalid_filter_type=$(echo "$new_config" | jq '[(.subscriptions // {})[] | select((.include != null and (.include | type) != "array") or (.exclude != null and (.exclude | type) != "array"))] | length')
+                invalid_filter_type=$(printf '%s\n' "$new_config" | jq '[(.subscriptions // {})[] | select((.include != null and (.include | type) != "array") or (.exclude != null and (.exclude | type) != "array"))] | length')
                 if [ "$invalid_filter_type" -gt 0 ]; then
                     printf '{"error":"Include and exclude filters must be arrays"}'
                     exit 0
                 fi
 
                 # Validate: include and exclude filter entries must be non-empty strings
-                invalid_filter_entries=$(echo "$new_config" | jq '[(.subscriptions // {})[] | ((.include // []) + (.exclude // []))[] | select(type != "string" or . == "")] | length')
+                invalid_filter_entries=$(printf '%s\n' "$new_config" | jq '[(.subscriptions // {})[] | ((.include // []) + (.exclude // []))[] | select(type != "string" or . == "")] | length')
                 if [ "$invalid_filter_entries" -gt 0 ]; then
                     printf '{"error":"Include and exclude filter entries must be non-empty strings"}'
                     exit 0
@@ -296,7 +296,7 @@ case "$1" in
 
                 # All validation passed — apply template path update to config before merge
                 if [ -n "$tmpl_contents" ]; then
-                    new_config=$(echo "$new_config" | jq --arg p "$CUSTOM_TEMPLATE" '.singbox.template = $p')
+                    new_config=$(printf '%s\n' "$new_config" | jq --arg p "$CUSTOM_TEMPLATE" '.singbox.template = $p')
                 fi
 
                 # Build merged config
@@ -355,10 +355,10 @@ case "$1" in
 
                 # Parse optional params
                 read -r input
-                dry_run=$(echo "$input" | jq -r '.dry_run // false')
-                cached_lists=$(echo "$input" | jq -r '.cached_lists // false')
-                download_lists=$(echo "$input" | jq -r '.download_lists // false')
-                verbosity=$(echo "$input" | jq -r '.verbosity // 0')
+                dry_run=$(printf '%s\n' "$input" | jq -r '.dry_run // false')
+                cached_lists=$(printf '%s\n' "$input" | jq -r '.cached_lists // false')
+                download_lists=$(printf '%s\n' "$input" | jq -r '.download_lists // false')
+                verbosity=$(printf '%s\n' "$input" | jq -r '.verbosity // 0')
 
                 # Build subcommand
                 [ "$dry_run" = "true" ] && subcmd="dry-run" || subcmd="run"
@@ -408,8 +408,8 @@ case "$1" in
                 fi
 
                 read -r input
-                with_subs=$(echo "$input" | jq -r '.with_subscriptions // false')
-                verbosity=$(echo "$input" | jq -r '.verbosity // 0')
+                with_subs=$(printf '%s\n' "$input" | jq -r '.with_subscriptions // false')
+                verbosity=$(printf '%s\n' "$input" | jq -r '.verbosity // 0')
 
                 args="routing run --logs"
                 [ "$with_subs" = "true" ] && args="$args --with-subscriptions"
@@ -443,7 +443,7 @@ case "$1" in
 
             test_url)
                 read -r input
-                url=$(echo "$input" | jq -r '.url // ""')
+                url=$(printf '%s\n' "$input" | jq -r '.url // ""')
 
                 case "$url" in
                     http://*|https://*) ;;
@@ -451,7 +451,7 @@ case "$1" in
                 esac
 
                 # Extract domain (strip protocol, path, query, port)
-                domain=$(echo "$url" | sed 's|https\?://||;s|[/?#].*||;s|:.*||')
+                domain=$(printf '%s\n' "$url" | sed 's|https\?://||;s|[/?#].*||;s|:.*||')
 
                 # 1. Test request through tun0 — capture HTTP status code
                 vpn_http_code=$(curl --interface tun0 -s --max-time 15 \
@@ -494,8 +494,8 @@ case "$1" in
                 else
                     tag_names='{}'
                 fi
-                if echo "$result" | jq -e '.proxies' > /dev/null 2>&1; then
-                    echo "$result" | jq --argjson tn "$tag_names" '. + {tag_names: $tn}'
+                if printf '%s\n' "$result" | jq -e '.proxies' > /dev/null 2>&1; then
+                    printf '%s\n' "$result" | jq --argjson tn "$tag_names" '. + {tag_names: $tn}'
                 else
                     printf '{"proxies":{},"tag_names":{}}'
                 fi
@@ -503,8 +503,8 @@ case "$1" in
 
             set_proxy)
                 read -r input
-                proxy=$(echo "$input" | jq -r '.proxy // ""')
-                selected=$(echo "$input" | jq -r '.selected // ""')
+                proxy=$(printf '%s\n' "$input" | jq -r '.proxy // ""')
+                selected=$(printf '%s\n' "$input" | jq -r '.selected // ""')
 
                 if [ -z "$proxy" ] || [ -z "$selected" ]; then
                     printf '{"error":"Missing proxy or selected"}'
@@ -530,7 +530,7 @@ case "$1" in
 
             test_delays)
                 read -r input
-                test_url=$(echo "$input" | jq -r '.url // "https://www.gstatic.com/generate_204"')
+                test_url=$(printf '%s\n' "$input" | jq -r '.url // "https://www.gstatic.com/generate_204"')
                 case "$test_url" in
                     http://*|https://*) ;;
                     *) printf '{"error":"Invalid URL"}'; exit 0 ;;
@@ -552,11 +552,11 @@ case "$1" in
                         resp=$(curl -s --max-time 8 \
                             "http://127.0.0.1:9090/proxies/${tag}/delay?url=${enc_url}&timeout=5000" \
                             2>/dev/null)
-                        delay=$(echo "$resp" | jq -r '.delay // 0' 2>/dev/null || echo 0)
+                        delay=$(printf '%s\n' "$resp" | jq -r '.delay // 0' 2>/dev/null || echo 0)
                         printf '%s\t%s\n' "$tag" "${delay:-0}" > "${tmpd}/${tag}"
                     ) &
                 done <<TAGEOF
-$(echo "$input" | jq -r '.tags[]? // empty')
+$(printf '%s\n' "$input" | jq -r '.tags[]? // empty')
 TAGEOF
                 wait
                 # Build JSON result from temp files using jq for safe encoding
@@ -574,7 +574,7 @@ TAGEOF
 
             get_syslog)
                 read -r input
-                lines=$(echo "$input" | jq -r '.lines // 200')
+                lines=$(printf '%s\n' "$input" | jq -r '.lines // 200')
                 # Validate: must be a positive integer
                 case "$lines" in
                     ''|*[!0-9]*) lines=200 ;;
@@ -601,12 +601,12 @@ TAGEOF
 
             set_template)
                 read -r input
-                tmpl=$(echo "$input" | jq -r '.template // ""')
+                tmpl=$(printf '%s\n' "$input" | jq -r '.template // ""')
                 if [ -z "$tmpl" ]; then
                     printf '{"error":"Empty template"}'
                     exit 0
                 fi
-                if ! echo "$tmpl" | jq -e '.' > /dev/null 2>&1; then
+                if ! printf '%s\n' "$tmpl" | jq -e '.' > /dev/null 2>&1; then
                     printf '{"error":"Invalid JSON"}'
                     exit 0
                 fi
@@ -661,11 +661,11 @@ TAGEOF
 
             set_domains_config)
                 read -r input
-                if ! echo "$input" | jq -e '.config' > /dev/null 2>&1; then
+                if ! printf '%s\n' "$input" | jq -e '.config' > /dev/null 2>&1; then
                     printf '{"error":"Invalid config JSON"}'
                     exit 0
                 fi
-                new_routing=$(echo "$input" | jq '.config')
+                new_routing=$(printf '%s\n' "$input" | jq '.config')
                 # Merge into existing config, replacing only the routing section
                 if [ -f "$CONFIG_FILE" ]; then
                     existing=$(cat "$CONFIG_FILE")
@@ -705,7 +705,7 @@ TAGEOF
 
             set_manual_ips)
                 read -r input
-                ips=$(echo "$input" | jq -r '.ips // ""')
+                ips=$(printf '%s\n' "$input" | jq -r '.ips // ""')
                 manual_file="$MANUAL_IPS_DEFAULT"
                 if [ -f "$CONFIG_FILE" ]; then
                     cf=$(jq -r '.routing.subnets.manual_file // ""' "$CONFIG_FILE" 2>/dev/null)
