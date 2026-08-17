@@ -92,7 +92,7 @@ ALL_PLATFORMS = \
 	build-luci \
 	build-ipk build-ipk-core build-ipk-core-all build-ipk-all build-ipk-luci \
 	docker-apk shell \
-	lint go-build go-test go-lint go-fmt clean
+	lint go-build go-test go-lint go-fmt luci-test clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -217,6 +217,17 @@ go-lint: ## Run golangci-lint on Go code
 
 go-fmt: ## Check Go formatting
 	@cd $(GO_PKG_DIR) && test -z "$$(gofmt -l .)" || { gofmt -d .; exit 1; }
+
+# ── LuCI development ─────────────────────────────────────────
+
+# node --test needs explicit files: a bare directory argument is resolved as a
+# module and fails. dash, not sh: macOS sh is bash 3.2 and mis-parses the rpcd
+# script's case-inside-$().
+luci-test: ## Run LuCI view and rpcd backend tests
+	node --check $(LUCI_SRC)/root/www/luci-static/resources/view/horn-vpn-manager/config.js
+	node --test $(LUCI_SRC)/tests/*.test.js
+	dash -n $(LUCI_SRC)/root/usr/libexec/rpcd/horn-vpn-manager
+	dash $(LUCI_SRC)/tests/rpcd-checks.test.sh
 
 # ── Cleanup ───────────────────────────────────────────────────
 

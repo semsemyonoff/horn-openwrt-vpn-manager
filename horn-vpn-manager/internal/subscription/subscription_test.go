@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/config"
+	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/logx"
 )
 
 // fakeApplier records calls without executing system commands.
@@ -381,6 +382,9 @@ func TestRunner_Run_apply_called_when_not_dryrun(t *testing.T) {
 	applier := &fakeApplier{}
 	runner := NewRunner(cfg, applier)
 	runner.OutDir = t.TempDir()
+	// ConfigDir too: a non-dry-run that reaches the end writes subs-tags.json
+	// there, and the default is the on-device /etc/horn-vpn-manager.
+	runner.ConfigDir = t.TempDir()
 	runner.DryRun = false
 
 	if err := runner.Run(context.Background()); err != nil {
@@ -825,8 +829,11 @@ func TestRunner_Run_fallback_on_default(t *testing.T) {
 	if group["blacklist_timeout"] != "1m" {
 		t.Errorf("blacklist_timeout = %v, want 1m", group["blacklist_timeout"])
 	}
-	if group["interrupt_exist_connections"] != true {
-		t.Errorf("interrupt_exist_connections = %v, want true", group["interrupt_exist_connections"])
+	if _, ok := group["interrupt_exist_connections"]; ok {
+		// Not a field of the extended build's fallback outbound; sing-box
+		// disallows unknown outbound fields, so emitting it would make every
+		// fallback config fail `sing-box check`.
+		t.Errorf("fallback group carries interrupt_exist_connections, want absent")
 	}
 	// Single-node primary → -single, multi-node backup → -manual, order as declared.
 	want := []string{"primary-single", "backup-manual", "spare-single"}
@@ -846,8 +853,8 @@ func TestRunner_Run_fallback_on_default(t *testing.T) {
 	if err := json.Unmarshal(data, &tags); err != nil {
 		t.Fatalf("subs-tags.json is not valid JSON: %v", err)
 	}
-	if tags["primary-fallback"] == "" {
-		t.Errorf("no name registered for primary-fallback, got: %v", tags)
+	if tags["primary-fallback"] != "primary (fallback)" {
+		t.Errorf("name for primary-fallback = %q, want %q", tags["primary-fallback"], "primary (fallback)")
 	}
 }
 
@@ -969,6 +976,63 @@ func TestRunner_Run_fallback_nested(t *testing.T) {
 	}
 	if final := routeFinal(t, generated); final != "a-fallback" {
 		t.Errorf("route.final = %q, want a-fallback", final)
+	}
+}
+
+// TestRunner_Run_fallback_nested_collapsed verifies that when a backup's own
+// chain collapses (its only backup produced no plan), the outer chain falls back
+// to that backup's bare final tag instead of referencing a -fallback group that
+// was never emitted. Nothing else catches a dangling tag: dry-run never runs
+// `sing-box check`.
+func TestRunner_Run_fallback_nested_collapsed(t *testing.T) {
+	deadSrv := newTestServer(t, "", http.StatusInternalServerError)
+	defer deadSrv.Close()
+
+	cfg := &config.Config{
+		Fetch: config.Fetch{Retries: 1, TimeoutSeconds: 5, Parallelism: 1},
+		Subscriptions: map[string]*config.Subscription{
+			"a": {
+				Name:     "A",
+				Default:  true,
+				Nodes:    []string{inlineNodeA},
+				Fallback: &config.Fallback{Subscriptions: []string{"b"}},
+			},
+			"b": {
+				Name:     "B",
+				Nodes:    []string{inlineNodeB},
+				Fallback: &config.Fallback{Subscriptions: []string{"c"}},
+			},
+			"c": {Name: "C", URL: deadSrv.URL},
+		},
+	}
+
+	outDir := t.TempDir()
+	runner := NewRunner(cfg, &fakeApplier{})
+	runner.OutDir = outDir
+	runner.DryRun = true
+
+	if err := runner.Run(context.Background()); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	generated := readConfig(t, filepath.Join(outDir, "config.json"))
+
+	if inner := outboundByTag(generated, "b-fallback"); inner != nil {
+		t.Errorf("b-fallback emitted despite its only backup failing, tags: %v", collectOutboundTags(generated))
+	}
+	outer := outboundByTag(generated, "a-fallback")
+	if outer == nil {
+		t.Fatalf("a-fallback missing, tags: %v", collectOutboundTags(generated))
+	}
+	if want := []string{"a-single", "b-single"}; !slices.Equal(outboundList(t, outer), want) {
+		t.Errorf("a-fallback outbounds = %v, want %v", outboundList(t, outer), want)
+	}
+	// Every referenced tag must actually exist, or sing-box rejects the config.
+	tags := collectOutboundTags(generated)
+	for _, ref := range outboundList(t, outer) {
+		if outboundByTag(generated, ref) == nil {
+			t.Errorf("a-fallback references %q, which is not an emitted outbound (tags: %v)", ref, tags)
+		}
 	}
 }
 
@@ -1198,4 +1262,83 @@ func TestExtractNodeName(t *testing.T) {
 			t.Errorf("extractNodeName(%q) = %q, want %q", tt.uri, got, tt.want)
 		}
 	}
+}
+
+// captureLog redirects logx output for the duration of the test.
+func captureLog(t *testing.T) *strings.Builder {
+	t.Helper()
+	var buf strings.Builder
+	logx.SetOutput(&buf)
+	t.Cleanup(func() { logx.SetOutput(os.Stderr) })
+	return &buf
+}
+
+const noEffectWarning = "fallback chain has no effect"
+
+// TestRunner_Run_fallback_no_effect_warning covers both sides of the reachability
+// check: a non-default subscription with a chain but no route rules is only inert
+// when nothing else routes to it. Being another chain's backup makes it reachable
+// through that chain's group, so warning there would tell an operator to delete a
+// working configuration.
+func TestRunner_Run_fallback_no_effect_warning(t *testing.T) {
+	t.Run("warns when unreachable", func(t *testing.T) {
+		buf := captureLog(t)
+		cfg := &config.Config{
+			Fetch: config.Fetch{Retries: 1, TimeoutSeconds: 5, Parallelism: 1},
+			Subscriptions: map[string]*config.Subscription{
+				"a": {Name: "A", Default: true, Nodes: []string{inlineNodeA}},
+				"b": {
+					Name:     "B",
+					Nodes:    []string{inlineNodeB},
+					Fallback: &config.Fallback{Subscriptions: []string{"c"}},
+				},
+				"c": {Name: "C", Nodes: []string{inlineNodeC}},
+			},
+		}
+		runFallbackRunner(t, cfg)
+		if !strings.Contains(buf.String(), noEffectWarning) {
+			t.Errorf("expected a %q warning for the unreachable chain, log:\n%s", noEffectWarning, buf.String())
+		}
+	})
+
+	t.Run("stays quiet when the subscription is another chain's backup", func(t *testing.T) {
+		buf := captureLog(t)
+		cfg := &config.Config{
+			Fetch: config.Fetch{Retries: 1, TimeoutSeconds: 5, Parallelism: 1},
+			Subscriptions: map[string]*config.Subscription{
+				"a": {
+					Name:     "A",
+					Default:  true,
+					Nodes:    []string{inlineNodeA},
+					Fallback: &config.Fallback{Subscriptions: []string{"b"}},
+				},
+				"b": {
+					Name:     "B",
+					Nodes:    []string{inlineNodeB},
+					Fallback: &config.Fallback{Subscriptions: []string{"c"}},
+				},
+				"c": {Name: "C", Nodes: []string{inlineNodeC}},
+			},
+		}
+		generated := runFallbackRunner(t, cfg)
+		if strings.Contains(buf.String(), noEffectWarning) {
+			t.Errorf("b is reached through a-fallback, so no %q warning is due, log:\n%s", noEffectWarning, buf.String())
+		}
+		// Guard: the warning would also be absent if the group were never built.
+		if outboundByTag(generated, "b-fallback") == nil {
+			t.Fatalf("b-fallback missing, tags: %v", collectOutboundTags(generated))
+		}
+	})
+}
+
+func runFallbackRunner(t *testing.T, cfg *config.Config) map[string]any {
+	t.Helper()
+	outDir := t.TempDir()
+	runner := NewRunner(cfg, &fakeApplier{})
+	runner.OutDir = outDir
+	runner.DryRun = true
+	if err := runner.Run(context.Background()); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+	return readConfig(t, filepath.Join(outDir, "config.json"))
 }

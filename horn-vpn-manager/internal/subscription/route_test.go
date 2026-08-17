@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/config"
@@ -260,12 +262,79 @@ func TestRunner_RouteRule_NonDefault(t *testing.T) {
 	// Use a capturing applier from the internal package via a local fake.
 	applier := &fakeRouteApplier{}
 	runner := subscription.NewRunner(cfg, applier)
-	runner.OutDir = t.TempDir()
+	outDir := t.TempDir()
+	runner.OutDir = outDir
 	runner.DryRun = true
 
 	if err := runner.Run(context.Background()); err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
+
+	rules := generatedRouteRules(t, outDir)
+	// One rule per source kind, both pointing at the non-default subscription's
+	// own outbound — this is what applyFallbackChains later retargets.
+	want := []struct {
+		key      string
+		values   []string
+		outbound string
+	}{
+		{"domain_suffix", []string{"corp.example.com"}, "work-single"},
+		{"ip_cidr", []string{"10.0.0.0/8"}, "work-single"},
+	}
+	for _, w := range want {
+		rule := findRuleByKey(rules, w.key)
+		if rule == nil {
+			t.Errorf("no route rule with %q, got rules: %v", w.key, rules)
+			continue
+		}
+		if got := ruleStrings(rule[w.key]); !slices.Equal(got, w.values) {
+			t.Errorf("rule %s = %v, want %v", w.key, got, w.values)
+		}
+		if rule["outbound"] != w.outbound {
+			t.Errorf("rule %s outbound = %v, want %q", w.key, rule["outbound"], w.outbound)
+		}
+	}
+}
+
+// generatedRouteRules returns route.rules from the config written to outDir.
+func generatedRouteRules(t *testing.T, outDir string) []map[string]any {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(outDir, "config.json"))
+	if err != nil {
+		t.Fatalf("read generated config: %v", err)
+	}
+	var generated struct {
+		Route struct {
+			Rules []map[string]any `json:"rules"`
+		} `json:"route"`
+	}
+	if err := json.Unmarshal(data, &generated); err != nil {
+		t.Fatalf("generated config is not valid JSON: %v", err)
+	}
+	return generated.Route.Rules
+}
+
+// findRuleByKey returns the first rule carrying key, or nil.
+func findRuleByKey(rules []map[string]any, key string) map[string]any {
+	for _, r := range rules {
+		if _, ok := r[key]; ok {
+			return r
+		}
+	}
+	return nil
+}
+
+func ruleStrings(v any) []string {
+	items, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		s, _ := it.(string)
+		out = append(out, s)
+	}
+	return out
 }
 
 // TestRunner_RouteRule_DefaultNoRule verifies that default subscriptions do not
@@ -294,11 +363,20 @@ func TestRunner_RouteRule_DefaultNoRule(t *testing.T) {
 
 	applier := &fakeRouteApplier{}
 	runner := subscription.NewRunner(cfg, applier)
-	runner.OutDir = t.TempDir()
+	outDir := t.TempDir()
+	runner.OutDir = outDir
 	runner.DryRun = true
 
 	if err := runner.Run(context.Background()); err != nil {
 		t.Fatalf("Run() error: %v", err)
+	}
+
+	// The template's own "sniff" rule is expected; a rule naming an outbound is
+	// not, since the default subscription is reached through route.final.
+	for _, rule := range generatedRouteRules(t, outDir) {
+		if _, ok := rule["outbound"]; ok {
+			t.Errorf("default subscription produced a route rule: %v", rule)
+		}
 	}
 }
 

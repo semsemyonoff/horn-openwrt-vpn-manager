@@ -67,6 +67,7 @@ Package contents:
 - `horn-vpn-manager-luci/root/usr/share/luci/menu.d/horn-vpn-manager.json` — menu entry
 - `horn-vpn-manager-luci/po/{en,ru}/horn-vpn-manager.po` — translations
 - `horn-vpn-manager-luci/tools/po2lmo.py` — PO→LMO compiler for translations
+- `horn-vpn-manager-luci/tests/` — Node/`dash` harness for the view and the rpcd backend; not shipped in the package (`package-luci-apk.sh` copies only `root/`)
 
 Tab order: Subscriptions → Routing → Run → Sing-box template config → Additional domains → Sing-box logs → Test
 
@@ -95,6 +96,11 @@ LuCI invariants (each one was a real bug):
 - **A save must not drop fields the JS does not know about.** `_collectConfig` starts from a copy of the subscription as loaded (`_widgets[idx].raw`) and of `singbox` (`_rawSingbox`), then assigns or deletes known keys via `setOrDelete` — never rebuild either object from an allow-list. A no-op save must leave `config.json` byte-identical.
 - Only write a field whose input was actually rendered: `interval` / `tolerance` inputs exist only for a multi-node subscription with proxy data, so an unguarded write deletes them whenever sing-box is down.
 - rpcd merges `singbox` additively (`$esb + $isb`), so dropping a key on save cannot clear a stored value. Clearing a field that *was* set emits `""` (the core treats empty as unset); a field that was never set stays absent.
+- **`E()` string children go through `innerHTML`.** Any text that is concatenated or comes from outside the view — provider node names, backend error messages, filenames — must be set with `textContent` (`nodeNameSpan` / `textP`), never passed as an `E(...)` child.
+- Maps keyed by subscription id use `Object.create(null)`: the ID field is free text, so an id like `__proto__` or `constructor` would otherwise not become an own key and the subscription would silently vanish from the save.
+- Client-side validation must never be stricter than the core. A disabled subscription needs no `url`/`nodes`, so rejecting it blocks a save over something the core accepts; when in doubt let `check_with_core` deliver the error.
+- rpcd `jq` checks compare against `"${bad:-1}"`. An unguarded `[ "$bad" -gt 0 ]` errors out when `jq` aborts on a malformed payload and the script falls through — accepting it. Fail closed.
+- `check_with_core` writes its candidate to an `mktemp` path, not a `$$`-derived one: rpcd runs as root on a world-writable `/tmp`, so a predictable name lets a local process pre-plant a symlink and have root truncate an arbitrary file.
 - The rpcd backend keeps sh-level checks structural only (types, presence, XOR) and delegates schema validation to `vpn-manager check -c <tmp>` on the **merged** candidate (`check_with_core`), rather than reimplementing cross-reference logic in a regex-less `jq`. It accepts on the structural checks alone when the core is unreachable, so a partially installed system can still save.
 - Error replies go through `fail_json`, which JSON-escapes the message — core errors quote subscription ids.
 
@@ -128,8 +134,9 @@ Fallback chains (`fallback`):
 
 `connect_timeout` and `interrupt_exist_connections`:
 
-- `singbox.connect_timeout` (a `time.ParseDuration` string) is emitted as a dial field on every node outbound; empty omits the field entirely
+- `singbox.connect_timeout` (a `time.ParseDuration` string) is emitted as a dial field on every node outbound; empty omits the field entirely. Duration fields (`connect_timeout`, `interval`, `fallback.blacklist_timeout`) must be **positive**: `time.ParseDuration` accepts `"0"` and a leading `-`, and a non-positive value would be written through to sing-box, so validation checks the sign separately
 - generated `urltest` and `selector` groups always emit `interrupt_exist_connections: true`, so operators should raise per-subscription `tolerance` (~300 ms; the default is 100) to keep `urltest` from cutting live connections on benign latency jitter
+- the generated `fallback` group carries exactly `type`, `tag`, `outbounds`, `blacklist_timeout` — `FallbackOutboundOptions` in the extended build and nothing else. sing-box decodes outbound options with unknown fields disallowed, so adding `interrupt_exist_connections` (which `selector` and `urltest` *do* accept) makes `sing-box check` reject the entire config. Do not harmonise the three group types
 
 Node identity:
 
@@ -208,6 +215,7 @@ Design constraints:
 - `make go-test` — run Go tests
 - `make go-fmt` / `make go-lint` — Go formatting check / `golangci-lint`
 - `make lint` — aggregate Go checks (`go-fmt` + `go-lint`)
+- `make luci-test` — LuCI view tests (`node --test`) and rpcd backend tests (`dash`), plus the `node --check` / `dash -n` syntax gates
 - `make clean` — remove build output
 
 Preferred checks before opening a change:
@@ -216,6 +224,7 @@ Preferred checks before opening a change:
 - `golangci-lint run`
 - `go test ./...`
 - `make lint`
+- `make luci-test` when `config.js` or the rpcd script changes
 - affected `make build*` target when packaging/build flow changes
 
 If the task touches OpenWrt runtime integration, validate on an OpenWrt device or container rather than on the host OS.
@@ -270,7 +279,9 @@ Preferred test layout:
 
 Non-Go checks:
 
-- LuCI JS has no test harness in the repo. When changing save/validation logic, drive the **real** `render` / `_collectConfig` / `_validate` from `config.js` against a stub DOM (Node, optionally jsdom) rather than asserting on a reimplementation, and include a mutation check — revert the fix and confirm the harness fails — so it cannot pass vacuously. `node --check` on `config.js` is the minimum gate.
+- LuCI JS is covered by `horn-vpn-manager-luci/tests/`. `load-view.js` evaluates the shipped `config.js` with `new Function`, the way LuCI itself does, against `stub-dom.js` — a dependency-free DOM/LuCI stub, no jsdom — so tests drive the **real** `_makeCard` / `_collectConfig` / `_validate`. Never assert on a reimplementation, and mutation-check every new test: revert the fix it covers and confirm the test fails, so it cannot pass vacuously.
+- `rpcd-checks.test.sh` sources the real rpcd script with an unmatched `$1` so the `case` dispatcher falls through, then drives `check_sub_sources` / `fail_json` / `check_with_core` directly. It stubs `vpn-manager` on `PATH` to cover the core-rejection path.
+- Run them with `make luci-test` (or `node --test horn-vpn-manager-luci/tests/*.test.js` — a bare directory argument does not work — and `dash horn-vpn-manager-luci/tests/rpcd-checks.test.sh`). `node --check` on `config.js` and `dash -n` on the rpcd script remain the minimum gates.
 - Gate the rpcd script with `dash -n`, not the host `sh`: macOS `sh` is bash 3.2 and mis-parses a pre-existing `case`-inside-`$()`. `dash` is the closest available shell to OpenWrt `ash`. `shellcheck -s sh` is useful but reports pre-existing SC2221/SC2222.
 
 ## Performance & Binary Size Constraints

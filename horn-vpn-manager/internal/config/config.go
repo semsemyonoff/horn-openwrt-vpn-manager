@@ -16,6 +16,10 @@ import (
 
 const DefaultPath = "/etc/horn-vpn-manager/config.json"
 
+// DefaultManualIPFile is where routing.subnets.manual_file points when the
+// config leaves it unset.
+const DefaultManualIPFile = "/etc/horn-vpn-manager/lists/manual-ip.lst"
+
 type Config struct {
 	Fetch         Fetch                    `json:"fetch"`
 	Singbox       Singbox                  `json:"singbox"`
@@ -125,7 +129,7 @@ func (c *Config) applyDefaults() {
 		c.Fetch.Parallelism = 2
 	}
 	if c.Routing.Subnets.ManualFile == "" {
-		c.Routing.Subnets.ManualFile = "/etc/horn-vpn-manager/lists/manual-ip.lst"
+		c.Routing.Subnets.ManualFile = DefaultManualIPFile
 	}
 }
 
@@ -136,8 +140,11 @@ func (c *Config) validate(hasExplicitManualFile bool) error {
 		return errors.New("config must have at least routing (domains.url, subnets.urls, or subnets.manual_file) or subscriptions configured")
 	}
 	if c.Singbox.ConnectTimeout != "" {
-		if _, err := time.ParseDuration(c.Singbox.ConnectTimeout); err != nil {
-			return fmt.Errorf("singbox has invalid connect_timeout %q: must be a Go duration (e.g. \"3s\", \"500ms\")", c.Singbox.ConnectTimeout)
+		// time.ParseDuration accepts "0" and a leading "-", so the sign has to
+		// be checked separately: a non-positive value is written onto every node
+		// outbound and would take the whole proxy down.
+		if d, err := time.ParseDuration(c.Singbox.ConnectTimeout); err != nil || d <= 0 {
+			return fmt.Errorf("singbox has invalid connect_timeout %q: must be a positive Go duration (e.g. \"3s\", \"500ms\")", c.Singbox.ConnectTimeout)
 		}
 	}
 	return nil
@@ -173,8 +180,8 @@ func (c *Config) ValidateSubscriptions() error {
 			return fmt.Errorf("subscription %q has an empty exclude pattern: remove it or provide a non-empty pattern", id)
 		}
 		if sub.Interval != "" {
-			if _, err := time.ParseDuration(sub.Interval); err != nil {
-				return fmt.Errorf("subscription %q has invalid interval %q: must be a Go duration (e.g. \"5m\", \"30s\")", id, sub.Interval)
+			if d, err := time.ParseDuration(sub.Interval); err != nil || d <= 0 {
+				return fmt.Errorf("subscription %q has invalid interval %q: must be a positive Go duration (e.g. \"5m\", \"30s\")", id, sub.Interval)
 			}
 		}
 		if err := validateSource(id, sub); err != nil {
@@ -254,8 +261,10 @@ func (c *Config) validateFallback(id string, sub *Subscription) error {
 		}
 	}
 	if fb.BlacklistTimeout != "" {
-		if _, err := time.ParseDuration(fb.BlacklistTimeout); err != nil {
-			return fmt.Errorf("subscription %q has invalid fallback blacklist_timeout %q: must be a Go duration (e.g. \"1m\", \"30s\")", id, fb.BlacklistTimeout)
+		// A non-positive timeout expires a blacklist entry before it is set,
+		// defeating the chain, so it is rejected rather than passed through.
+		if d, err := time.ParseDuration(fb.BlacklistTimeout); err != nil || d <= 0 {
+			return fmt.Errorf("subscription %q has invalid fallback blacklist_timeout %q: must be a positive Go duration (e.g. \"1m\", \"30s\")", id, fb.BlacklistTimeout)
 		}
 	}
 	return nil

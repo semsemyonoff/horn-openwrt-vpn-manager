@@ -75,7 +75,7 @@ func TestLoad_defaults(t *testing.T) {
 	if cfg.Fetch.Parallelism != 2 {
 		t.Errorf("default parallelism = %d, want 2", cfg.Fetch.Parallelism)
 	}
-	if cfg.Routing.Subnets.ManualFile != "/etc/horn-vpn-manager/lists/manual-ip.lst" {
+	if cfg.Routing.Subnets.ManualFile != DefaultManualIPFile {
 		t.Errorf("default manual_file = %q", cfg.Routing.Subnets.ManualFile)
 	}
 }
@@ -192,6 +192,11 @@ func TestLoad_singbox_connect_timeout(t *testing.T) {
 		{name: "explicitly empty", value: `"connect_timeout": "",`, want: ""},
 		{name: "invalid duration", value: `"connect_timeout": "3 seconds",`, wantErr: true},
 		{name: "unitless number", value: `"connect_timeout": "3",`, wantErr: true},
+		// time.ParseDuration accepts these, but a non-positive dial timeout is
+		// written onto every node outbound and would kill the whole proxy.
+		{name: "negative duration", value: `"connect_timeout": "-3s",`, wantErr: true},
+		{name: "zero duration", value: `"connect_timeout": "0s",`, wantErr: true},
+		{name: "unitless zero", value: `"connect_timeout": "0",`, wantErr: true},
 	}
 
 	for _, tc := range cases {
@@ -563,6 +568,23 @@ func TestValidateSubscriptions_fallback(t *testing.T) {
 			sub:     &Subscription{Name: "S1", URL: "https://example.com/s1", Default: true, Fallback: &Fallback{Subscriptions: []string{"backup"}, BlacklistTimeout: "1 minute"}},
 			wantErr: "invalid fallback blacklist_timeout",
 		},
+		// time.ParseDuration takes both, but a non-positive timeout expires the
+		// blacklist entry before it is set and defeats the chain.
+		{
+			name:    "negative blacklist_timeout",
+			sub:     &Subscription{Name: "S1", URL: "https://example.com/s1", Default: true, Fallback: &Fallback{Subscriptions: []string{"backup"}, BlacklistTimeout: "-1m"}},
+			wantErr: "invalid fallback blacklist_timeout",
+		},
+		{
+			name:    "zero blacklist_timeout",
+			sub:     &Subscription{Name: "S1", URL: "https://example.com/s1", Default: true, Fallback: &Fallback{Subscriptions: []string{"backup"}, BlacklistTimeout: "0s"}},
+			wantErr: "invalid fallback blacklist_timeout",
+		},
+		{
+			name:    "negative interval",
+			sub:     &Subscription{Name: "S1", URL: "https://example.com/s1", Default: true, Interval: "-5m"},
+			wantErr: "invalid interval",
+		},
 	}
 
 	for _, tc := range cases {
@@ -729,7 +751,7 @@ func TestLoad_manual_file_only_routing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error for manual_file-only routing: %v", err)
 	}
-	if cfg.Routing.Subnets.ManualFile != "/etc/horn-vpn-manager/lists/manual-ip.lst" {
+	if cfg.Routing.Subnets.ManualFile != DefaultManualIPFile {
 		t.Errorf("manual_file = %q", cfg.Routing.Subnets.ManualFile)
 	}
 }

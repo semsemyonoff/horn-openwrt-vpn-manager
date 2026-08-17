@@ -55,6 +55,9 @@ func TestIntegration_Run_with_route_rules(t *testing.T) {
 	applier := &fakeApplier{}
 	runner := NewRunner(cfg, applier)
 	runner.OutDir = outDir
+	// ConfigDir too: a non-dry-run writes subs-tags.json there, and the default
+	// is the on-device /etc/horn-vpn-manager.
+	runner.ConfigDir = t.TempDir()
 
 	if err := runner.Run(context.Background()); err != nil {
 		t.Fatalf("Run() error: %v", err)
@@ -187,6 +190,7 @@ func TestIntegration_PartialFailure_default_config_still_generated(t *testing.T)
 	applier := &fakeApplier{}
 	runner := NewRunner(cfg, applier)
 	runner.OutDir = outDir
+	runner.ConfigDir = t.TempDir()
 
 	// Must succeed despite the failed non-default subscription.
 	if err := runner.Run(context.Background()); err != nil {
@@ -282,6 +286,7 @@ func TestIntegration_Run_inline_nodes_no_http(t *testing.T) {
 	applier := &fakeApplier{}
 	runner := NewRunner(cfg, applier)
 	runner.OutDir = outDir
+	runner.ConfigDir = t.TempDir()
 
 	if err := runner.Run(context.Background()); err != nil {
 		t.Fatalf("Run() error: %v", err)

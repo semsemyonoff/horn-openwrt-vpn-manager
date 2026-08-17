@@ -139,6 +139,12 @@ none of the new fields must render as before apart from the added group field.
   Post-Completion, not an in-repo gate
 - **e2e tests**: project has no UI-based e2e harness, so none apply
 
+Superseded during the post-completion review round: a permanent in-repo harness was added at
+`horn-vpn-manager-luci/tests/` and wired to `make luci-test` — `config.test.js` drives the shipped
+`config.js` through `load-view.js` against a dependency-free `stub-dom.js` (no jsdom), and
+`rpcd-checks.test.sh` drives the real `check_sub_sources` / `fail_json` / `check_with_core` under
+`dash`. Tasks 10-12 describe these as ad-hoc verification; they are now standing gates.
+
 Go gates, run inside `horn-vpn-manager/`:
 
 ```
@@ -166,7 +172,7 @@ Packaging gates from repo root: `make lint`, and `make build` when LuCI files ch
 | Who may declare `fallback` | **any subscription** | Issue #1 proposes default-only, but that is too narrow in practice. A personal VPS carries named domains as a *non-default* subscription, so default-only would leave exactly the node that most needs redundancy without any. The subscription that actually failed in production was also non-default. Widening costs one extra validation rule (real cycle detection) and is far cheaper now than retrofitting later. |
 | Personal node schema | **`nodes: []`, mutually exclusive with a non-empty `url`** | A subscription stays one entity, so `route` / `include` / `exclude` / `default` / `fallback` keep working unchanged; validation is a simple XOR |
 | `connect_timeout` | **global, `singbox.connect_timeout`** | One knob; empty default emits nothing, preserving current behavior |
-| `interrupt_exist_connections` | **`true` on all generated groups** (resolved) | Stranding connections on a dead node is never desirable — observed connections hung 22 s and 1 m 25 s after their node stopped answering. **Coupling to be documented:** on `urltest` the field also fires on benign latency-driven re-selections. At the default `tolerance: 100` with an observed node spread of 103–230 ms that is noise, so live downloads/streams/WebSockets would be cut for no reason. The mitigation is `tolerance`, not disabling the flag: it is already a per-subscription config field requiring no code, and raising it (~300 ms) leaves re-selection to genuine degradation, where interrupting is always correct. |
+| `interrupt_exist_connections` | **`true` on the `urltest` and `selector` groups** (resolved; corrected during implementation — see Task 7) | Stranding connections on a dead node is never desirable — observed connections hung 22 s and 1 m 25 s after their node stopped answering. **Coupling to be documented:** on `urltest` the field also fires on benign latency-driven re-selections. At the default `tolerance: 100` with an observed node spread of 103–230 ms that is noise, so live downloads/streams/WebSockets would be cut for no reason. The mitigation is `tolerance`, not disabling the flag: it is already a per-subscription config field requiring no code, and raising it (~300 ms) leaves re-selection to genuine degradation, where interrupting is always correct. |
 | Backup subscription failure | **degrade, do not abort** | A transient outage on a *backup* must not abort regeneration of a healthy primary; matches the existing skip-and-continue policy at `subscription.go:337-345` |
 | Dedup key | **marshalled outbound, not `StableHash`** | `StableHash` omits `ALPN`, `Mode`, `HeaderType`; hashing more fields would rewrite every tag and invalidate `subs-tags.json`, saved selector choices, and `experimental.cache_file` state |
 | rpcd validation | **delegate to `vpn-manager check -c <tmp>`** | Avoids reimplementing XOR + cross-reference logic in POSIX sh with a regex-less `jq` |
@@ -320,8 +326,10 @@ which changes the rendered outbound. Dedup on the marshalled outbound instead.
 
 - [x] add `InterruptExistConnections bool` with tag `json:"interrupt_exist_connections"` to
       `URLTestOutbound` and `SelectorOutbound`
-- [x] set it to `true` on both groups in `BuildOutbounds`, and on `FallbackOutbound` in Task 7
-      (the `FallbackOutbound` half stays with Task 7, where the type is introduced)
+- [x] set it to `true` on both groups in `BuildOutbounds`. ~~and on `FallbackOutbound` in Task 7~~ —
+      **reversed in Task 7**: the extended build's `FallbackOutboundOptions` declares only
+      `outbounds` / `blacklist_timeout`, and sing-box rejects unknown outbound fields, so the extra
+      key made `sing-box check` reject the whole config
 - [x] write tests asserting the field is present and `true` in the marshalled JSON for each group
       (`TestBuildOutbounds_GroupsInterruptExistConnections`)
 - [x] run `go test ./...` — passes; `gofmt -l .` clean; `golangci-lint run` reports the same 10
@@ -461,7 +469,9 @@ apply it per subscription.
 - Modify: `horn-vpn-manager/internal/subscription/subscription_test.go`
 - Modify: `horn-vpn-manager/internal/subscription/route_test.go`
 
-- [x] add the `FallbackOutbound` type, with `InterruptExistConnections` set to `true` per Task 2
+- [x] add the `FallbackOutbound` type. ~~with `InterruptExistConnections` set to `true` per Task 2`~~
+      — the field is **not** emitted here: `FallbackOutboundOptions` in `sing-box-extended` accepts
+      only `outbounds` and `blacklist_timeout`, and unknown outbound fields are a hard decode error
 - [x] add an id→plan association: an `ID` field on `OutboundPlan`, set by `BuildOutbounds`, from
       which `applyFallbackChains` builds the `map[string]*OutboundPlan` it needs
 - [x] for every subscription declaring a chain, emit a group tagged `<id>-fallback` whose outbounds
@@ -734,7 +744,9 @@ generated `out/config.json` files were diffed.
       `blacklist_timeout: "1m"`; `provider-fallback` lists `["provider-manual", "corp-single"]` and
       omits `blacklist_timeout` (unset → sing-box default); `provider`'s route rule targets
       `provider-fallback` while `route.final` stays on the default's chain; `connect_timeout: "3s"`
-      on all 5 node outbounds and on no group; `interrupt_exist_connections: true` on all 4 groups.
+      on all 5 node outbounds and on no group; `interrupt_exist_connections: true` on the 3
+      `urltest`/`selector` groups and absent from the `fallback` group (re-verified after the Task 7
+      reversal).
       The HTTP access log shows exactly 2 requests for that run (`main.txt`, `corp.txt`) — the
       inline-node subscription performed none. `vpn-manager check` on the shipped
       `config.example.json` exits 0.
@@ -785,6 +797,32 @@ generated `out/config.json` files were diffed.
       the issue's own acceptance criteria, the two out-of-scope LuCI field-drop bugs found on the
       way, and the one remaining device-level exercise carried in Post-Completion
 - [x] move this plan to `docs/plans/completed/`
+
+### Post-completion review round
+
+*Applied after Task 15 closed, from a full multi-agent review of the branch. Recorded here so the
+plan matches the shipped code.*
+
+- Reversed `interrupt_exist_connections` on the `fallback` group (see Task 2 / Task 7 above).
+- Duration validation now rejects non-positive values for `singbox.connect_timeout`,
+  `subscription.interval` and `fallback.blacklist_timeout`: `time.ParseDuration` accepts `"0"` and a
+  leading `-`, and the value is written straight through to sing-box.
+- Dedup no longer renames survivors: the tag collision counter advances for skipped duplicates too,
+  so dropping a duplicate cannot shift a later distinct node from `-3` to `-2` and silently repoint a
+  tag that saved selector choices and `cache_file` state still reference.
+- The "fallback chain has no effect" warning is suppressed when the subscription is another chain's
+  backup — it is reachable through that chain's group even with no route rules of its own.
+- Removed a dead source check in `Run` (`ValidateSubscriptions` already rejects it) and a dead
+  `plan.TagNames` write in `applyFallbackChains`.
+- LuCI: `_collectConfig`'s subscription map is `Object.create(null)` (a free-text id like
+  `__proto__` was silently dropped); `connect_timeout` is only written when its input was rendered;
+  an inline-node subscription with no nodes no longer emits `"nodes": []`; `isValidDuration` accepts
+  U+03BC as well as U+00B5; node names, backend errors and filenames go to the DOM via `textContent`
+  (`nodeNameSpan` / `textP`) rather than as `E()` string children.
+- rpcd: `jq` checks fail closed via `"${bad:-1}"`, and `check_with_core` uses `mktemp` instead of a
+  predictable `$$` path (root writing into a world-writable `/tmp`).
+- Added `horn-vpn-manager-luci/tests/` and `make luci-test`; `AGENTS.md` records the new invariants,
+  the harness and the `fallback` field-set constraint.
 
 ## Post-Completion
 

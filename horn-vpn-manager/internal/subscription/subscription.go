@@ -335,10 +335,8 @@ func (r *Runner) Run(ctx context.Context) error { //nolint:gocognit,gocyclo // o
 			continue
 		}
 		enabledCount++
-		if sub.URL == "" && len(sub.Nodes) == 0 {
-			logx.Warn("Subscription %s has neither url nor nodes configured, skipping", id)
-			continue
-		}
+		// No source check here: ValidateSubscriptions has already rejected an
+		// enabled subscription carrying neither url nor nodes.
 		jobs = append(jobs, subJob{id: id, sub: sub})
 	}
 
@@ -490,6 +488,15 @@ func (r *Runner) applyFallbackChains(plans []*OutboundPlan, defaultID string, ta
 		chains[id] = backups
 	}
 
+	// A subscription listed as somebody else's backup is reachable through that
+	// chain even with no route rules of its own.
+	isBackup := make(map[string]bool, len(chains))
+	for _, backups := range chains {
+		for _, ref := range backups {
+			isBackup[ref] = true
+		}
+	}
+
 	var defaultTag string
 	for _, id := range ids {
 		backups, ok := chains[id]
@@ -510,21 +517,25 @@ func (r *Runner) applyFallbackChains(plans []*OutboundPlan, defaultID string, ta
 		}
 
 		plan.FallbackGroup = &FallbackOutbound{
-			Type:                      "fallback",
-			Tag:                       tag,
-			Outbounds:                 outbounds,
-			BlacklistTimeout:          r.Cfg.Subscriptions[id].Fallback.BlacklistTimeout,
-			InterruptExistConnections: true,
+			Type:             "fallback",
+			Tag:              tag,
+			Outbounds:        outbounds,
+			BlacklistTimeout: r.Cfg.Subscriptions[id].Fallback.BlacklistTimeout,
 		}
-		name := id + " (fallback)"
-		plan.TagNames[tag] = name
-		tagNames[tag] = name
+		tagNames[tag] = id + " (fallback)"
 
 		logx.Detail("  Subscription %s: fallback chain: %s -> [%s]", id, tag, strings.Join(outbounds, ", "))
 
 		if id == defaultID {
 			defaultTag = tag
 			continue
+		}
+		// A non-default subscription is reached either through its own route
+		// rules or as another chain's backup — the outer group lists this
+		// subscription's own <id>-fallback tag. With neither, the group is
+		// emitted but nothing routes to it and the chain silently does nothing.
+		if len(plan.RouteRules) == 0 && !isBackup[id] {
+			logx.Warn("Subscription %s: fallback chain has no effect — the subscription is not the default one, defines no route and is not a backup of another chain, so nothing is routed through %s", id, tag)
 		}
 		RetargetRouteRules(plan.RouteRules, tag)
 	}

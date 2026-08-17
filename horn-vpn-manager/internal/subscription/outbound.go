@@ -12,8 +12,16 @@ const (
 	defaultInterval  = "5m"
 	defaultTolerance = 100
 	packetEncoding   = "xudp"
-	transportHTTP    = "http"
-	transportXHTTP   = "xhttp"
+
+	protoVLESS = "vless"
+
+	transportTCP   = "tcp"
+	transportHTTP  = "http"
+	transportXHTTP = "xhttp"
+	transportGRPC  = "grpc"
+
+	securityTLS     = "tls"
+	securityReality = "reality"
 )
 
 // OutboundPlan holds the sing-box outbound configuration generated for a single
@@ -137,7 +145,7 @@ func (t *OutboundTransport) MarshalJSON() ([]byte, error) {
 		if t.HTTPPath != "" {
 			m["path"] = t.HTTPPath
 		}
-	case "grpc":
+	case transportGRPC:
 		if t.ServiceName != "" {
 			m["service_name"] = t.ServiceName
 		}
@@ -188,12 +196,17 @@ type SelectorOutbound struct {
 // extended build. A stock build rejects it at `sing-box check` time with
 // "unknown outbound type", which system.ApplySingbox surfaces before the live
 // config is replaced.
+//
+// The field set is exactly FallbackOutboundOptions in the extended build
+// (option/group.go): outbounds and blacklist_timeout, nothing else. sing-box
+// decodes outbound options with unknown fields disallowed, so an extra key —
+// interrupt_exist_connections, which selector and urltest do accept — makes
+// `sing-box check` reject the whole config.
 type FallbackOutbound struct {
-	Type                      string   `json:"type"`
-	Tag                       string   `json:"tag"`
-	Outbounds                 []string `json:"outbounds"`
-	BlacklistTimeout          string   `json:"blacklist_timeout,omitempty"`
-	InterruptExistConnections bool     `json:"interrupt_exist_connections"`
+	Type             string   `json:"type"`
+	Tag              string   `json:"tag"`
+	Outbounds        []string `json:"outbounds"`
+	BlacklistTimeout string   `json:"blacklist_timeout,omitempty"`
 }
 
 // fallbackTag returns the generated fallback group tag for a subscription id.
@@ -285,19 +298,25 @@ func BuildOutbounds(id string, uris []string, opts BuildOptions) (*OutboundPlan,
 			if err != nil {
 				return nil, fmt.Errorf("marshalling outbound for subscription %q: %w", id, err)
 			}
+			hash := vless.StableHash(n)
+			base := fmt.Sprintf("%s-node-%s", id, hash)
+			// The suffix counter advances for skipped duplicates too, so dedup
+			// never renames a surviving node: without this, dropping a duplicate
+			// would shift the next colliding node from "-3" to "-2", silently
+			// repointing a tag that saved selector choices and
+			// experimental.cache_file state still refer to.
+			count := seenTags[base]
+			seenTags[base]++
 			if _, seen := seenOutbounds[string(key)]; seen {
 				duplicates++
 				continue
 			}
 			seenOutbounds[string(key)] = struct{}{}
 
-			hash := vless.StableHash(n)
-			base := fmt.Sprintf("%s-node-%s", id, hash)
 			tag := base
-			if count := seenTags[base]; count > 0 {
+			if count > 0 {
 				tag = fmt.Sprintf("%s-%d", base, count+1)
 			}
-			seenTags[base]++
 			ob.Tag = tag
 			plan.NodeOutbounds = append(plan.NodeOutbounds, ob)
 			plan.TagNames[tag] = n.Name
@@ -348,7 +367,7 @@ func BuildOutbounds(id string, uris []string, opts BuildOptions) (*OutboundPlan,
 // An empty connectTimeout omits the connect_timeout field entirely.
 func nodeToOutbound(n *vless.Node, tag, connectTimeout string) *VLESSOutbound {
 	ob := &VLESSOutbound{
-		Type:           "vless",
+		Type:           protoVLESS,
 		Tag:            tag,
 		Server:         n.Server,
 		ServerPort:     n.Port,
@@ -364,7 +383,7 @@ func nodeToOutbound(n *vless.Node, tag, connectTimeout string) *VLESSOutbound {
 
 	// TLS block: generate only when security is explicitly "tls" or "reality".
 	// An empty security field means plaintext — do not inject TLS.
-	if n.Security == "tls" || n.Security == "reality" {
+	if n.Security == securityTLS || n.Security == securityReality {
 		alpn := n.ALPN
 		if len(alpn) == 0 && n.TransportType == transportXHTTP {
 			alpn = []string{"h2"}
@@ -381,7 +400,7 @@ func nodeToOutbound(n *vless.Node, tag, connectTimeout string) *VLESSOutbound {
 				Fingerprint: n.Fingerprint,
 			}
 		}
-		if n.Security == "reality" && n.PublicKey != "" {
+		if n.Security == securityReality && n.PublicKey != "" {
 			tls.Reality = &RealityTLS{
 				Enabled:   true,
 				PublicKey: n.PublicKey,
@@ -402,7 +421,7 @@ func nodeToOutbound(n *vless.Node, tag, connectTimeout string) *VLESSOutbound {
 func buildTransport(n *vless.Node) *OutboundTransport {
 	// Determine effective transport type, matching legacy shell logic.
 	effType := n.TransportType
-	if n.TransportType == "tcp" && n.HeaderType == transportHTTP {
+	if n.TransportType == transportTCP && n.HeaderType == transportHTTP {
 		effType = transportHTTP
 	}
 	// h2 is an alias for http transport.
@@ -423,8 +442,8 @@ func buildTransport(n *vless.Node) *OutboundTransport {
 			t.HTTPHosts = []string{n.Host}
 		}
 		return t
-	case "grpc":
-		return &OutboundTransport{Type: "grpc", ServiceName: n.ServiceName}
+	case transportGRPC:
+		return &OutboundTransport{Type: transportGRPC, ServiceName: n.ServiceName}
 	case transportXHTTP:
 		mode := n.Mode
 		if mode == "" {

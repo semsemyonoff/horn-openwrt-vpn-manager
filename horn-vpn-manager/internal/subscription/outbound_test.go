@@ -559,6 +559,43 @@ func TestBuildOutbounds_DeduplicationIgnoresStableHash(t *testing.T) {
 	}
 }
 
+// TestBuildOutbounds_DeduplicationDoesNotRenameSurvivors pins that dropping a
+// duplicate never shifts the collision suffix of a later, genuinely distinct
+// node. Without the counter advancing for skipped duplicates, the alpn=h2 node
+// below would move from "-3" to "-2" — silently repointing a tag that saved
+// selector choices and experimental.cache_file state still refer to.
+func TestBuildOutbounds_DeduplicationDoesNotRenameSurvivors(t *testing.T) {
+	// The first three URIs share a StableHash (it omits ALPN); the first two are
+	// byte-identical and therefore dedup to one outbound.
+	dup := "vless://u@h.example.com:443?security=tls&sni=h.example.com&alpn=http%2F1.1#A"
+	uris := []string{
+		dup,
+		dup,
+		"vless://u@h.example.com:443?security=tls&sni=h.example.com&alpn=h2#B",
+	}
+
+	plan, err := subscription.BuildOutbounds("sub", uris, buildOpts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(plan.NodeOutbounds) != 2 {
+		t.Fatalf("NodeOutbounds len: got %d want 2 (%v)", len(plan.NodeOutbounds), collectTags(plan))
+	}
+
+	base := plan.NodeOutbounds[0].Tag
+	if got, want := plan.NodeOutbounds[1].Tag, base+"-3"; got != want {
+		t.Errorf("surviving distinct node tag: got %q want %q — dedup shifted the collision suffix", got, want)
+	}
+}
+
+func collectTags(plan *subscription.OutboundPlan) []string {
+	tags := make([]string, 0, len(plan.NodeOutbounds))
+	for _, ob := range plan.NodeOutbounds {
+		tags = append(tags, ob.Tag)
+	}
+	return tags
+}
+
 func TestBuildOutbounds_NoURIs(t *testing.T) {
 	_, err := subscription.BuildOutbounds("sub", nil, buildOpts)
 	if err == nil {
@@ -641,11 +678,10 @@ func TestFallbackOutbound_JSONMarshal(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			group := &subscription.FallbackOutbound{
-				Type:                      "fallback",
-				Tag:                       "primary-fallback",
-				Outbounds:                 []string{"primary-single", "backup-manual"},
-				BlacklistTimeout:          tc.blacklistTimeout,
-				InterruptExistConnections: true,
+				Type:             "fallback",
+				Tag:              "primary-fallback",
+				Outbounds:        []string{"primary-single", "backup-manual"},
+				BlacklistTimeout: tc.blacklistTimeout,
 			}
 			data, err := json.Marshal(group)
 			if err != nil {
@@ -672,8 +708,18 @@ func TestFallbackOutbound_JSONMarshal(t *testing.T) {
 			case tc.wantTimeout != nil && got != tc.wantTimeout:
 				t.Errorf("blacklist_timeout = %v, want %v", got, tc.wantTimeout)
 			}
-			if m["interrupt_exist_connections"] != true {
-				t.Errorf("interrupt_exist_connections = %v, want true", m["interrupt_exist_connections"])
+			// sing-box decodes outbound options with unknown fields disallowed
+			// and the extended build's FallbackOutboundOptions declares only
+			// outbounds and blacklist_timeout, so any extra key here makes
+			// `sing-box check` reject the config on a real device.
+			want := map[string]bool{"type": true, "tag": true, "outbounds": true}
+			if tc.wantTimeout != nil {
+				want["blacklist_timeout"] = true
+			}
+			for k := range m {
+				if !want[k] {
+					t.Errorf("unexpected field %q in fallback group JSON; sing-box rejects unknown outbound fields", k)
+				}
 			}
 		})
 	}

@@ -155,7 +155,7 @@ func parseV2RayJSON(data []byte) ([]string, error) {
 	var uris []string
 	for _, e := range entries {
 		for _, ob := range e.Outbounds {
-			if ob.Protocol != "vless" {
+			if ob.Protocol != protoVLESS {
 				continue
 			}
 			uri, ok := v2rayOutboundToVLESSURI(ob, e.Remarks)
@@ -196,7 +196,7 @@ func v2rayOutboundToVLESSURI(ob v2rayOutbound, remarks string) (string, bool) {
 	}
 
 	u := &url.URL{
-		Scheme:   "vless",
+		Scheme:   protoVLESS,
 		User:     url.User(user.ID),
 		Host:     net.JoinHostPort(vn.Address, strconv.Itoa(vn.Port)),
 		RawQuery: q.Encode(),
@@ -209,12 +209,12 @@ func v2rayOutboundToVLESSURI(ob v2rayOutbound, remarks string) (string, bool) {
 // based on ss. A nil ss is treated as plain tcp with no security.
 func applyStreamSettings(q url.Values, ss *v2rayStreamSetting) {
 	if ss == nil {
-		q.Set("type", "tcp")
+		q.Set("type", transportTCP)
 		return
 	}
 	network := ss.Network
 	if network == "" {
-		network = "tcp"
+		network = transportTCP
 	}
 	q.Set("type", network)
 	if ss.Security != "" && ss.Security != "none" {
@@ -226,7 +226,7 @@ func applyStreamSettings(q url.Values, ss *v2rayStreamSetting) {
 
 func applySecuritySettings(q url.Values, ss *v2rayStreamSetting) {
 	switch ss.Security {
-	case "reality":
+	case securityReality:
 		rs := ss.RealitySettings
 		if rs == nil {
 			return
@@ -235,7 +235,7 @@ func applySecuritySettings(q url.Values, ss *v2rayStreamSetting) {
 		setIfNonEmpty(q, "fp", rs.Fingerprint)
 		setIfNonEmpty(q, "pbk", rs.PublicKey)
 		setIfNonEmpty(q, "sid", rs.ShortID)
-	case "tls":
+	case securityTLS:
 		ts := ss.TLSSettings
 		if ts == nil {
 			return
@@ -250,7 +250,7 @@ func applySecuritySettings(q url.Values, ss *v2rayStreamSetting) {
 
 func applyTransportSettings(q url.Values, network string, ss *v2rayStreamSetting) {
 	switch network {
-	case "tcp":
+	case transportTCP:
 		if ss.TCPSettings != nil && ss.TCPSettings.Header != nil {
 			if t := ss.TCPSettings.Header.Type; t != "" && t != "none" {
 				q.Set("headerType", t)
@@ -261,7 +261,7 @@ func applyTransportSettings(q url.Values, network string, ss *v2rayStreamSetting
 			setIfNonEmpty(q, "path", ws.Path)
 			setIfNonEmpty(q, "host", ws.Headers["Host"])
 		}
-	case "grpc":
+	case transportGRPC:
 		if gs := ss.GRPCSettings; gs != nil {
 			setIfNonEmpty(q, "serviceName", gs.ServiceName)
 		}

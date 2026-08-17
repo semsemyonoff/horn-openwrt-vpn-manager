@@ -145,6 +145,24 @@ function cleanNodeName(name) {
     }
 }
 
+// Node names come from the provider's vless:// fragment, so they are remote
+// input. dom.append assigns string children via innerHTML — set textContent.
+function nodeNameSpan(name) {
+    var el = E("span", { class: "vpnsub-proxy-node-name" });
+    el.textContent = name == null ? "" : name;
+    return el;
+}
+
+// A <p> for a message that carries data we did not author — a backend error
+// (check_with_core quotes subscription ids verbatim), a node name, a filename.
+// Same innerHTML sink as above, so build the text node ourselves. Use this for
+// every notification whose text is concatenated rather than a bare _() literal.
+function textP(text, attrs) {
+    var el = E("p", attrs || {});
+    el.textContent = text == null ? "" : String(text);
+    return el;
+}
+
 function getLastDelay(proxy) {
     if (!proxy || !proxy.history || !proxy.history.length) return null;
     var last = proxy.history[proxy.history.length - 1];
@@ -234,7 +252,7 @@ function makeProxyWidget(
             (tagNames && tagNames[singleTag]) || singleTag,
         );
         return E("div", { class: "vpnsub-proxy-single" }, [
-            E("span", { class: "vpnsub-proxy-node-name" }, name),
+            nodeNameSpan(name),
             delay ? makeLatencySpan(delay) : "",
         ]);
     }
@@ -317,7 +335,7 @@ function makeProxyWidget(
                         "vpnsub-proxy-node-row" +
                         (isSelected ? " vpnsub-proxy-selected" : ""),
                 },
-                [E("span", { class: "vpnsub-proxy-node-name" }, name), delayEl],
+                [nodeNameSpan(name), delayEl],
             );
             row.setAttribute("data-tag", tag);
             row.addEventListener("click", function () {
@@ -603,14 +621,17 @@ function cardSubEnabled(card) {
     return !el || el.checked;
 }
 
-// id → declared backup ids, over every rendered card.
+// id → declared backup ids, over every *enabled* rendered card. Disabled cards
+// are skipped to match validateFallbackCycles in the core (and validateChains
+// below): a chain through a disabled subscription is never generated, so an
+// edge through one must not make a candidate look like it closes a cycle.
 function chainGraph() {
-    var graph = {};
+    var graph = Object.create(null);
     Array.prototype.forEach.call(
         document.querySelectorAll(".vpnsub-sub-card"),
         function (card) {
             var id = cardSubId(card);
-            if (!id) return;
+            if (!id || !cardSubEnabled(card)) return;
             graph[id] = Array.prototype.slice
                 .call(card.querySelectorAll(".vpnsub-chain-select"))
                 .map(function (sel) {
@@ -626,7 +647,9 @@ function chainGraph() {
 
 // Does `from` reach `target` by following declared chains?
 function chainReaches(graph, from, target) {
-    var seen = {};
+    // Object.create(null), not {}: sanitizeId accepts an id like "constructor",
+    // which would otherwise read as already-seen off Object.prototype.
+    var seen = Object.create(null);
     var stack = [from];
     while (stack.length) {
         var cur = stack.pop();
@@ -654,7 +677,7 @@ function refreshChainPickers() {
 }
 
 function makeChainPicker(cardId, values) {
-    var listEl = E("div", { class: "vpnsub-dynlist vpnsub-chain-list" });
+    var listEl = E("div", { class: "vpnsub-dynlist" });
 
     function ownId() {
         var card = document.getElementById(cardId);
@@ -668,7 +691,7 @@ function makeChainPicker(cardId, values) {
     function candidates(current) {
         var own = ownId();
         var graph = chainGraph();
-        var picked = {};
+        var picked = Object.create(null);
         Array.prototype.forEach.call(
             listEl.querySelectorAll(".vpnsub-chain-select"),
             function (sel) {
@@ -701,13 +724,20 @@ function makeChainPicker(cardId, values) {
             sel.appendChild(E("option", { value: "" }, "—"));
         opts.forEach(function (o) {
             if (o.id === current) known = true;
-            sel.appendChild(E("option", { value: o.id }, o.label));
+            // textContent, not an E() string child: dom.append assigns string
+            // children via innerHTML, and the label carries a subscription name.
+            var opt = E("option", { value: o.id });
+            opt.textContent = o.label;
+            sel.appendChild(opt);
         });
         // A pick that stopped being valid (its subscription was disabled,
         // renamed or removed) stays visible instead of being silently
         // rewritten; _validate turns it into a message.
-        if (current && !known)
-            sel.appendChild(E("option", { value: current }, current));
+        if (current && !known) {
+            var stale = E("option", { value: current });
+            stale.textContent = current;
+            sel.appendChild(stale);
+        }
         sel.value = current;
         if (current && !known) sel.classList.add("vpnsub-invalid");
         else sel.classList.remove("vpnsub-invalid");
@@ -808,6 +838,34 @@ function makeChainPicker(cardId, values) {
             ),
     );
 
+    // Elements outside the picker that only mean anything while a chain exists —
+    // the blacklist-timeout row. _collectConfig drops blacklist_timeout together
+    // with the rest of the fallback object when the chain is empty, so leaving
+    // the field visible would silently discard whatever was typed into it.
+    var dependents = [];
+
+    function chainValues() {
+        return Array.prototype.slice
+            .call(listEl.querySelectorAll(".vpnsub-chain-select"))
+            .map(function (sel) {
+                return sel._value || "";
+            })
+            .filter(function (v) {
+                return v !== "";
+            });
+    }
+
+    // Keyed on a non-empty pick, not on row presence: a row parked on "—" is
+    // dropped by chainValues(), so _collectConfig would emit no fallback object
+    // and discard the timeout the still-visible field was showing.
+    function syncChainVisibility() {
+        var display = chainValues().length ? "" : "none";
+        warnEl.style.display = display;
+        dependents.forEach(function (el) {
+            el.style.display = display;
+        });
+    }
+
     var picker = {
         cardId: cardId,
         node: E("div", { class: "vpnsub-dynlist-wrap" }, [
@@ -815,29 +873,21 @@ function makeChainPicker(cardId, values) {
             addWrap,
             warnEl,
         ]),
-        getValue: function () {
-            return Array.prototype.slice
-                .call(listEl.querySelectorAll(".vpnsub-chain-select"))
-                .map(function (sel) {
-                    return sel._value || "";
-                })
-                .filter(function (v) {
-                    return v !== "";
-                });
+        getValue: chainValues,
+        // Tie an element's visibility to "this card has a chain".
+        showWithChain: function (el) {
+            dependents.push(el);
+            syncChainVisibility();
         },
         refresh: function () {
             Array.prototype.forEach.call(
                 listEl.querySelectorAll(".vpnsub-chain-select"),
                 fillSelect,
             );
-            warnEl.style.display = listEl.querySelector(".vpnsub-chain-select")
-                ? ""
-                : "none";
+            syncChainVisibility();
         },
     };
-    warnEl.style.display = listEl.querySelector(".vpnsub-chain-select")
-        ? ""
-        : "none";
+    syncChainVisibility();
     chainPickers.push(picker);
     return picker;
 }
@@ -859,7 +909,7 @@ function validateChains(subs) {
         if (!enabled(id)) return;
         var fb = subs[id].fallback;
         if (!fb || !Array.isArray(fb.subscriptions)) return;
-        var seen = {};
+        var seen = Object.create(null);
         var prefix = _("Fallback chain of") + ' "' + id + '": ';
         fb.subscriptions.forEach(function (ref) {
             if (ref === id)
@@ -881,7 +931,7 @@ function validateChains(subs) {
 
     // Cycles of any length, over enabled subscriptions only — a chain through a
     // disabled subscription is never generated.
-    var graph = {};
+    var graph = Object.create(null);
     ids.forEach(function (id) {
         if (!enabled(id)) return;
         var fb = subs[id].fallback;
@@ -889,7 +939,7 @@ function validateChains(subs) {
             return ref !== id && enabled(ref);
         });
     });
-    var state = {}; // 1 = on the current path, 2 = fully explored
+    var state = Object.create(null); // 1 = on the current path, 2 = fully explored
     ids.sort().forEach(function (start) {
         if (!graph[start] || state[start]) return;
         (function walk(id, path) {
@@ -910,10 +960,16 @@ function validateChains(subs) {
     return errs;
 }
 
-// Go's time.ParseDuration accepts a sequence of decimal-and-unit pairs; the
-// core is authoritative, this only catches typos before the round trip.
+// Go's time.ParseDuration accepts an optional sign, then either the special
+// unitless "0" or a sequence of decimal-and-unit pairs; the core is
+// authoritative, this only catches typos before the round trip. The integer
+// part is optional (".5s" parses in Go), so requiring it would reject a value
+// the core accepts and leave no way to save it.
 function isValidDuration(s) {
-    return /^(\d+(\.\d+)?(ns|us|µs|ms|s|m|h))+$/.test(s);
+    // Both micro signs are accepted: Go's parser takes U+00B5 MICRO SIGN and
+    // U+03BC GREEK SMALL LETTER MU, and rejecting either would block a value
+    // the core saves fine.
+    return /^[+-]?(0|((\d+(\.\d*)?|\.\d+)(ns|us|µs|μs|ms|s|m|h))+)$/.test(s);
 }
 
 // ── ANSI → HTML ───────────────────────────────────────────────────────────────
@@ -994,8 +1050,11 @@ function isValidUrl(s) {
 function isValidNodeUri(s) {
     if (s.indexOf("vless://") !== 0) return false;
     try {
-        new URL(s);
-        return true;
+        // vless:// is a non-special scheme, so URL() happily parses a bare
+        // "vless://" with no host and no uuid — the likeliest paste error. The
+        // core needs both (vless.Parse), so require them here too.
+        var u = new URL(s);
+        return !!u.hostname && !!u.username;
     } catch (e) {
         return false;
     }
@@ -1289,10 +1348,10 @@ return view.extend({
                 title: _("Add"),
                 click: function () {
                     var i = self._subIdx++;
-                    var card = self._makeCard(
-                        { name: "", url: "", default: false, enabled: true },
-                        i,
-                    );
+                    // Empty, not seeded with default:false/enabled:true — those
+                    // become the card's `raw`, and _collectConfig only emits the
+                    // redundant halves when raw already carried them.
+                    var card = self._makeCard({}, i);
                     subList.appendChild(card);
                     refreshChainPickers();
                     card.scrollIntoView({ behavior: "smooth" });
@@ -1760,7 +1819,7 @@ return view.extend({
                             if (err && err.message)
                                 ui.addNotification(
                                     null,
-                                    E("p", _("Error: ") + err.message),
+                                    textP(_("Error: ") + err.message),
                                     "error",
                                 );
                         });
@@ -1900,8 +1959,7 @@ return view.extend({
                         .catch(function (err) {
                             ui.addNotification(
                                 null,
-                                E(
-                                    "p",
+                                textP(
                                     _("Save error: ") +
                                         (err.message || String(err)),
                                 ),
@@ -2164,7 +2222,7 @@ return view.extend({
                                     if (exportWarnings.length > 0) {
                                         ui.addNotification(
                                             null,
-                                            E("p", _("Export incomplete — the following data could not be read and was omitted: ") + exportWarnings.join(", ")),
+                                            textP(_("Export incomplete — the following data could not be read and was omitted: ") + exportWarnings.join(", ")),
                                             "warning",
                                         );
                                     }
@@ -2174,7 +2232,7 @@ return view.extend({
                             if (exportWarnings.length > 0) {
                                 ui.addNotification(
                                     null,
-                                    E("p", _("Export incomplete — the following data could not be read and was omitted: ") + exportWarnings.join(", ")),
+                                    textP(_("Export incomplete — the following data could not be read and was omitted: ") + exportWarnings.join(", ")),
                                     "warning",
                                 );
                             }
@@ -2190,7 +2248,7 @@ return view.extend({
                     .catch(function (err) {
                         ui.addNotification(
                             null,
-                            E("p", _("Export error: ") + (err.message || String(err))),
+                            textP(_("Export error: ") + (err.message || String(err))),
                             "error",
                         );
                     });
@@ -2265,7 +2323,7 @@ return view.extend({
                                     .catch(function (err) {
                                         ui.addNotification(
                                             null,
-                                            E("p", _("Config and template were saved, but some auxiliary data failed to restore: ") + (err.message || String(err)) + _(". Manual IPs/domains may need to be re-imported.")),
+                                            textP(_("Config and template were saved, but some auxiliary data failed to restore: ") + (err.message || String(err)) + _(". Manual IPs/domains may need to be re-imported.")),
                                             "warning",
                                         );
                                         setTimeout(function () { location.reload(); }, 2000);
@@ -2276,7 +2334,7 @@ return view.extend({
                         if (err && err.message !== "No file selected") {
                             ui.addNotification(
                                 null,
-                                E("p", _("Import error: ") + (err.message || String(err))),
+                                textP(_("Import error: ") + (err.message || String(err))),
                                 "error",
                             );
                         }
@@ -2419,11 +2477,15 @@ return view.extend({
             },
         });
 
-        // Auto-fill ID from name for new subscriptions (no existing id)
+        // Auto-fill ID from name for new subscriptions (no existing id).
+        // The refresh has to be repeated here: nameInput's own `input` handler
+        // already ran by the time this listener fires, so the pickers were
+        // rebuilt against the previous id and would offer a stale one.
         if (!sub.id) {
             nameInput.addEventListener("input", function () {
                 if (!idInput._manualEdit) {
                     idInput.value = sanitizeId(nameInput.value);
+                    refreshChainPickers();
                 }
             });
         }
@@ -2671,15 +2733,13 @@ return view.extend({
                 ),
             ),
         );
-        children.push(
-            formRow(
-                _("Blacklist timeout"),
-                blacklistTimeoutInput,
-                _(
-                    "How long a failed subscription is skipped before being retried (e.g. 1m)",
-                ),
-            ),
+        var blacklistTimeoutRow = formRow(
+            _("Blacklist timeout"),
+            blacklistTimeoutInput,
+            _("How long a failed subscription is skipped before being retried (e.g. 1m)"),
         );
+        children.push(blacklistTimeoutRow);
+        fallbackW.showWithChain(blacklistTimeoutRow);
 
         children.push(domainsRow);
         children.push(domainUrlsRow);
@@ -2722,7 +2782,10 @@ return view.extend({
         var testUrl =
             document.getElementById("vpnsub-test-url-setting").value.trim() ||
             "https://www.gstatic.com/generate_204";
-        var subs = {};
+        // Null-prototype: the ID field is free text, so an id like "__proto__"
+        // or "constructor" would otherwise not become an own key and the
+        // subscription would silently vanish from the saved config.
+        var subs = Object.create(null);
 
         Array.prototype.forEach.call(
             document.querySelectorAll(".vpnsub-sub-card"),
@@ -2761,7 +2824,9 @@ return view.extend({
                 sub.name = name;
                 if (useNodes) {
                     delete sub.url;
-                    sub.nodes = nodes;
+                    // A disabled card may legitimately have no nodes yet, and an
+                    // empty "nodes": [] carries no more meaning than no key at all.
+                    setOrDelete(sub, "nodes", nodes.length ? nodes : null);
                 } else {
                     sub.url = url;
                     delete sub.nodes;
@@ -2825,16 +2890,20 @@ return view.extend({
         singbox.test_url = testUrl;
         singbox.template = this._singboxTemplate || "";
         var ctEl = document.getElementById("vpnsub-connect-timeout");
-        var ct = ctEl ? ctEl.value.trim() : "";
-        // rpcd merges singbox additively ($esb + $isb), so dropping the key would
-        // leave the stored value untouched. Clearing a field that was set must
-        // therefore send "" — the core treats empty as unset — while a field that
-        // was never set stays absent, so an untouched save rewrites nothing.
-        setOrDelete(
-            singbox,
-            "connect_timeout",
-            ct || (hasOwn(singbox, "connect_timeout") ? "" : null),
-        );
+        // Only written when its input was actually rendered: taking the cleared
+        // branch for a missing element would emit "" and wipe a stored value.
+        if (ctEl) {
+            var ct = ctEl.value.trim();
+            // rpcd merges singbox additively ($esb + $isb), so dropping the key would
+            // leave the stored value untouched. Clearing a field that was set must
+            // therefore send "" — the core treats empty as unset — while a field that
+            // was never set stays absent, so an untouched save rewrites nothing.
+            setOrDelete(
+                singbox,
+                "connect_timeout",
+                ct || (hasOwn(singbox, "connect_timeout") ? "" : null),
+            );
+        }
 
         return {
             singbox: singbox,
@@ -2889,26 +2958,39 @@ return view.extend({
 
                 var sourceEl = card.querySelector(".vpnsub-sub-source");
                 var useNodes = !!sourceEl && sourceEl.value === "nodes";
+                // A disabled subscription is never fetched, so the core's
+                // validateSource lets it carry no source at all. Requiring one
+                // here would make a config the core accepts unsaveable.
+                var needsSource = cardSubEnabled(card);
 
                 if (useNodes) {
                     var nodeVals = w.nodes ? w.nodes.getValue() : [];
                     if (!nodeVals.length) {
-                        ui.addNotification(null, E("p", _("A subscription using inline nodes needs at least one vless:// URI")), "warning");
-                        valid = false;
+                        if (needsSource) {
+                            ui.addNotification(null, E("p", _("A subscription using inline nodes needs at least one vless:// URI")), "warning");
+                            valid = false;
+                        }
                     } else if (nodeVals.some(function (v) { return !isValidNodeUri(v); })) {
+                        // Checked even when disabled: the core parses stored
+                        // nodes with vless.Parse regardless of enabled state.
                         ui.addNotification(null, E("p", _("Inline nodes must be valid vless:// URIs")), "warning");
                         valid = false;
                     }
                 } else if (!url) {
-                    setError(urlEl, _("URL is required"));
-                    valid = false;
+                    if (needsSource) {
+                        setError(urlEl, _("URL is required"));
+                        valid = false;
+                    }
                 } else if (!isValidUrl(url)) {
                     setError(urlEl, _("Enter a valid URL (https://...)"));
                     valid = false;
                 }
 
+                // Only when a chain exists — otherwise the row is hidden and the
+                // value is dropped on save, so rejecting it would block a save
+                // over a field the user cannot see.
                 var btEl = card.querySelector(".vpnsub-sub-blacklist-timeout");
-                if (btEl) {
+                if (btEl && w.fallback && w.fallback.getValue().length) {
                     clearError(btEl);
                     var bt = btEl.value.trim();
                     if (bt && !isValidDuration(bt)) {
@@ -2951,7 +3033,9 @@ return view.extend({
         var chainErrs = validateChains(cfg.subscriptions);
         if (chainErrs.length) {
             chainErrs.forEach(function (msg) {
-                ui.addNotification(null, E("p", msg), "warning");
+                var p = E("p");
+                p.textContent = msg;
+                ui.addNotification(null, p, "warning");
             });
             return false;
         }
@@ -3026,7 +3110,7 @@ return view.extend({
             .catch(function (err) {
                 ui.addNotification(
                     null,
-                    E("p", _("Save error: ") + (err.message || String(err))),
+                    textP(_("Save error: ") + (err.message || String(err))),
                     "error",
                 );
             });
@@ -3102,11 +3186,9 @@ return view.extend({
                 while (resultsEl.firstChild)
                     resultsEl.removeChild(resultsEl.firstChild);
                 resultsEl.appendChild(
-                    E(
-                        "p",
-                        { class: "vpnsub-test-error" },
-                        _("Error: ") + (err.message || String(err)),
-                    ),
+                    textP(_("Error: ") + (err.message || String(err)), {
+                        class: "vpnsub-test-error",
+                    }),
                 );
             })
             .then(function () {
@@ -3192,7 +3274,7 @@ return view.extend({
             .catch(function (err) {
                 ui.addNotification(
                     null,
-                    E("p", _("Save error: ") + (err.message || String(err))),
+                    textP(_("Save error: ") + (err.message || String(err))),
                     "error",
                 );
             })

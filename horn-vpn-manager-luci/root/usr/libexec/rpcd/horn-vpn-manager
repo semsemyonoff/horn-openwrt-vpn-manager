@@ -25,36 +25,49 @@ fail_json() {
 # a remote url or an inline nodes list, never both, and an enabled one needs
 # exactly one. Kept to shapes and presence only — URI syntax and cross-subscription
 # rules are left to check_with_core.
+#
+# Every check compares against "${bad:-1}": when jq itself aborts (a payload
+# shape its filter cannot index, e.g. a subscription that is a string) it prints
+# nothing, and an unguarded `[ "$bad" -gt 0 ]` would error out and fall through —
+# accepting the payload. Defaulting to 1 makes a jq failure reject instead.
 check_sub_sources() {
     local cfg="$1"
     local bad
 
-    bad=$(echo "$cfg" | jq '[(.subscriptions // {})[] | select((.name | type) != "string" or (.name // "") == "")] | length')
-    if [ "$bad" -gt 0 ]; then
+    # Runs first so the later filters, which index into each subscription, have
+    # a shape they can work with and a bad payload gets a message that names it.
+    bad=$(echo "$cfg" | jq 'if ((.subscriptions // {}) | type) != "object" then 1 else [(.subscriptions // {})[] | select(type != "object")] | length end' 2>/dev/null)
+    if [ "${bad:-1}" != 0 ]; then
+        printf 'Subscriptions must be an object of subscription objects'
+        return 1
+    fi
+
+    bad=$(echo "$cfg" | jq '[(.subscriptions // {})[] | select((.name | type) != "string" or (.name // "") == "")] | length' 2>/dev/null)
+    if [ "${bad:-1}" != 0 ]; then
         printf 'All subscriptions must have a non-empty string name'
         return 1
     fi
 
-    bad=$(echo "$cfg" | jq '[(.subscriptions // {})[] | select((.url != null and (.url | type) != "string") or (.nodes != null and (.nodes | type) != "array"))] | length')
-    if [ "$bad" -gt 0 ]; then
+    bad=$(echo "$cfg" | jq '[(.subscriptions // {})[] | select((.url != null and (.url | type) != "string") or (.nodes != null and (.nodes | type) != "array"))] | length' 2>/dev/null)
+    if [ "${bad:-1}" != 0 ]; then
         printf 'Subscription url must be a string and nodes must be an array'
         return 1
     fi
 
-    bad=$(echo "$cfg" | jq '[(.subscriptions // {})[] | (.nodes // [])[] | select(type != "string" or . == "")] | length')
-    if [ "$bad" -gt 0 ]; then
+    bad=$(echo "$cfg" | jq '[(.subscriptions // {})[] | (.nodes // [])[] | select(type != "string" or . == "")] | length' 2>/dev/null)
+    if [ "${bad:-1}" != 0 ]; then
         printf 'Subscription nodes must be non-empty strings'
         return 1
     fi
 
-    bad=$(echo "$cfg" | jq '[(.subscriptions // {})[] | select((.url // "") != "" and ((.nodes // []) | length) > 0)] | length')
-    if [ "$bad" -gt 0 ]; then
+    bad=$(echo "$cfg" | jq '[(.subscriptions // {})[] | select((.url // "") != "" and ((.nodes // []) | length) > 0)] | length' 2>/dev/null)
+    if [ "${bad:-1}" != 0 ]; then
         printf 'A subscription takes either a url or inline nodes, not both'
         return 1
     fi
 
-    bad=$(echo "$cfg" | jq '[(.subscriptions // {})[] | select(.enabled != false and (.url // "") == "" and ((.nodes // []) | length) == 0)] | length')
-    if [ "$bad" -gt 0 ]; then
+    bad=$(echo "$cfg" | jq '[(.subscriptions // {})[] | select(.enabled != false and (.url // "") == "" and ((.nodes // []) | length) == 0)] | length' 2>/dev/null)
+    if [ "${bad:-1}" != 0 ]; then
         printf 'Each enabled subscription must have a url or inline nodes'
         return 1
     fi
@@ -70,14 +83,18 @@ check_sub_sources() {
 # accepted on the structural checks alone, as it was before this delegation existed.
 check_with_core() {
     local cfg="$1"
-    local tmp="/tmp/horn-vpn-manager-check.$$.json"
+    local tmp
     local out
     local rc
     local msg
 
     command -v vpn-manager >/dev/null 2>&1 || return 0
 
-    if ! (umask 077; printf '%s\n' "$cfg" > "$tmp"); then
+    # mktemp, not a $$-derived name: rpcd runs as root and /tmp is a
+    # world-writable tmpfs, so a predictable path lets an unprivileged local
+    # process pre-plant a symlink and have root truncate an arbitrary file.
+    tmp=$(umask 077; mktemp /tmp/horn-vpn-manager-check.XXXXXX) || return 0
+    if ! printf '%s\n' "$cfg" > "$tmp"; then
         rm -f "$tmp"
         return 0
     fi
