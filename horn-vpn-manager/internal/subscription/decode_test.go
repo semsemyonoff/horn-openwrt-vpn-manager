@@ -424,10 +424,23 @@ const topologyWarning = "single-node before and is multi-node now"
 func TestWarnTopologyShift(t *testing.T) {
 	const vless1 = "vless://uuid1@host1.example.com:443?encryption=none#Node+1"
 	const vless2 = "vless://uuid2@host2.example.com:443?encryption=none#Node+2"
+	// Known scheme, rejected by the parser: sing-box implements only salamander.
+	const hy2Broken = "hysteria2://pass@bad.example.com:8443?obfs=gecko#Broken"
+
+	// warn drives the real BuildOutbounds so the plan the warning is checked
+	// against is the one the run would actually generate.
+	warn := func(t *testing.T, uris []string) {
+		t.Helper()
+		plan, err := BuildOutbounds("api", uris, BuildOptions{TestURL: "http://example.com"})
+		if err != nil {
+			t.Fatalf("BuildOutbounds: %v", err)
+		}
+		warnTopologyShift("api", uris, plan)
+	}
 
 	t.Run("warns on single vless plus a new scheme", func(t *testing.T) {
 		buf := captureLog(t)
-		warnTopologyShift("api", []string{vless1, hy2Line})
+		warn(t, []string{vless1, hy2Line})
 		log := buf.String()
 		if !strings.Contains(log, topologyWarning) {
 			t.Fatalf("expected a topology-shift warning, log:\n%s", log)
@@ -447,7 +460,7 @@ func TestWarnTopologyShift(t *testing.T) {
 
 	t.Run("silent when already multi-node", func(t *testing.T) {
 		buf := captureLog(t)
-		warnTopologyShift("api", []string{vless1, vless2, hy2Line})
+		warn(t, []string{vless1, vless2, hy2Line})
 		if strings.Contains(buf.String(), topologyWarning) {
 			t.Errorf("unexpected warning for an already multi-node subscription, log:\n%s", buf.String())
 		}
@@ -455,7 +468,7 @@ func TestWarnTopologyShift(t *testing.T) {
 
 	t.Run("silent when still single-node", func(t *testing.T) {
 		buf := captureLog(t)
-		warnTopologyShift("api", []string{hy2Line})
+		warn(t, []string{hy2Line})
 		if strings.Contains(buf.String(), topologyWarning) {
 			t.Errorf("unexpected warning for a single-node subscription, log:\n%s", buf.String())
 		}
@@ -465,9 +478,34 @@ func TestWarnTopologyShift(t *testing.T) {
 	// is no saved selector choice to invalidate.
 	t.Run("silent when no vless node is present", func(t *testing.T) {
 		buf := captureLog(t)
-		warnTopologyShift("api", []string{hy2Line, hy2ShortLine})
+		warn(t, []string{hy2Line, hy2ShortLine})
 		if strings.Contains(buf.String(), topologyWarning) {
 			t.Errorf("unexpected warning for a vless-free subscription, log:\n%s", buf.String())
+		}
+	})
+
+	// A new-scheme line the parser rejects is dropped by BuildOutbounds, so the
+	// subscription keeps its <id>-single tag: telling the operator to re-pick a
+	// node would be wrong, and it would repeat on every cron run.
+	t.Run("silent when the new-scheme node does not parse", func(t *testing.T) {
+		buf := captureLog(t)
+		warn(t, []string{vless1, hy2Broken})
+		if strings.Contains(buf.String(), topologyWarning) {
+			t.Errorf("unexpected warning for a subscription that stayed single-node, log:\n%s", buf.String())
+		}
+	})
+
+	// The node count comes from the plan, not the URI list: duplicates are
+	// deduplicated away before the tags exist.
+	t.Run("counts nodes from the plan", func(t *testing.T) {
+		buf := captureLog(t)
+		warn(t, []string{vless1, hy2Line, hy2Line})
+		log := buf.String()
+		if !strings.Contains(log, topologyWarning) {
+			t.Fatalf("expected a topology-shift warning, log:\n%s", log)
+		}
+		if !strings.Contains(log, "yields 2 node(s)") {
+			t.Errorf("warning does not count the deduplicated nodes, log:\n%s", log)
 		}
 	})
 }

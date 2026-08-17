@@ -288,10 +288,6 @@ func (r *Runner) Run(ctx context.Context) error { //nolint:gocognit,gocyclo // o
 			logx.Debug("  %s", uri)
 		}
 
-		if fromPayload {
-			warnTopologyShift(defaultID, uris)
-		}
-
 		if r.DryRun {
 			if writeErr := r.writeDryRunNodes(defaultID, uris); writeErr != nil {
 				logx.Err("Failed to write dry-run output for %s: %v", defaultID, writeErr)
@@ -301,6 +297,10 @@ func (r *Runner) Run(ctx context.Context) error { //nolint:gocognit,gocyclo // o
 		plan, buildErr := BuildOutbounds(defaultID, uris, r.buildOptsForSub(sub, testURL))
 		if buildErr != nil {
 			return fmt.Errorf("default subscription %q failed to build outbounds, aborting", defaultID)
+		}
+
+		if fromPayload {
+			warnTopologyShift(defaultID, uris, plan)
 		}
 
 		logx.Detail("  Subscription %s: final outbound tag: %s", defaultID, logx.Bold(plan.FinalTag))
@@ -651,10 +651,6 @@ func (r *Runner) processSub(ctx context.Context, id string, sub *config.Subscrip
 		logx.Debug("  %s", uri)
 	}
 
-	if fromPayload {
-		warnTopologyShift(id, uris)
-	}
-
 	if r.DryRun {
 		if writeErr := r.writeDryRunNodes(id, uris); writeErr != nil {
 			logx.Err("Failed to write dry-run output for %s: %v", id, writeErr)
@@ -665,6 +661,10 @@ func (r *Runner) processSub(ctx context.Context, id string, sub *config.Subscrip
 	if buildErr != nil {
 		logx.Err("Failed to build outbounds for %s: %v", id, buildErr)
 		return subResult{id: id, err: buildErr}
+	}
+
+	if fromPayload {
+		warnTopologyShift(id, uris, plan)
 	}
 
 	logx.Detail("  Subscription %s: final outbound tag: %s", id, logx.Bold(plan.FinalTag))

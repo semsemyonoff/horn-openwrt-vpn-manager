@@ -201,7 +201,7 @@ Init script `/etc/init.d/horn-vpn-manager` ждёт доступ в интерн
 
 | Схема | Протокол | Заметки |
 | --- | --- | --- |
-| `vless://` | VLESS | TLS / Reality, транспорты tcp, ws, grpc, http, httpupgrade, xhttp |
+| `vless://` | VLESS | TLS / Reality, транспорты tcp, ws, grpc, http (h2), xhttp |
 | `hysteria2://`, `hy2://` | Hysteria2 | обе схемы официальные и равнозначны |
 
 Особенности hysteria2 URI:

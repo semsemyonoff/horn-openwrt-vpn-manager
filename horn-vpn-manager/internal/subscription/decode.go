@@ -234,13 +234,22 @@ const legacyScheme = "vless://"
 // that filters the new-scheme nodes back out keeps its "<id>-single" tag and must
 // not be told otherwise on every run. For the same reason it is never called for
 // inline nodes, which have no pre-multi-protocol history at all.
-func warnTopologyShift(id string, uris []string) {
-	if len(uris) < 2 {
+//
+// It also takes the built plan rather than deciding from the URI count alone: a
+// URI the dispatcher rejects (an unsupported obfs, an empty auth) is skipped by
+// BuildOutbounds, so a payload of one vless line plus one broken new-scheme line
+// stays single-node and its tag does not move. Both the plan and the individual
+// URIs are checked for the same reason.
+func warnTopologyShift(id string, uris []string, plan *OutboundPlan) {
+	if plan == nil || len(plan.NodeTags) < 2 {
 		return
 	}
 	legacy := 0
 	var gained []string
 	for _, uri := range uris {
+		if _, err := nodes.Parse(uri); err != nil {
+			continue
+		}
 		if strings.HasPrefix(uri, legacyScheme) {
 			legacy++
 			continue
@@ -255,5 +264,5 @@ func warnTopologyShift(id string, uris []string) {
 	logx.Warn("subscription %s yields %d node(s): 1 vless:// node plus %d node(s) of newly supported scheme(s) (%s). "+
 		"This subscription was single-node before and is multi-node now, so its final outbound tag moves from %s-single to %s-manual; "+
 		"its saved selector choice and clash.db entry no longer resolve and a node has to be re-picked once in LuCI",
-		id, len(uris), len(uris)-1, strings.Join(gained, ", "), id, id)
+		id, len(plan.NodeTags), len(plan.NodeTags)-1, strings.Join(gained, ", "), id, id)
 }
