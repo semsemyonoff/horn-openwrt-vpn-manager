@@ -412,24 +412,48 @@ Notes:
 - Create: `horn-vpn-manager/internal/hysteria2/hysteria2.go`
 - Create: `horn-vpn-manager/internal/hysteria2/hysteria2_test.go`
 
-- [ ] define `Node` (`Auth`, `Server`, `Port`, `Name`, `SNI`, `Insecure`, `ALPN`, `ObfsType`,
+- [x] define `Node` (`Auth`, `Server`, `Port`, `Name`, `SNI`, `Insecure`, `ALPN`, `ObfsType`,
       `ObfsPassword`, `UpMbps`, `DownMbps`) and `Outbound`/`Obfs` structs reusing `proto.OutboundTLS`
-- [ ] implement `Parse` for `hysteria2://` and `hy2://`: auth from the **whole userinfo**
+- [x] implement `Parse` for `hysteria2://` and `hy2://`: auth from the **whole userinfo**
       (`u.User.String()`, percent-decoded, colon allowed), **port optional defaulting to 443**,
       `sni`, `insecure`, `obfs`, `obfs-password` from the query, `alpn`/`upmbps`/`downmbps` as
       documented non-spec extensions, name from the fragment with the same `+`→space handling as
       VLESS
-- [ ] reject: wrong scheme, missing auth, missing host, invalid port, and `obfs=gecko` with a
+- [x] reject: wrong scheme, missing auth, missing host, invalid port, and `obfs=gecko` with a
       message saying sing-box implements only `salamander`
-- [ ] implement `StableHash` with the `hysteria2|…` input from Technical Details
-- [ ] implement `Outbound(tag, ct string) any` emitting `connect_timeout` when set and
+- [x] implement `StableHash` with the `hysteria2|…` input from Technical Details
+- [x] implement `Outbound(tag, ct string) any` emitting `connect_timeout` when set and
       `up_mbps`/`down_mbps` only when the URI carried them; add a comment recording that
       `ignore_client_bandwidth`/`masquerade` are inbound-only and that `tls` is required
-- [ ] write table-driven parse tests: minimal URI, fully-populated URI, `hy2://` alias, colon in
+- [x] write table-driven parse tests: minimal URI, fully-populated URI, `hy2://` alias, colon in
       auth, omitted port, each rejection
-- [ ] write marshalling tests: minimal node, node with obfs, node with bandwidth, node with
+- [x] write marshalling tests: minimal node, node with obfs, node with bandwidth, node with
       `connect_timeout` — asserting exact JSON
-- [ ] run `go test ./...` — must pass before task 5
+- [x] run `go test ./...` — must pass before task 5
+
+Notes:
+- `Node` follows the Task 3 shape: unexported fields plus an accessor each, `Parse` the only
+  constructor. `NewOutbound` is exported for the same reason it is in `vless` — `BuildOutbounds`
+  (Task 6) will want the concrete type; `(*Node).Outbound` is a one-line delegation.
+- ➕ **Rejection added beyond the plan:** `obfs=salamander` with an empty `obfs-password`. sing-box
+  rejects a salamander block without a password, and that rejection fails `sing-box check` on the
+  *whole* generated config; catching it at parse degrades to one skipped node with a warning
+  instead. The gecko rejection was generalised the same way: any `obfs` type other than
+  `salamander` is rejected, with a message naming `salamander`.
+- `insecure` goes through `strconv.ParseBool`; an unrecognised value reads as "verify
+  certificates". `upmbps`/`downmbps` fall back to 0 (field omitted, congestion control stays BBR).
+  Neither is a rejection — the plan's rejection list is closed, and a provider quirk in an optional
+  extension should not drop a node.
+- `TLS` is `json:"tls"` **without** `omitempty` and always constructed: hysteria2 runs over QUIC and
+  sing-box requires the block. Field order is `type, tag, server, server_port, password, obfs,
+  up_mbps, down_mbps, tls, connect_timeout`.
+- `TestStableHash_Golden` pins four URIs against md5 values computed **outside Go** (`printf … |
+  md5sum`) and records the exact hash input per case. `TestStableHash_DefaultPortMatchesExplicit443`
+  pins that the spec default and an explicit `:443` hash identically, so a URI gaining an explicit
+  port does not move its tag.
+- Mutation-checked: swapping `u.User.String()` for `u.User.Username()` fails 4 subtests (auth
+  truncated at the colon); changing the `hysteria2|` hash prefix fails the hash golden.
+- `go test ./...`, `gofmt -l` and `make lint` (0 issues) all clean.
 
 ### Task 5: Add the `nodes` dispatcher
 
