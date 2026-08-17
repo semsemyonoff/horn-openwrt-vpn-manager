@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -353,6 +354,184 @@ func TestIntegration_Run_inline_nodes_only(t *testing.T) {
 		if !tags[tag] {
 			t.Errorf("expected outbound %q, got tags: %v", tag, tags)
 		}
+	}
+}
+
+// mixedProtocolPayload interleaves a VLESS and a hysteria2 line the way a
+// provider payload would after this feature ships.
+const mixedProtocolPayload = "vless://uuid-m@vless.example.com:443?encryption=none#VLESS+Node\n" +
+	inlineHY2NodeA + "\n"
+
+// TestIntegration_Run_inline_hysteria2_with_route_rules is the acceptance case
+// this feature was built for: the self-hosted hysteria2 node expressed as inline
+// nodes on its own subscription, with its own route rules, instead of a
+// hand-written outbound in the sing-box template.
+//
+// The URI omits the port and carries a colon inside the auth, so this also pins
+// the round trip of both spec quirks all the way into the generated config.
+func TestIntegration_Run_inline_hysteria2_with_route_rules(t *testing.T) {
+	cfg := &config.Config{
+		Fetch:   config.Fetch{Retries: 1, TimeoutSeconds: 5, Parallelism: 1},
+		Singbox: config.Singbox{ConnectTimeout: "3s"},
+		Subscriptions: map[string]*config.Subscription{
+			"main": {Name: "Main", Default: true, Nodes: []string{inlineNodeA}},
+			"api": {
+				Name:  "API over QUIC",
+				Nodes: []string{inlineHY2NodeA},
+				Route: &config.SubscriptionRoute{
+					Domains: []string{"api.anthropic.com"},
+					IPCIDRs: []string{"203.0.113.0/24"},
+				},
+			},
+		},
+	}
+
+	outDir := t.TempDir()
+	runner := NewRunner(cfg, &fakeApplier{})
+	runner.OutDir = outDir
+	runner.DryRun = true
+
+	if err := runner.Run(context.Background()); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	generated := readConfig(t, filepath.Join(outDir, "config.json"))
+
+	ob := outboundByTag(generated, "api-single")
+	if ob == nil {
+		t.Fatalf("api-single outbound missing, tags: %v", collectOutboundTags(generated))
+	}
+	for _, tc := range []struct {
+		field string
+		want  any
+	}{
+		{"type", "hysteria2"},
+		{"server", "hy2a.example.com"},
+		{"server_port", float64(443)}, // spec default, the URI carried no port
+		{"password", "user:pa:ss"},    // whole userinfo, colon and all
+		{"connect_timeout", "3s"},
+	} {
+		if ob[tc.field] != tc.want {
+			t.Errorf("api-single %s = %v (%T), want %v", tc.field, ob[tc.field], ob[tc.field], tc.want)
+		}
+	}
+
+	obfs, _ := ob["obfs"].(map[string]any)
+	if obfs == nil || obfs["type"] != "salamander" || obfs["password"] != "obfspw" {
+		t.Errorf("api-single obfs = %v, want a salamander block with the URI's password", ob["obfs"])
+	}
+	// sing-box requires tls on a hysteria2 outbound; it runs over QUIC.
+	tls, _ := ob["tls"].(map[string]any)
+	if tls == nil || tls["enabled"] != true || tls["server_name"] != "hy2a.example.com" {
+		t.Errorf("api-single tls = %v, want enabled with the URI's sni", ob["tls"])
+	}
+	// Inbound-only fields must never reach an outbound.
+	for _, forbidden := range []string{"ignore_client_bandwidth", "masquerade"} {
+		if _, ok := ob[forbidden]; ok {
+			t.Errorf("api-single carries inbound-only field %q", forbidden)
+		}
+	}
+	// Bandwidth hints were not in the URI, so congestion control stays BBR.
+	for _, absent := range []string{"up_mbps", "down_mbps"} {
+		if _, ok := ob[absent]; ok {
+			t.Errorf("api-single carries %q, want absent so sing-box keeps BBR", absent)
+		}
+	}
+
+	routeSection, _ := generated["route"].(map[string]any)
+	if routeSection == nil {
+		t.Fatal("expected route section in generated config")
+	}
+	rules, _ := routeSection["rules"].([]any)
+	var domainRule, ipRule bool
+	for _, rule := range rules {
+		m, ok := rule.(map[string]any)
+		if !ok {
+			continue
+		}
+		if outbound, _ := m["outbound"].(string); outbound != "api-single" {
+			continue
+		}
+		if ds, _ := m["domain_suffix"].([]any); len(ds) > 0 {
+			domainRule = true
+		}
+		if ic, _ := m["ip_cidr"].([]any); len(ic) > 0 {
+			ipRule = true
+		}
+	}
+	if !domainRule || !ipRule {
+		t.Errorf("expected domain and ip_cidr rules for api-single, got rules: %v", rules)
+	}
+}
+
+// TestIntegration_Run_mixed_protocol_subscription pins that one downloaded
+// payload carrying both protocols produces both nodes under a single shared
+// urltest/selector pair — the decode filter, the dispatcher and the group
+// generation all have to agree for this to hold.
+func TestIntegration_Run_mixed_protocol_subscription(t *testing.T) {
+	srv := newTestServer(t, mixedProtocolPayload, http.StatusOK)
+	defer srv.Close()
+
+	cfg := &config.Config{
+		Fetch: config.Fetch{Retries: 1, TimeoutSeconds: 5, Parallelism: 1},
+		Subscriptions: map[string]*config.Subscription{
+			"main": {Name: "Main", URL: srv.URL, Default: true},
+		},
+	}
+
+	outDir := t.TempDir()
+	runner := NewRunner(cfg, &fakeApplier{})
+	runner.OutDir = outDir
+	runner.DryRun = true
+
+	if err := runner.Run(context.Background()); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	generated := readConfig(t, filepath.Join(outDir, "config.json"))
+	outbounds, _ := generated["outbounds"].([]any)
+
+	// Exactly one urltest and one selector, holding both node tags in payload order.
+	var urltest, selector map[string]any
+	var nodeTags []string
+	var types []string
+	for _, raw := range outbounds {
+		m, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		switch m["type"] {
+		case "urltest":
+			if urltest != nil {
+				t.Fatalf("more than one urltest group generated: %v", collectOutboundTags(generated))
+			}
+			urltest = m
+		case "selector":
+			if selector != nil {
+				t.Fatalf("more than one selector group generated: %v", collectOutboundTags(generated))
+			}
+			selector = m
+		case "vless", "hysteria2":
+			tag, _ := m["tag"].(string)
+			nodeTags = append(nodeTags, tag)
+			types = append(types, m["type"].(string))
+		}
+	}
+
+	if want := []string{"vless", "hysteria2"}; !slices.Equal(types, want) {
+		t.Fatalf("node outbound types = %v, want %v", types, want)
+	}
+	if urltest == nil || selector == nil {
+		t.Fatalf("expected one urltest and one selector group, tags: %v", collectOutboundTags(generated))
+	}
+	if got := outboundList(t, urltest); !slices.Equal(got, nodeTags) {
+		t.Errorf("urltest members = %v, want both node tags %v", got, nodeTags)
+	}
+	if got := outboundList(t, selector); !slices.Equal(got, append([]string{"main-auto"}, nodeTags...)) {
+		t.Errorf("selector members = %v, want main-auto plus %v", got, nodeTags)
+	}
+	if final := routeFinal(t, generated); final != "main-manual" {
+		t.Errorf("route.final = %q, want main-manual", final)
 	}
 }
 

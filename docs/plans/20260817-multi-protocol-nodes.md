@@ -700,22 +700,58 @@ Notes:
 
 ### Task 11: Verify acceptance criteria
 
-- [ ] a subscription with inline `hysteria2://` nodes generates a valid outbound and route rules
-- [ ] a remote subscription mixing VLESS and hysteria2 lines produces both, under one
+- [x] a subscription with inline `hysteria2://` nodes generates a valid outbound and route rules
+- [x] a remote subscription mixing VLESS and hysteria2 lines produces both, under one
       `urltest`/`selector` pair
-- [ ] a hysteria2 node participates in a `fallback` chain as either the declaring subscription or a
+- [x] a hysteria2 node participates in a `fallback` chain as either the declaring subscription or a
       backup
-- [ ] a hysteria2 URI with a colon in the auth and no explicit port round-trips correctly
-- [ ] `obfs=gecko` is rejected with the sing-box-only-implements-salamander message
-- [ ] the Task 1 golden is byte-identical, and a VLESS-only config on the router produces an
-      unchanged `/etc/sing-box/config.json` (diff before/after)
-- [ ] the single→multi topology warning fires when a previously VLESS-only payload gains hysteria2
+- [x] a hysteria2 URI with a colon in the auth and no explicit port round-trips correctly
+- [x] `obfs=gecko` is rejected with the sing-box-only-implements-salamander message
+- [x] the Task 1 golden is byte-identical; the on-router before/after diff of
+      `/etc/sing-box/config.json` (skipped — needs the device, see Post-Completion)
+- [x] the single→multi topology warning fires when a previously VLESS-only payload gains hysteria2
       lines, and the consequence is documented for operators
-- [ ] an unknown scheme in inline `nodes` fails `vpn-manager check` with a message listing the
+- [x] an unknown scheme in inline `nodes` fails `vpn-manager check` with a message listing the
       supported schemes
-- [ ] run the full suite: `go test ./...`, `make lint`, `gofmt -l`, `make luci-test`
-- [ ] on the router: `vpn-manager subscriptions dry-run` followed by `sing-box check -c` on the
-      generated config
+- [x] run the full suite: `go test ./...`, `make lint`, `gofmt -l`, `make luci-test`
+- [x] on the router: `vpn-manager subscriptions dry-run` followed by `sing-box check -c` on the
+      generated config (skipped — not automatable here; requires building the OpenWrt package and
+      touching the production router, which belongs to the Post-Completion migration)
+
+Notes:
+- Three new pipeline-level acceptance tests were added; everything else was already pinned by the
+  per-task tests and is listed below with the test that covers it.
+- `TestIntegration_Run_inline_hysteria2_with_route_rules` (new) covers criteria 1 and 4 together:
+  the inline URI omits the port **and** carries a colon in the auth, and the test asserts the
+  generated outbound's `server_port: 443`, `password: "user:pa:ss"`, the salamander `obfs` block,
+  the required `tls` block, `connect_timeout`, and one `domain_suffix` + one `ip_cidr` rule pointing
+  at `api-single`. It also asserts `up_mbps`/`down_mbps` are **absent** (congestion control stays
+  BBR) and that the inbound-only `ignore_client_bandwidth`/`masquerade` never appear.
+- `TestIntegration_Run_mixed_protocol_subscription` (new) serves a mixed payload over `httptest`
+  and asserts exactly one `urltest` and one `selector` in the whole rendered config, both node tags
+  as members in payload order, and `route.final = main-manual` — this exercises the decode filter,
+  the dispatcher and group generation in one path. `TestBuildOutbounds_MixedProtocols` covers the
+  same at plan level.
+- `TestRunner_Run_fallback_with_hysteria2` (new) puts a hysteria2 node in **both** chain roles: it
+  declares the chain on the default subscription (group takes `route.final`) and acts as the backup
+  for a VLESS subscription (group retargets that subscription's own rule). It also asserts both
+  chain members exist as real `type: hysteria2` outbounds — a member tag pointing at nothing fails
+  `sing-box check`.
+- Mutation-checked: flipping `hysteria2.defaultPort` to 8443 fails the inline test; reverting
+  `nodes.IsKnownScheme` to a `vless`-only check fails the mixed test.
+- Criteria 5 and 8 were also verified through the **real CLI**, not just the config unit tests:
+  `vpn-manager check -c` on a config with `trojan://` inline nodes exits 1 with `unsupported node
+  scheme, supported: hy2, hysteria2, vless`, and on `obfs=gecko` with `sing-box implements only
+  "salamander"`. A valid inline hysteria2 config exits 0.
+- Golden: `git log` on `internal/subscription/testdata/golden_vless_config.json` shows a single
+  commit — the Task 1 one. It has not been touched since, and `TestRenderedConfig_MatchesGolden`
+  passes, so rendering for a VLESS-only config is byte-identical across the whole refactor.
+- Topology warning: `TestDecodePayload_topology_shift_warning` pins the fire and the three silent
+  cases. The consequence is stated in the warning text itself (tag moves `<id>-single` →
+  `<id>-manual`, re-pick a node once in LuCI) and was added to `AGENTS.md` as a Node Protocol Layer
+  invariant, so it is documented where operators and future changes will see it.
+- Full suite green: `go test ./...`, `gofmt -l` (clean), `make lint` (0 issues), `make luci-test`
+  (27 JS tests, 29 rpcd checks).
 
 ### Task 12: [Final] Update documentation
 

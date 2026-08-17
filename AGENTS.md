@@ -194,6 +194,7 @@ Invariants:
 - **Groups are protocol-agnostic by construction.** `urltest`, `selector` and `fallback` reference members by tag only, so a subscription mixing protocols shares one `urltest`/`selector` pair and a `fallback` chain can cross protocols without any change to group generation.
 - **JSON subscription decoding stays VLESS-only.** `jsondecode.go` converts V2Ray/Xray outbounds, a format that carries VLESS; there is no evidence of providers shipping hysteria2 that way, and speculative conversion is unverifiable.
 - Node URIs carry credentials. `nodes.Parse` never quotes the offending URI in an error. (`internal/config` still echoes it in `subscription %q has an invalid node %q` — pre-existing and inconsistent, worth its own change.)
+- **Widening the accepted schemes can change a subscription's topology.** A provider payload that yielded one VLESS node before and now also yields hysteria2 nodes becomes multi-node: its final tag moves from `<id>-single` to `<id>-manual`, so the saved selector choice and the `clash.db` entry stop resolving and a node has to be re-picked once in LuCI. `warnTopologyShift` (`decode.go`) logs exactly that on the `1 vless + n new-scheme` case; the 0→n case stays silent because such a payload did not decode at all before. This is a one-time event per affected subscription, not a bug.
 
 hysteria2 specifics:
 

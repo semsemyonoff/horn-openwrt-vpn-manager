@@ -627,6 +627,12 @@ const (
 	inlineNodeA = "vless://uuid-a@a.example.com:443?encryption=none#Alpha"
 	inlineNodeB = "vless://uuid-b@b.example.com:443?encryption=none#Beta"
 	inlineNodeC = "vless://uuid-c@c.example.com:443?encryption=none#Gamma"
+
+	// Both hysteria2 URIs deliberately carry a colon inside the auth and omit
+	// the port, so every pipeline test that uses them also exercises the two
+	// spec quirks that a naive parser gets wrong.
+	inlineHY2NodeA = "hysteria2://user:pa:ss@hy2a.example.com?sni=hy2a.example.com&obfs=salamander&obfs-password=obfspw#HY2+Alpha"
+	inlineHY2NodeB = "hy2://user:pa:ss@hy2b.example.com?insecure=1#HY2+Beta"
 )
 
 // TestRunner_Run_inline_nodes_distinct_per_subscription guards the urlCache[""]
@@ -928,6 +934,97 @@ func TestRunner_Run_fallback_on_non_default(t *testing.T) {
 	}
 	if retargeted != 2 {
 		t.Errorf("rules pointing at corp-fallback = %d, want 2 (domain + ip_cidr)", retargeted)
+	}
+}
+
+// TestRunner_Run_fallback_with_hysteria2 covers the case the fallback groups
+// exist for: a backup that runs a different transport than the node that failed.
+// It pins a hysteria2 node in both chain roles — declaring the chain on the
+// default subscription, and acting as a backup for a VLESS subscription — since
+// groups reference members by tag and must stay protocol-agnostic.
+func TestRunner_Run_fallback_with_hysteria2(t *testing.T) {
+	cfg := &config.Config{
+		Fetch: config.Fetch{Retries: 1, TimeoutSeconds: 5, Parallelism: 1},
+		Subscriptions: map[string]*config.Subscription{
+			"api": {
+				Name:     "API over QUIC",
+				Default:  true,
+				Nodes:    []string{inlineHY2NodeA},
+				Fallback: &config.Fallback{Subscriptions: []string{"backup"}, BlacklistTimeout: "90s"},
+			},
+			"backup": {Name: "Backup", Nodes: []string{inlineNodeA}},
+			"corp": {
+				Name:     "Corp",
+				Nodes:    []string{inlineNodeB},
+				Route:    &config.SubscriptionRoute{Domains: []string{"corp.example.com"}},
+				Fallback: &config.Fallback{Subscriptions: []string{"spare"}},
+			},
+			"spare": {Name: "Spare over QUIC", Nodes: []string{inlineHY2NodeB}},
+		},
+	}
+
+	outDir := t.TempDir()
+	runner := NewRunner(cfg, &fakeApplier{})
+	runner.OutDir = outDir
+	runner.DryRun = true
+
+	if err := runner.Run(context.Background()); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	generated := readConfig(t, filepath.Join(outDir, "config.json"))
+
+	// hysteria2 declaring the chain: the group takes over route.final.
+	group := outboundByTag(generated, "api-fallback")
+	if group == nil {
+		t.Fatalf("api-fallback outbound missing, tags: %v", collectOutboundTags(generated))
+	}
+	if want := []string{"api-single", "backup-single"}; !slices.Equal(outboundList(t, group), want) {
+		t.Errorf("api-fallback outbounds = %v, want %v", outboundList(t, group), want)
+	}
+	if group["blacklist_timeout"] != "90s" {
+		t.Errorf("blacklist_timeout = %v, want 90s", group["blacklist_timeout"])
+	}
+	if final := routeFinal(t, generated); final != "api-fallback" {
+		t.Errorf("route.final = %q, want api-fallback", final)
+	}
+
+	// hysteria2 as a backup for a VLESS subscription: the group retargets the
+	// declaring subscription's own rules and leaves route.final alone.
+	corpGroup := outboundByTag(generated, "corp-fallback")
+	if corpGroup == nil {
+		t.Fatalf("corp-fallback outbound missing, tags: %v", collectOutboundTags(generated))
+	}
+	if want := []string{"corp-single", "spare-single"}; !slices.Equal(outboundList(t, corpGroup), want) {
+		t.Errorf("corp-fallback outbounds = %v, want %v", outboundList(t, corpGroup), want)
+	}
+
+	route, _ := generated["route"].(map[string]any)
+	rules, _ := route["rules"].([]any)
+	var retargeted int
+	for _, r := range rules {
+		m, ok := r.(map[string]any)
+		if !ok {
+			continue
+		}
+		if outbound, _ := m["outbound"].(string); outbound == "corp-fallback" {
+			retargeted++
+		}
+	}
+	if retargeted != 1 {
+		t.Errorf("rules pointing at corp-fallback = %d, want 1", retargeted)
+	}
+
+	// Both chain members must be real hysteria2 outbounds, not tags pointing at
+	// nothing: a group member that never got generated fails `sing-box check`.
+	for _, tag := range []string{"api-single", "spare-single"} {
+		ob := outboundByTag(generated, tag)
+		if ob == nil {
+			t.Fatalf("%s outbound missing, tags: %v", tag, collectOutboundTags(generated))
+		}
+		if ob["type"] != "hysteria2" {
+			t.Errorf("%s type = %v, want hysteria2", tag, ob["type"])
+		}
 	}
 }
 
