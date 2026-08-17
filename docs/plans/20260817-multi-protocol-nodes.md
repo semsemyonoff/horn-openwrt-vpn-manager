@@ -582,13 +582,31 @@ Notes:
 - Modify: `horn-vpn-manager/internal/config/config.go`
 - Modify: `horn-vpn-manager/internal/config/config_test.go`
 
-- [ ] replace `vless.Parse` in `validateSource` (`:226`) with `nodes.Parse`
-- [ ] update the two error strings (`:218,224`) and the `Nodes` doc comment (`:42-43`) to name the
+- [x] replace `vless.Parse` in `validateSource` (`:226`) with `nodes.Parse`
+- [x] update the two error strings (`:218,224`) and the `Nodes` doc comment (`:42-43`) to name the
       supported schemes rather than `vless://`, keeping the subscription id quoted
-- [ ] confirm the XOR rule and the disabled-subscription exemption are untouched
-- [ ] write tests: inline hysteria2 node accepted, mixed-protocol node list accepted, unknown scheme
+- [x] confirm the XOR rule and the disabled-subscription exemption are untouched
+- [x] write tests: inline hysteria2 node accepted, mixed-protocol node list accepted, unknown scheme
       rejected with a message listing supported schemes, disabled subscription still exempt
-- [ ] run `go test ./...` — must pass before task 9
+- [x] run `go test ./...` — must pass before task 9
+
+Notes:
+- The scheme list is rendered by a small `supportedSchemes()` helper over `nodes.Schemes()` rather
+  than a hardcoded string, so a new protocol package widens the error message for free.
+- `internal/config` no longer imports `internal/vless` at all; `nodes.Parse` is the only entry point.
+- The XOR rule and the disabled exemption are byte-identical — only the message text of the
+  neither-url-nor-nodes and empty-node errors changed. A new table case pins that a disabled
+  subscription with no source is still accepted through the reworded path.
+- `TestValidateSubscriptions_source_errors_list_schemes` asserts every scheme from `nodes.Schemes()`
+  appears in the error for: no source, empty node, unregistered scheme, and a URI with no scheme.
+  A protocol-level rejection (`obfs=gecko`) is deliberately **not** in that test — it surfaces the
+  parser's own message, which names `salamander`, and a separate table case pins that.
+- Mutation-checked: reverting to `vless.Parse` fails 5 subtests across both tests.
+- ⚠️ Pre-existing, unchanged by this task: `subscription %q has an invalid node %q` echoes the whole
+  URI, which carries credentials (a VLESS UUID, a hysteria2 password) into the CLI output and
+  `/tmp/horn-vpn-manager-*.log`. `nodes.Parse` deliberately never quotes the URI for exactly this
+  reason, so the two are inconsistent. Out of scope here — worth its own change.
+- `go test ./...`, `gofmt -l` and `make go-lint` (0 issues) all clean.
 
 ### Task 9: Update the LuCI frontend, backend comment and translations
 

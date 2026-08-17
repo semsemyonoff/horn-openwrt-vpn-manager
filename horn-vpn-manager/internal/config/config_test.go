@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/nodes"
 )
 
 func writeFile(t *testing.T, path, content string) {
@@ -332,6 +334,11 @@ func TestValidateSubscriptions_valid(t *testing.T) {
 
 const testNodeURI = "vless://11111111-2222-3333-4444-555555555555@203.0.113.10:443?security=reality&sni=example.com&pbk=abc&fp=chrome&type=tcp#Personal"
 
+const (
+	testHysteria2URI = "hysteria2://s3cret@203.0.113.20:8443?sni=example.com&obfs=salamander&obfs-password=xyz#API"
+	testHY2AliasURI  = "hy2://user:pass@203.0.113.21#Backup"
+)
+
 func TestLoad_subscription_nodes(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
@@ -409,9 +416,31 @@ func TestValidateSubscriptions_source(t *testing.T) {
 			wantErr: "empty node",
 		},
 		{
+			name: "inline hysteria2 node",
+			sub:  &Subscription{Name: "S1", Default: true, Nodes: []string{testHysteria2URI}},
+		},
+		{
+			name: "mixed protocol nodes",
+			sub:  &Subscription{Name: "S1", Default: true, Nodes: []string{testNodeURI, testHysteria2URI, testHY2AliasURI}},
+		},
+		{
 			name:    "unparsable node",
 			sub:     &Subscription{Name: "S1", Default: true, Nodes: []string{"https://example.com/not-a-node"}},
 			wantErr: "invalid node",
+		},
+		{
+			name:    "unknown scheme node",
+			sub:     &Subscription{Name: "S1", Default: true, Nodes: []string{"trojan://secret@203.0.113.30:443#T"}},
+			wantErr: "invalid node",
+		},
+		{
+			name:    "protocol-level rejection is surfaced",
+			sub:     &Subscription{Name: "S1", Default: true, Nodes: []string{"hysteria2://a@203.0.113.20?obfs=gecko"}},
+			wantErr: "salamander",
+		},
+		{
+			name: "disabled subscription without a source stays exempt",
+			sub:  &Subscription{Name: "S1", Enabled: &f},
 		},
 		{
 			name:    "disabled subscription with both",
@@ -443,6 +472,32 @@ func TestValidateSubscriptions_source(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), `"s1"`) {
 				t.Errorf("error should name the offending subscription: %v", err)
+			}
+		})
+	}
+}
+
+// A source error is the operator's only hint about what an inline node may be,
+// so it has to name every scheme the dispatcher accepts rather than assert one
+// protocol.
+func TestValidateSubscriptions_source_errors_list_schemes(t *testing.T) {
+	cases := map[string]*Subscription{
+		"no source":  {Name: "S1", Default: true},
+		"empty node": {Name: "S1", Default: true, Nodes: []string{""}},
+		"bad scheme": {Name: "S1", Default: true, Nodes: []string{"trojan://secret@203.0.113.30:443#T"}},
+		"no scheme":  {Name: "S1", Default: true, Nodes: []string{"203.0.113.30:443"}},
+	}
+	for name, sub := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg := &Config{Subscriptions: map[string]*Subscription{"s1": sub}}
+			err := cfg.ValidateSubscriptions()
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			for _, scheme := range nodes.Schemes() {
+				if !strings.Contains(err.Error(), scheme) {
+					t.Errorf("error must name scheme %q: %v", scheme, err)
+				}
 			}
 		})
 	}

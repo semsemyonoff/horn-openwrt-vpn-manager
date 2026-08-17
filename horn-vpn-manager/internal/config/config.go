@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/vless"
+	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/nodes"
 )
 
 const DefaultPath = "/etc/horn-vpn-manager/config.json"
@@ -39,8 +39,9 @@ type Singbox struct {
 
 // Subscription defines a single subscription entry.
 //
-// Nodes carries inline vless:// URIs for a self-hosted provider and is mutually
-// exclusive with a non-empty URL.
+// Nodes carries inline node URIs for a self-hosted provider and is mutually
+// exclusive with a non-empty URL. Any scheme the nodes dispatcher knows is
+// accepted, so a list may mix protocols.
 type Subscription struct {
 	Name      string             `json:"name"`
 	URL       string             `json:"url"`
@@ -215,19 +216,25 @@ func validateSource(id string, sub *Subscription) error {
 	}
 	if sub.URL == "" && len(sub.Nodes) == 0 {
 		if sub.IsEnabled() {
-			return fmt.Errorf("subscription %q has neither url nor nodes: set a subscription url or add inline vless:// nodes", id)
+			return fmt.Errorf("subscription %q has neither url nor nodes: set a subscription url or add inline node URIs (supported schemes: %s)", id, supportedSchemes())
 		}
 		return nil
 	}
 	for _, uri := range sub.Nodes {
 		if uri == "" {
-			return fmt.Errorf("subscription %q has an empty node: remove it or provide a vless:// URI", id)
+			return fmt.Errorf("subscription %q has an empty node: remove it or provide a node URI (supported schemes: %s)", id, supportedSchemes())
 		}
-		if _, err := vless.Parse(uri); err != nil {
+		if _, err := nodes.Parse(uri); err != nil {
 			return fmt.Errorf("subscription %q has an invalid node %q: %w", id, uri, err)
 		}
 	}
 	return nil
+}
+
+// supportedSchemes renders the node schemes the dispatcher accepts, so a source
+// error tells the operator what a valid inline node looks like.
+func supportedSchemes() string {
+	return strings.Join(nodes.Schemes(), ", ")
 }
 
 // validateFallback checks a single fallback chain declaration. A chain is
