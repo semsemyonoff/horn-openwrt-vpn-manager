@@ -26,9 +26,12 @@ Two OpenWrt packages plus local build tooling.
 
 ### Root tooling
 
-- `Makefile` — main entry point: Go cross-compile + local packaging into `.apk` / `.ipk`, lint and test targets. Package builds need **no** Docker or OpenWrt SDK
+- `Makefile` — main entry point: Go cross-compile + local packaging into `.apk` / `.ipk`, lint and test targets. Package builds need **no** OpenWrt SDK, but they do need a running Docker daemon: the packaging scripts run `apk mkpkg` and GNU `ar`/`tar` inside `alpine:latest`
 - `Dockerfile` + `docker/entrypoint.sh` — OpenWrt SNAPSHOT SDK image, used only by `make shell` for an interactive SDK session
-- `scripts/` — packaging helpers (`package-apk.sh`, `package-ipk.sh`, `package-luci-apk.sh`, `package-luci-ipk.sh`)
+- `scripts/` — packaging helpers (`package-apk.sh`, `package-ipk.sh`, `package-luci-apk.sh`, `package-luci-ipk.sh`) and `check-release-version.sh`
+- `.github/workflows/` — `ci.yml` (lint, tests, one-platform packaging) and `release.yml` (tag → all platforms → draft release)
+- `cliff.toml` — git-cliff config; groups conventional commit subjects into the release notes
+- `docs/release-notes/<tag>.md` — optional hand-written intro placed above the generated changelog
 - `bin/` — generated build output; never a source of truth
 
 ### `horn-vpn-manager` (core package)
@@ -217,7 +220,7 @@ Full rationale: [`docs/reference/concurrency-and-apply.md`](docs/reference/concu
 - `make build-core` / `make build-core-all` / `make build-luci` — granular `.apk` builds
 - `make build-ipk` / `make build-ipk-all` — `.ipk` for OpenWrt < 25 with opkg
 - `make build-ipk-core` / `make build-ipk-core-all` / `make build-ipk-luci` — granular `.ipk` builds
-- `make shell` — interactive shell inside the SDK container (the only Docker-dependent target)
+- `make shell` — interactive shell inside the SDK container
 - `make go-build` / `make go-test` / `make go-fmt` / `make go-lint`
 - `make lint` — aggregate Go checks (`go-fmt` + `go-lint`)
 - `make luci-test` — LuCI view tests (`node --test`) and rpcd backend tests (`dash`), plus the `node --check` / `dash -n` syntax gates
@@ -286,6 +289,28 @@ Short imperative commit messages, preferably scoped: `feat: add go config loader
 PRs should state which package(s) are affected (`horn-vpn-manager`, `horn-vpn-manager-luci`, build
 tooling), whether the change targets the Go core or OpenWrt packaging (`.apk` for OpenWrt ≥ 25, `.ipk`
 for OpenWrt < 25 with opkg), and which checks were run.
+
+The commit prefix is not cosmetic: `cliff.toml` groups release notes by it, and anything it does not
+recognize lands under "Other". Review fixups (`fix: address … review findings`) are skipped entirely —
+they correct code that ships in the same release under its own entry — so a change that must appear in
+the notes needs a subject of its own, not a fixup subject.
+
+## Releases
+
+Releases are cut by pushing a tag; `.github/workflows/release.yml` does the rest.
+
+1. bump `PKG_VERSION` in **both** `horn-vpn-manager/Makefile` and `horn-vpn-manager-luci/Makefile`
+2. optionally write `docs/release-notes/v<version>.md` — free-form text placed above the generated
+   changelog, for releases that need more than a commit list
+3. commit, then `git tag v<version> && git push --tags`
+
+The workflow runs `ci.yml` first, then verifies the tag against `PKG_VERSION`
+(`scripts/check-release-version.sh` — a mismatch fails the release rather than shipping a package
+whose metadata lies about its version), builds all five platforms as `.apk` **and** `.ipk` plus both
+LuCI packages, generates the changelog with git-cliff, and creates a **draft** release with the 12
+artifacts and `SHA256SUMS`. Review the notes and publish by hand.
+
+Re-pushing the same tag updates the existing draft in place instead of failing.
 
 ## Security & Configuration Tips
 

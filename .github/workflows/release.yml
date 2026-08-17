@@ -1,0 +1,101 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    name: Build and draft release
+    needs: checks
+    runs-on: ubuntu-latest
+    env:
+      # Pinned so a git-cliff release cannot change the notes of a rebuilt tag.
+      GIT_CLIFF_VERSION: 2.13.1
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history and tags: git-cliff needs the previous tag to bound the
+          # changelog range.
+          fetch-depth: 0
+
+      - name: Verify tag matches PKG_VERSION
+        run: ./scripts/check-release-version.sh "$GITHUB_REF_NAME"
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: horn-vpn-manager/go.mod
+          cache: false
+
+      - name: Build packages for all platforms
+        run: make build-all build-ipk-all
+
+      - name: Checksums
+        working-directory: bin
+        run: sha256sum -- *.apk *.ipk > SHA256SUMS
+
+      - name: Install git-cliff
+        run: |
+          set -eu
+          BASE="https://github.com/orhun/git-cliff/releases/download/v${GIT_CLIFF_VERSION}"
+          NAME="git-cliff-${GIT_CLIFF_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          cd /tmp
+          curl -sSfL -O "$BASE/$NAME"
+          curl -sSfL -O "$BASE/$NAME.sha512"
+          sha512sum -c "$NAME.sha512"
+          tar -xzf "$NAME"
+          echo "/tmp/git-cliff-${GIT_CLIFF_VERSION}" >> "$GITHUB_PATH"
+
+      - name: Assemble release notes
+        run: |
+          set -eu
+          NOTES=notes.md
+          INTRO="docs/release-notes/${GITHUB_REF_NAME}.md"
+          : > "$NOTES"
+
+          # A hand-written intro wins the top of the notes; the generated
+          # changelog always follows, so nothing silently disappears from it.
+          if [ -f "$INTRO" ]; then
+            cat "$INTRO" >> "$NOTES"
+            printf '\n\n' >> "$NOTES"
+          fi
+
+          git-cliff --config cliff.toml --latest >> "$NOTES"
+
+          PREV=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+          if [ -n "$PREV" ]; then
+            printf '\n**Full diff**: %s/%s/compare/%s...%s\n' \
+              "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$PREV" "$GITHUB_REF_NAME" >> "$NOTES"
+          fi
+
+          echo "── release notes ──"
+          cat "$NOTES"
+
+      - name: Create or update the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          # Re-running a tag must not fail on the release that the first run
+          # created: update it in place instead.
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --draft --notes-file notes.md
+            gh release upload "$GITHUB_REF_NAME" bin/*.apk bin/*.ipk bin/SHA256SUMS --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --draft \
+              --title "$GITHUB_REF_NAME" \
+              --notes-file notes.md \
+              bin/*.apk bin/*.ipk bin/SHA256SUMS
+          fi
+          echo "Draft release ready: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases"

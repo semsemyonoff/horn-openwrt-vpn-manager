@@ -1,0 +1,52 @@
+# git-cliff configuration — release notes are generated from conventional
+# commit subjects. The release workflow runs `git-cliff --latest`, so the header
+# stays empty: GitHub renders the body under its own release heading, and the
+# compare link is appended by the workflow, which knows the repository URL.
+#
+# Preview locally: git-cliff --latest --config cliff.toml
+
+[changelog]
+header = ""
+body = """
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim }}
+{% for commit in commits %}
+- {{ commit.message | upper_first }}{% if commit.scope %} (`{{ commit.scope }}`){% endif %} ({{ commit.id | truncate(length=7, end="") }})
+{%- endfor %}
+{% endfor %}
+"""
+footer = ""
+trim = true
+
+[git]
+conventional_commits = true
+# Commits that predate the convention ("bump version", "Update readme") still
+# belong in the notes — they land in "Other" instead of disappearing.
+filter_unconventional = false
+filter_commits = false
+split_commits = false
+protect_breaking_commits = false
+topo_order = false
+sort_commits = "oldest"
+tag_pattern = "v[0-9]*"
+
+# The numeric comment prefixes only order the groups; the template strips them.
+commit_parsers = [
+  { message = "^Merge (branch|pull request|remote)", skip = true },
+  { message = "^bump version", skip = true },
+  { message = "^chore\\(release\\)", skip = true },
+  # Review fixups correct code that ships in the same release under its own
+  # feat/fix entry, so they describe nothing a reader can act on — and there are
+  # dozens of them with an identical subject.
+  { message = "(?i)^\\w+(\\(.+\\))?: address .*(review|feedback)", skip = true },
+  { message = "^feat", group = "<!-- 0 -->Features" },
+  { message = "^fix", group = "<!-- 1 -->Bug fixes" },
+  { message = "^perf", group = "<!-- 2 -->Performance" },
+  { message = "^refactor", group = "<!-- 3 -->Refactoring" },
+  { message = "^docs", group = "<!-- 4 -->Documentation" },
+  { message = "^test", group = "<!-- 5 -->Tests" },
+  { message = "^build", group = "<!-- 6 -->Build and packaging" },
+  { message = "^ci", group = "<!-- 7 -->CI" },
+  { message = "^chore", group = "<!-- 8 -->Chores" },
+  { message = ".*", group = "<!-- 9 -->Other" },
+]

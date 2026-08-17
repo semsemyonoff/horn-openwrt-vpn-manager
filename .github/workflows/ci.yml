@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Called by release.yml so a tag is never published without the checks the
+  # branch would have run.
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: horn-vpn-manager/go.mod
+          # The module has no dependencies, so there is no go.sum to key a cache on.
+          cache: false
+
+      - name: gofmt
+        run: make go-fmt
+
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+          working-directory: horn-vpn-manager
+
+      - name: Test
+        run: make go-test
+
+  luci:
+    name: LuCI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: View and rpcd tests
+        run: make luci-test
+
+  package:
+    name: Package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: horn-vpn-manager/go.mod
+          cache: false
+
+      # One platform only: this guards the packaging scripts, not the release
+      # matrix, which release.yml builds in full.
+      - name: Build .apk and .ipk for one platform
+        run: make build build-ipk
+
+      - name: List artifacts
+        run: ls -lh bin/

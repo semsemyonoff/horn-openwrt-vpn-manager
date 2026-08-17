@@ -528,9 +528,10 @@ make build-core-all # собрать только core для всех плат�
 make build-ipk-all  # то же в .ipk для OpenWrt < 25 с opkg
 ```
 
-Готовые артефакты появятся в `bin/`. Docker для сборки пакетов не нужен: core кросс-компилируется
-локальным Go, а упаковкой занимаются скрипты в `scripts/`. Целевая платформа выводится из
-`TARGET` (`make build-core TARGET=ath79/generic`), список платформ для `*-all` — в `ALL_PLATFORMS`.
+Готовые артефакты появятся в `bin/`. OpenWrt SDK не нужен: core кросс-компилируется локальным Go, а
+упаковкой занимаются скрипты в `scripts/` — им нужен запущенный Docker, потому что `apk mkpkg` и
+GNU `ar`/`tar` вызываются внутри `alpine:latest`. Целевая платформа выводится из `TARGET`
+(`make build-core TARGET=ath79/generic`), список платформ для `*-all` — в `ALL_PLATFORMS`.
 
 Для установки на роутер вручную:
 
@@ -546,11 +547,27 @@ make help
 make lint       # gofmt -l + golangci-lint run
 make go-test    # go test ./... -count=1
 make luci-test
-make shell      # интерактивный shell внутри контейнера с OpenWrt SDK (единственная Docker-цель)
+make shell      # интерактивный shell внутри контейнера с OpenWrt SDK
 ```
 
 `make luci-test` выполняет тесты LuCI-вьюхи (`node --test`) и rpcd-бэкенда (`dash`) плюс
 синтаксические гейты `node --check` / `dash -n`; нужны `node` и `dash`.
+
+### Релизы
+
+Релиз собирает GitHub Actions по пушу тега:
+
+```sh
+# 1. поднять PKG_VERSION в обоих Makefile'ах (horn-vpn-manager и horn-vpn-manager-luci)
+# 2. при необходимости написать docs/release-notes/v2.3.0.md — текст попадёт над ченджлогом
+git commit -am "build: bump version to 2.3.0"
+git tag v2.3.0 && git push --follow-tags
+```
+
+Workflow прогоняет lint и тесты, проверяет, что тег совпадает с `PKG_VERSION`, собирает `.apk` и
+`.ipk` для всех пяти платформ плюс оба LuCI-пакета, генерирует ченджлог из коммитов (git-cliff,
+конфиг — `cliff.toml`) и создаёт **черновик** релиза с артефактами и `SHA256SUMS`. Опубликовать
+черновик нужно руками.
 
 ### Debug режим
 
