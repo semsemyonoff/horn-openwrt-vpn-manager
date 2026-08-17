@@ -149,13 +149,19 @@ func printRunHelp() {
 
 Usage: vpn-manager run [options]
 
+Both phases receive the same options, each ignoring the ones it does not know.
+
 Options:
-  -c, --config     Path to config file (default: /etc/horn-vpn-manager/config.json)
-  -t, --template   Path to sing-box template
-  -v               Increase verbosity (up to -vvv)
-  --no-color       Disable colored output
-  --logs           Write output to log files in addition to stderr
-  --debug          Debug mode: config/template from binary dir, output to ./out, no system actions
+  -c, --config           Path to config file (default: /etc/horn-vpn-manager/config.json)
+  -t, --template         Path to sing-box template
+  -v                     Increase verbosity (up to -vvv)
+  --no-color             Disable colored output
+  --logs                 Write output to log files in addition to stderr
+  --debug                Debug mode: config/template from binary dir, output to ./out, no system actions
+  --with-subscriptions   Routing phase: also pre-fetch subscription route lists into the cache
+  --cached-lists         Subscriptions phase: serve route lists from the cache, revalidating a copy
+                         older than fetch.list_cache_ttl
+  --download-lists       Subscriptions phase: always download fresh route lists and cache them
 `)
 }
 
@@ -182,12 +188,17 @@ Subcommands:
   help           Show this help message
 
 Options:
-  -c, --config     Path to config file (default: /etc/horn-vpn-manager/config.json)
-  -t, --template   Path to sing-box template (default: embedded; in --debug: <bindir>/sing-box.template.default.json)
-  -v               Increase verbosity (up to -vvv)
-  --no-color       Disable colored output
-  --logs           Write output to /tmp/horn-vpn-manager-subscriptions.log in addition to stderr
-  --debug          Debug mode: config/template from binary dir, output to ./out, no system actions
+  -c, --config       Path to config file (default: /etc/horn-vpn-manager/config.json)
+  -t, --template     Path to sing-box template (default: embedded; in --debug: <bindir>/sing-box.template.default.json)
+  -v                 Increase verbosity (up to -vvv)
+  --no-color         Disable colored output
+  --logs             Write output to /tmp/horn-vpn-manager-subscriptions.log in addition to stderr
+  --debug            Debug mode: config/template from binary dir, output to ./out, no system actions
+  --cached-lists     Serve route lists from the cache; a copy older than fetch.list_cache_ttl is
+                     revalidated rather than reused
+  --download-lists   Always download fresh route lists and cache them (wins over --cached-lists)
+
+Without either list flag, route lists are downloaded on every run and the cache is not touched.
 `)
 }
 
