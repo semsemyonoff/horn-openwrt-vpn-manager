@@ -106,7 +106,7 @@ func subscriptionsRunCtx(ctx context.Context, args []string) error {
 
 	// The lock comes before both the log file and the config: SetLogFile
 	// truncates a log another run is still writing, and a config read before a
-	// wait of up to a minute can be a generation out of date by the time it is
+	// wait of several minutes can be a generation out of date by the time it is
 	// applied.
 	release, err := system.AcquireRunLock(ctx, filepath.Dir(flags.configPath))
 	if err != nil {

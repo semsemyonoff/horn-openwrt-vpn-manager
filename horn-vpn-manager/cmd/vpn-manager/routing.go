@@ -85,7 +85,7 @@ func routingRunCtx(ctx context.Context, args []string) error {
 	}
 
 	// Lock first: SetLogFile truncates a log another run is still writing, and a
-	// config read before a wait of up to a minute can be a generation stale by
+	// config read before a wait of several minutes can be a generation stale by
 	// the time it is applied.
 	release, err := system.AcquireRunLock(ctx, filepath.Dir(flags.configPath))
 	if err != nil {

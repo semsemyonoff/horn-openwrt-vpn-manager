@@ -18,9 +18,17 @@ import (
 const LockFilename = ".run.lock"
 
 // lockWait is how long a run waits for a lock held by another process before
-// giving up. Long enough to absorb two cron entries landing in the same minute,
-// short enough that invocations cannot pile up behind a wedged run.
-var lockWait = 60 * time.Second
+// giving up.
+//
+// Sized against a whole "routing run --with-subscriptions", not against the
+// clock skew between two cron entries: it downloads the domain list, every
+// subnet list and every subscription route list, and a single unreachable URL
+// already costs a minute at the default timeout and retries. Cron entries do
+// collide by construction — `0 */6` and `0 */12` fire together every 12 hours —
+// and the right outcome there is for subscriptions to wait and then build from
+// the cache routing has just refreshed, not to skip an update cycle. Still
+// bounded, so invocations cannot pile up behind a wedged run.
+var lockWait = 5 * time.Minute
 
 // ErrLocked reports that another vpn-manager run holds the lock.
 var ErrLocked = errors.New("another vpn-manager run is in progress")
