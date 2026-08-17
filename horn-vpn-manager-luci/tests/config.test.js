@@ -412,6 +412,41 @@ test("a node name from the provider is not parsed as markup in the proxy widget"
     );
 });
 
+test("the auto pane's current node name is not parsed as markup", () => {
+    const ctx = loadView();
+    const hostile = "<img src=x onerror=alert(1)>";
+
+    const { cards } = mountSubscriptions(
+        ctx,
+        [{ id: "a", name: "A", url: "https://a/s", default: true }],
+        {
+            proxies: {
+                "a-manual": {
+                    type: "selector",
+                    now: "a-node-1",
+                    all: ["a-auto", "a-node-1"],
+                    history: [],
+                },
+                "a-auto": { type: "urltest", now: "a-node-1", history: [] },
+                "a-node-1": { type: "vless", history: [] },
+            },
+            tagNames: { "a-node-1": hostile },
+        },
+    );
+
+    const pane = cards[0].querySelector(".vpnsub-proxy-current");
+    assert.ok(pane, "auto pane was not rendered");
+    assert.strictEqual(
+        pane.querySelector("img"),
+        null,
+        "current node name was parsed as HTML: " + pane.innerHTML,
+    );
+    assert.ok(
+        pane.textContent.indexOf("<img") !== -1,
+        "the name should still be visible, as text",
+    );
+});
+
 test("a subscription name is not parsed as markup in a chain option label", () => {
     const ctx = loadView();
     mountSubscriptions(ctx, [

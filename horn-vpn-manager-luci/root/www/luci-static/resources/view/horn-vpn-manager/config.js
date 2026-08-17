@@ -147,8 +147,8 @@ function cleanNodeName(name) {
 
 // Node names come from the provider's vless:// fragment, so they are remote
 // input. dom.append assigns string children via innerHTML — set textContent.
-function nodeNameSpan(name) {
-    var el = E("span", { class: "vpnsub-proxy-node-name" });
+function nodeNameSpan(name, cls) {
+    var el = E("span", { class: cls || "vpnsub-proxy-node-name" });
     el.textContent = name == null ? "" : name;
     return el;
 }
@@ -280,10 +280,9 @@ function makeProxyWidget(
                 _("Current") + ":\u00a0",
             ),
             autoNow
-                ? E(
-                      "span",
-                      { class: "vpnsub-proxy-current-name" },
+                ? nodeNameSpan(
                       autoNowName || autoNow,
+                      "vpnsub-proxy-current-name",
                   )
                 : E("span", { class: "vpnsub-proxy-current-none" }, "—"),
             autoNowDelay ? makeLatencySpan(autoNowDelay) : "",
