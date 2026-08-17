@@ -32,7 +32,7 @@ Two OpenWrt packages plus local build tooling.
 - **A package must install as `root:root`.** The payload is staged in a bind-mounted temp dir, so every packaging script re-stages it inside the container before archiving — otherwise the uid of whoever ran the build ends up in the package and OpenWrt installs `/usr/bin/vpn-manager` as `nobody:nogroup`. `check-package-ownership.sh` runs in CI and in the release build. The `sh -c` blocks in those scripts are single-quoted: an apostrophe in a comment ends the string and the rest of the block runs on the host
 - `.github/workflows/` — `ci.yml` (lint, tests, one-platform packaging) and `release.yml` (tag → all platforms → draft release)
 - `cliff.toml` — git-cliff config; groups conventional commit subjects into the release notes
-- `docs/release-notes/<tag>.md` — optional hand-written intro placed above the generated changelog
+- `docs/release-notes/<tag>.md` — optional hand-written notes; when present they are the release body and the generated changelog is skipped
 - `bin/` — generated build output; never a source of truth
 
 ### `horn-vpn-manager` (core package)
@@ -301,17 +301,19 @@ the notes needs a subject of its own, not a fixup subject.
 Releases are cut by pushing a tag; `.github/workflows/release.yml` does the rest.
 
 1. bump `PKG_VERSION` in **both** `horn-vpn-manager/Makefile` and `horn-vpn-manager-luci/Makefile`
-2. optionally write `docs/release-notes/v<version>.md` — free-form text placed above the generated
-   changelog, for releases that need more than a commit list
+2. optionally write `docs/release-notes/v<version>.md` — when it exists it *is* the release body and the
+   generated changelog is skipped, for releases that deserve more than a commit list
 3. commit, then `git tag v<version> && git push --tags`
 
 The workflow runs `ci.yml` first, then verifies the tag against `PKG_VERSION`
 (`scripts/check-release-version.sh` — a mismatch fails the release rather than shipping a package
 whose metadata lies about its version), builds all five platforms as `.apk` **and** `.ipk` plus both
-LuCI packages, generates the changelog with git-cliff, and creates a **draft** release with the 12
-artifacts and `SHA256SUMS`. Review the notes and publish by hand.
+LuCI packages, checks that nothing in them is owned by a non-root uid, assembles the notes, and
+creates a **draft** release with the 12 artifacts and `SHA256SUMS`. Review and publish by hand.
 
-Re-pushing the same tag updates the existing draft in place instead of failing.
+Moving a tag and pushing it again rebuilds and replaces the assets of the existing release in place.
+That path deliberately does **not** pass `--draft`: re-releasing must not silently unpublish a release
+people already have.
 
 ## Security & Configuration Tips
 

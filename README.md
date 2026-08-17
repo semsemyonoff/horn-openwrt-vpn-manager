@@ -559,7 +559,7 @@ make shell      # интерактивный shell внутри контейне
 
 ```sh
 # 1. поднять PKG_VERSION в обоих Makefile'ах (horn-vpn-manager и horn-vpn-manager-luci)
-# 2. при необходимости написать docs/release-notes/v2.3.0.md — текст попадёт над ченджлогом
+# 2. при необходимости написать docs/release-notes/v2.3.0.md — он заменит собой авто-ченджлог
 git commit -am "build: bump version to 2.3.0"
 git tag v2.3.0 && git push --follow-tags
 ```

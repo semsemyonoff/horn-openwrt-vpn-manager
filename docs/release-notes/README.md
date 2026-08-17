@@ -1,9 +1,8 @@
 # Hand-written release notes
 
-`release.yml` looks for `docs/release-notes/<tag>.md` (for example `v2.3.0.md`) and puts its contents
-above the changelog git-cliff generates from the commits. Use it when a release needs a summary,
-upgrade steps or a warning that a commit list cannot carry; skip it and the release notes are just the
-grouped commit list.
+`release.yml` looks for `docs/release-notes/<tag>.md` (for example `v2.3.0.md`). When the file exists
+it becomes the release body as is, and the changelog git-cliff would have generated from the commits is
+skipped — a release that got a written summary does not also want the raw commit list under it. Without
+the file the generated changelog is the whole body.
 
-The generated changelog is always appended below the intro — the file adds context, it never replaces
-or filters what actually landed in the tag.
+Either way the workflow appends a link to the diff against the previous tag.

@@ -66,14 +66,17 @@ jobs:
           INTRO="docs/release-notes/${GITHUB_REF_NAME}.md"
           : > "$NOTES"
 
-          # A hand-written intro wins the top of the notes; the generated
-          # changelog always follows, so nothing silently disappears from it.
+          # Hand-written notes replace the generated changelog rather than
+          # sitting above it: a release that got a written summary does not also
+          # want the raw commit list under it. Without the file the changelog is
+          # all there is, so it is generated.
           if [ -f "$INTRO" ]; then
+            echo "notes: $INTRO (generated changelog skipped)"
             cat "$INTRO" >> "$NOTES"
-            printf '\n\n' >> "$NOTES"
+          else
+            echo "notes: generated from commits"
+            git-cliff --config cliff.toml --latest >> "$NOTES"
           fi
-
-          git-cliff --config cliff.toml --latest >> "$NOTES"
 
           PREV=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
           if [ -n "$PREV" ]; then
@@ -90,9 +93,11 @@ jobs:
         run: |
           set -eu
           # Re-running a tag must not fail on the release that the first run
-          # created: update it in place instead.
+          # created: update it in place instead. No --draft here — re-running a
+          # tag whose release is already published must not silently unpublish
+          # it, and a draft stays a draft either way.
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release edit "$GITHUB_REF_NAME" --draft --notes-file notes.md
+            gh release edit "$GITHUB_REF_NAME" --notes-file notes.md
             gh release upload "$GITHUB_REF_NAME" bin/*.apk bin/*.ipk bin/SHA256SUMS --clobber
           else
             gh release create "$GITHUB_REF_NAME" \
