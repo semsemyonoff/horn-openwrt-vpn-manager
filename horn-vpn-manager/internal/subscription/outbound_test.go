@@ -1,10 +1,14 @@
 package subscription_test
 
 import (
+	"bytes"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
+	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/config"
+	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/singbox"
 	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/subscription"
 )
 
@@ -723,6 +727,169 @@ func TestFallbackOutbound_JSONMarshal(t *testing.T) {
 			}
 		})
 	}
+}
+
+// goldenConfigPath holds the sing-box config rendered from goldenSubscriptions.
+//
+// A DIFF IN THIS FILE IS NOT A FAILURE TO PAPER OVER. Node tags are
+// "<id>-node-<StableHash>" and live outside this repository: they are written to
+// subs-tags.json, referenced by the selector choice an operator saved in LuCI,
+// and persisted in experimental.cache_file (/etc/sing-box/clash.db) on every
+// deployed router. Move a tag and every saved choice silently repoints to a node
+// nobody picked, while urltest/selector membership shifts underneath it. The
+// rendered outbound bodies matter for the same reason in reverse: a changed TLS
+// or transport shape is a behaviour change on the wire that no unit assertion
+// about individual fields would catch.
+//
+// Regenerating this file is a deliberate, separately reviewed decision — never a
+// way to make a diff go away.
+const goldenConfigPath = "testdata/golden_vless_config.json"
+
+// goldenTemplate is inlined rather than read from the shipped default template
+// so that editing the template cannot force the golden to be regenerated. It
+// still carries the pieces RenderConfig has to handle: placeholders in both
+// arrays, a static outbound, a static route rule, and deprecated inbound fields.
+const goldenTemplate = `{
+  "log": { "level": "info", "timestamp": true },
+  "inbounds": [
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "address": ["172.19.0.1/30"],
+      "auto_route": true,
+      "sniff": true,
+      "domain_strategy": "prefer_ipv4"
+    }
+  ],
+  "outbounds": [
+    "__VLESS_OUTBOUNDS__",
+    { "type": "direct", "tag": "direct" },
+    { "type": "block", "tag": "block" }
+  ],
+  "route": {
+    "rules": [
+      "__ROUTE_RULES__",
+      { "protocol": "dns", "outbound": "direct" }
+    ],
+    "final": "direct",
+    "auto_detect_interface": true
+  },
+  "experimental": {
+    "cache_file": { "enabled": true, "path": "/etc/sing-box/clash.db" }
+  }
+}`
+
+// goldenSubscriptions is the fixed input behind goldenConfigPath. Between them
+// the entries cover every VLESS rendering path the tool has: multi-node with
+// reality, xhttp and ws transports; single-node with its "<id>-single" tag; a
+// byte-identical duplicate that dedup must drop; two nodes colliding on
+// StableHash so the "-2" suffix is exercised; connect_timeout both set and
+// omitted; and per-subscription route rules.
+var goldenSubscriptions = []struct {
+	id    string
+	uris  []string
+	opts  subscription.BuildOptions
+	route *config.SubscriptionRoute
+}{
+	{
+		id: "default",
+		uris: []string{
+			"vless://uuid-reality@reality.example.com:8443?security=reality&pbk=publickey123&sid=ab12&sni=www.microsoft.com&fp=chrome&flow=xtls-rprx-vision#Reality+Node",
+			"vless://uuid-xhttp@xhttp.example.com:443?security=tls&sni=xhttp.example.com&type=xhttp&mode=stream-up&path=%2Fdownload&host=cdn.example.com&fp=firefox#XHTTP+Node",
+			"vless://uuid-ws@ws.example.com:2053?security=tls&sni=ws.example.com&type=ws&path=%2Fwebsocket&host=cdn.example.com#WS+Node",
+		},
+		opts: subscription.BuildOptions{Interval: "3m", Tolerance: 300, TestURL: testURL, ConnectTimeout: "3s"},
+	},
+	{
+		id: "personal",
+		uris: []string{
+			"vless://uuid-single@personal.example.com:443?security=tls&sni=personal.example.com&fp=chrome#Personal",
+		},
+		opts:  subscription.BuildOptions{Interval: "5m", Tolerance: 100, TestURL: testURL, ConnectTimeout: "3s"},
+		route: &config.SubscriptionRoute{Domains: []string{"example.org", "example.net"}, IPCIDRs: []string{"198.51.100.0/24"}},
+	},
+	{
+		id: "collide",
+		// The first two URIs are byte-identical and dedup to one outbound; the
+		// third shares their StableHash (it omits ALPN) and therefore renders
+		// under the "-3" collision suffix, pinning that the suffix counter keeps
+		// advancing for the dropped duplicate.
+		uris: []string{
+			"vless://uuid-dup@dup.example.com:443?security=tls&sni=dup.example.com&alpn=http%2F1.1#Dup",
+			"vless://uuid-dup@dup.example.com:443?security=tls&sni=dup.example.com&alpn=http%2F1.1#Dup",
+			"vless://uuid-dup@dup.example.com:443?security=tls&sni=dup.example.com&alpn=h2#Dup+h2",
+			"vless://uuid-plain@plain.example.com:80?type=tcp&headerType=http&host=plain.example.com&path=%2F#Plain+HTTP",
+		},
+		opts:  subscription.BuildOptions{TestURL: testURL},
+		route: &config.SubscriptionRoute{Domains: []string{"collide.example"}},
+	},
+}
+
+// renderGoldenConfig builds the goldenSubscriptions plans and renders them the
+// way the subscriptions pipeline does: node outbounds, then urltest, then
+// selector, per subscription in order, with route rules in the same order.
+func renderGoldenConfig(t *testing.T) []byte {
+	t.Helper()
+
+	var outbounds, routeRules []any
+	for _, sub := range goldenSubscriptions {
+		plan, err := subscription.BuildOutbounds(sub.id, sub.uris, sub.opts)
+		if err != nil {
+			t.Fatalf("BuildOutbounds(%q): %v", sub.id, err)
+		}
+		for _, ob := range plan.NodeOutbounds {
+			outbounds = append(outbounds, ob)
+		}
+		if plan.URLTestGroup != nil {
+			outbounds = append(outbounds, plan.URLTestGroup)
+		}
+		if plan.SelectorGroup != nil {
+			outbounds = append(outbounds, plan.SelectorGroup)
+		}
+		for _, r := range subscription.BuildRouteRules(sub.route, plan.FinalTag) {
+			routeRules = append(routeRules, r)
+		}
+	}
+
+	data, err := singbox.RenderConfig([]byte(goldenTemplate), outbounds, routeRules, "default-manual", "warn")
+	if err != nil {
+		t.Fatalf("RenderConfig: %v", err)
+	}
+	return data
+}
+
+// TestRenderedConfig_MatchesGolden is the regression gate for node tag
+// stability and rendered outbound shape. See goldenConfigPath.
+func TestRenderedConfig_MatchesGolden(t *testing.T) {
+	got := renderGoldenConfig(t)
+
+	want, err := os.ReadFile(goldenConfigPath)
+	if err != nil {
+		t.Fatalf("read golden: %v", err)
+	}
+
+	if bytes.Equal(got, want) {
+		return
+	}
+
+	gotLines, wantLines := strings.Split(string(got), "\n"), strings.Split(string(want), "\n")
+	for i := 0; i < len(gotLines) || i < len(wantLines); i++ {
+		var gotLine, wantLine string
+		if i < len(gotLines) {
+			gotLine = gotLines[i]
+		}
+		if i < len(wantLines) {
+			wantLine = wantLines[i]
+		}
+		if gotLine != wantLine {
+			t.Fatalf("rendered config differs from %s at line %d:\n  golden: %s\n  got:    %s\n\n"+
+				"If a node tag moved, every subs-tags.json entry, saved LuCI selector choice and "+
+				"clash.db entry on every deployed router now points at the wrong node. Fix the code, "+
+				"do not regenerate the golden.", goldenConfigPath, i+1, wantLine, gotLine)
+		}
+	}
+	t.Fatalf("rendered config differs from %s in length only: got %d bytes, golden %d bytes",
+		goldenConfigPath, len(got), len(want))
 }
 
 func TestBuildOutbounds_GroupsInterruptExistConnections(t *testing.T) {

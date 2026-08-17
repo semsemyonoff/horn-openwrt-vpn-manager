@@ -309,14 +309,27 @@ subscription payload / inline nodes
 - Create: `horn-vpn-manager/internal/subscription/testdata/golden_vless_config.json`
 - Modify: `horn-vpn-manager/internal/subscription/outbound_test.go`
 
-- [ ] add a test that builds plans from fixed VLESS subscriptions — multi-node (reality + xhttp +
+- [x] add a test that builds plans from fixed VLESS subscriptions — multi-node (reality + xhttp +
       ws), single-node, a duplicate node, a `StableHash` collision exercising the `-2` suffix, and
       `connect_timeout` set — renders them through `singbox.RenderConfig`, and compares the bytes
       against the golden
-- [ ] generate the golden from the **current** build, before any other task changes this code
-- [ ] add a comment naming what a diff means: node tags moved, invalidating `subs-tags.json`, saved
+- [x] generate the golden from the **current** build, before any other task changes this code
+- [x] add a comment naming what a diff means: node tags moved, invalidating `subs-tags.json`, saved
       selector choices and `experimental.cache_file` on every deployed router
-- [ ] run `go test ./...` — must pass before task 2
+- [x] run `go test ./...` — must pass before task 2
+
+Notes:
+- `TestRenderedConfig_MatchesGolden` + `renderGoldenConfig` / `goldenSubscriptions` live in
+  `outbound_test.go`; the fixture also covers per-subscription route rules and `connect_timeout`
+  omitted, and the duplicate + collision case lands on the `-3` suffix (the counter advances for the
+  dropped duplicate), which pins that invariant too.
+- The template is inlined in the test rather than read from
+  `sing-box.template.default.json`, so editing the shipped template cannot force a regeneration.
+- No `-update` flag was added, deliberately: the golden must not be regenerable as a reflex. The
+  file was generated once from the pre-refactor build via a throwaway test that was then removed.
+- Mutation-checked: perturbing the `vless|` hash prefix makes the test fail on the moved tag.
+- ⚠️ `make lint` already reports 24 pre-existing `staticcheck` SA5011 findings on this branch,
+  unrelated to this plan; verified the diff adds none.
 
 ### Task 2: Introduce the `proto` contract and move the shared TLS structs
 

@@ -1,0 +1,247 @@
+{
+  "experimental": {
+    "cache_file": {
+      "enabled": true,
+      "path": "/etc/sing-box/clash.db"
+    }
+  },
+  "inbounds": [
+    {
+      "address": [
+        "172.19.0.1/30"
+      ],
+      "auto_route": true,
+      "tag": "tun-in",
+      "type": "tun"
+    }
+  ],
+  "log": {
+    "level": "warn",
+    "timestamp": true
+  },
+  "outbounds": [
+    {
+      "type": "vless",
+      "tag": "default-node-d69256ce",
+      "server": "reality.example.com",
+      "server_port": 8443,
+      "uuid": "uuid-reality",
+      "flow": "xtls-rprx-vision",
+      "tls": {
+        "enabled": true,
+        "insecure": false,
+        "server_name": "www.microsoft.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        },
+        "reality": {
+          "enabled": true,
+          "public_key": "publickey123",
+          "short_id": "ab12"
+        }
+      },
+      "connect_timeout": "3s"
+    },
+    {
+      "type": "vless",
+      "tag": "default-node-188f3738",
+      "server": "xhttp.example.com",
+      "server_port": 443,
+      "uuid": "uuid-xhttp",
+      "packet_encoding": "xudp",
+      "tls": {
+        "enabled": true,
+        "insecure": false,
+        "server_name": "xhttp.example.com",
+        "alpn": [
+          "h2"
+        ],
+        "utls": {
+          "enabled": true,
+          "fingerprint": "firefox"
+        }
+      },
+      "transport": {
+        "host": "cdn.example.com",
+        "mode": "stream-up",
+        "path": "/download",
+        "type": "xhttp",
+        "x_padding_bytes": "100-1000"
+      },
+      "connect_timeout": "3s"
+    },
+    {
+      "type": "vless",
+      "tag": "default-node-8dc587cb",
+      "server": "ws.example.com",
+      "server_port": 2053,
+      "uuid": "uuid-ws",
+      "packet_encoding": "xudp",
+      "tls": {
+        "enabled": true,
+        "insecure": false,
+        "server_name": "ws.example.com"
+      },
+      "transport": {
+        "headers": {
+          "Host": "cdn.example.com"
+        },
+        "path": "/websocket",
+        "type": "ws"
+      },
+      "connect_timeout": "3s"
+    },
+    {
+      "type": "urltest",
+      "tag": "default-auto",
+      "outbounds": [
+        "default-node-d69256ce",
+        "default-node-188f3738",
+        "default-node-8dc587cb"
+      ],
+      "url": "https://www.gstatic.com/generate_204",
+      "interval": "3m",
+      "tolerance": 300,
+      "interrupt_exist_connections": true
+    },
+    {
+      "type": "selector",
+      "tag": "default-manual",
+      "outbounds": [
+        "default-auto",
+        "default-node-d69256ce",
+        "default-node-188f3738",
+        "default-node-8dc587cb"
+      ],
+      "default": "default-auto",
+      "interrupt_exist_connections": true
+    },
+    {
+      "type": "vless",
+      "tag": "personal-single",
+      "server": "personal.example.com",
+      "server_port": 443,
+      "uuid": "uuid-single",
+      "packet_encoding": "xudp",
+      "tls": {
+        "enabled": true,
+        "insecure": false,
+        "server_name": "personal.example.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "connect_timeout": "3s"
+    },
+    {
+      "type": "vless",
+      "tag": "collide-node-a8438422",
+      "server": "dup.example.com",
+      "server_port": 443,
+      "uuid": "uuid-dup",
+      "packet_encoding": "xudp",
+      "tls": {
+        "enabled": true,
+        "insecure": false,
+        "server_name": "dup.example.com",
+        "alpn": [
+          "http/1.1"
+        ]
+      }
+    },
+    {
+      "type": "vless",
+      "tag": "collide-node-a8438422-3",
+      "server": "dup.example.com",
+      "server_port": 443,
+      "uuid": "uuid-dup",
+      "packet_encoding": "xudp",
+      "tls": {
+        "enabled": true,
+        "insecure": false,
+        "server_name": "dup.example.com",
+        "alpn": [
+          "h2"
+        ]
+      }
+    },
+    {
+      "type": "vless",
+      "tag": "collide-node-3e0e892f",
+      "server": "plain.example.com",
+      "server_port": 80,
+      "uuid": "uuid-plain",
+      "packet_encoding": "xudp",
+      "transport": {
+        "host": [
+          "plain.example.com"
+        ],
+        "path": "/",
+        "type": "http"
+      }
+    },
+    {
+      "type": "urltest",
+      "tag": "collide-auto",
+      "outbounds": [
+        "collide-node-a8438422",
+        "collide-node-a8438422-3",
+        "collide-node-3e0e892f"
+      ],
+      "url": "https://www.gstatic.com/generate_204",
+      "interval": "5m",
+      "tolerance": 100,
+      "interrupt_exist_connections": true
+    },
+    {
+      "type": "selector",
+      "tag": "collide-manual",
+      "outbounds": [
+        "collide-auto",
+        "collide-node-a8438422",
+        "collide-node-a8438422-3",
+        "collide-node-3e0e892f"
+      ],
+      "default": "collide-auto",
+      "interrupt_exist_connections": true
+    },
+    {
+      "type": "direct",
+      "tag": "direct"
+    }
+  ],
+  "route": {
+    "auto_detect_interface": true,
+    "final": "default-manual",
+    "rules": [
+      {
+        "action": "sniff"
+      },
+      {
+        "domain_suffix": [
+          "example.org",
+          "example.net"
+        ],
+        "outbound": "personal-single"
+      },
+      {
+        "ip_cidr": [
+          "198.51.100.0/24"
+        ],
+        "outbound": "personal-single"
+      },
+      {
+        "domain_suffix": [
+          "collide.example"
+        ],
+        "outbound": "collide-manual"
+      },
+      {
+        "protocol": "dns",
+        "outbound": "direct"
+      }
+    ]
+  }
+}
