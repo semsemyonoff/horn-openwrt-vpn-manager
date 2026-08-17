@@ -579,8 +579,8 @@ msgstr "Inline nodes"
 msgid "Nodes"
 msgstr "Nodes"
 
-msgid "One vless:// URI per line — used instead of a subscription URL"
-msgstr "One vless:// URI per line — used instead of a subscription URL"
+msgid "One node URI per line (vless://, hysteria2://, hy2://) — used instead of a subscription URL"
+msgstr "One node URI per line (vless://, hysteria2://, hy2://) — used instead of a subscription URL"
 
 msgid "Source"
 msgstr "Source"
@@ -603,11 +603,11 @@ msgstr "How long a failed subscription is skipped before being retried (e.g. 1m)
 msgid "Enter a duration like 1m or 30s"
 msgstr "Enter a duration like 1m or 30s"
 
-msgid "A subscription using inline nodes needs at least one vless:// URI"
-msgstr "A subscription using inline nodes needs at least one vless:// URI"
+msgid "A subscription using inline nodes needs at least one node URI"
+msgstr "A subscription using inline nodes needs at least one node URI"
 
-msgid "Inline nodes must be valid vless:// URIs"
-msgstr "Inline nodes must be valid vless:// URIs"
+msgid "Inline nodes must be valid vless://, hysteria2:// or hy2:// URIs"
+msgstr "Inline nodes must be valid vless://, hysteria2:// or hy2:// URIs"
 
 msgid "The default subscription cannot be disabled"
 msgstr "The default subscription cannot be disabled"

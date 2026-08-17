@@ -579,8 +579,8 @@ msgstr "Встроенные узлы"
 msgid "Nodes"
 msgstr "Узлы"
 
-msgid "One vless:// URI per line — used instead of a subscription URL"
-msgstr "По одному URI vless:// на строку — используется вместо URL подписки"
+msgid "One node URI per line (vless://, hysteria2://, hy2://) — used instead of a subscription URL"
+msgstr "По одному URI узла на строку (vless://, hysteria2://, hy2://) — используется вместо URL подписки"
 
 msgid "Source"
 msgstr "Источник"
@@ -603,11 +603,11 @@ msgstr "Как долго отказавшая подписка пропуска
 msgid "Enter a duration like 1m or 30s"
 msgstr "Укажите длительность, например 1m или 30s"
 
-msgid "A subscription using inline nodes needs at least one vless:// URI"
-msgstr "Подписке со встроенными узлами нужен хотя бы один URI vless://"
+msgid "A subscription using inline nodes needs at least one node URI"
+msgstr "Подписке со встроенными узлами нужен хотя бы один URI узла"
 
-msgid "Inline nodes must be valid vless:// URIs"
-msgstr "Встроенные узлы должны быть корректными URI vless://"
+msgid "Inline nodes must be valid vless://, hysteria2:// or hy2:// URIs"
+msgstr "Встроенные узлы должны быть корректными URI vless://, hysteria2:// или hy2://"
 
 msgid "The default subscription cannot be disabled"
 msgstr "Подписку по умолчанию нельзя отключить"

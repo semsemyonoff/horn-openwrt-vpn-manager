@@ -75,9 +75,10 @@ check_sub_sources() {
     return 0
 }
 
-# Delegate schema validation of a candidate config to the core binary: vless URI
-# syntax, fallback cross-references and cycle detection are not expressible in
-# OpenWrt's jq, which is built without ONIGURUMA and has no regex support.
+# Delegate schema validation of a candidate config to the core binary: node URI
+# syntax (every scheme its nodes dispatcher accepts), fallback cross-references
+# and cycle detection are not expressible in OpenWrt's jq, which is built
+# without ONIGURUMA and has no regex support.
 # Prints the core's error message and returns 1 when the candidate is rejected.
 # When the core is unreachable (binary absent, /tmp unwritable) the candidate is
 # accepted on the structural checks alone, as it was before this delegation existed.

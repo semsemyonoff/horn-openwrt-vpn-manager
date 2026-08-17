@@ -18,6 +18,14 @@ const VIEW_PATH = path.join(
     "root/www/luci-static/resources/view/horn-vpn-manager/config.js",
 );
 
+// config.js uses URL for two unrelated things: the WHATWG constructor in
+// isValidNodeUri and the blob statics in the config export. Node's global URL
+// covers the constructor — a plain object stub would make every node URI parse
+// as invalid and let the validation tests pass vacuously.
+class URLStub extends URL {}
+URLStub.createObjectURL = () => "blob:stub";
+URLStub.revokeObjectURL = () => {};
+
 function loadView() {
     const src = fs.readFileSync(VIEW_PATH, "utf8");
     const document = stub.makeDocument();
@@ -83,7 +91,7 @@ function loadView() {
         dom,
         document,
         window,
-        { createObjectURL: () => "blob:stub", revokeObjectURL: () => {} },
+        URLStub,
         (fn) => fn,
         () => {},
         (s) => s,

@@ -145,7 +145,7 @@ function cleanNodeName(name) {
     }
 }
 
-// Node names come from the provider's vless:// fragment, so they are remote
+// Node names come from the fragment of the provider's node URI, so they are remote
 // input. dom.append assigns string children via innerHTML — set textContent.
 function nodeNameSpan(name, cls) {
     var el = E("span", { class: cls || "vpnsub-proxy-node-name" });
@@ -1044,16 +1044,26 @@ function isValidUrl(s) {
     return /^https?:\/\/.+/.test(s);
 }
 
-// Minimal client-side vless:// sanity check. vless.Parse in the Go core is
-// authoritative — this only catches obvious typos before the round trip.
+// Schemes the core's internal/nodes dispatcher accepts. Kept as an allow-list
+// rather than a single prefix so a new protocol package is one entry here.
+var NODE_URI_SCHEMES = ["vless", "hysteria2", "hy2"];
+
+// Minimal client-side node URI sanity check. The core's nodes.Parse is
+// authoritative — this only catches obvious typos before the round trip, and
+// must stay strictly looser than the core (matching on u.protocol makes it
+// case-insensitive where the core is not, which is the safe direction).
 function isValidNodeUri(s) {
-    if (s.indexOf("vless://") !== 0) return false;
     try {
-        // vless:// is a non-special scheme, so URL() happily parses a bare
-        // "vless://" with no host and no uuid — the likeliest paste error. The
-        // core needs both (vless.Parse), so require them here too.
+        // These are all non-special schemes, so URL() happily parses a bare
+        // "vless://" with no host and no userinfo — the likeliest paste error.
+        // Every supported protocol needs both (a VLESS uuid, a hysteria2 auth
+        // string), so require them here too. u.username alone is not enough:
+        // hysteria2 auth is the whole userinfo and may be "user:password",
+        // which URL() splits across username and password.
         var u = new URL(s);
-        return !!u.hostname && !!u.username;
+        var scheme = u.protocol.replace(/:$/, "");
+        if (NODE_URI_SCHEMES.indexOf(scheme) < 0) return false;
+        return !!u.hostname && !!(u.username || u.password);
     } catch (e) {
         return false;
     }
@@ -2434,7 +2444,10 @@ return view.extend({
         );
         var includeW = dynList(sub.include || [], _("keyword"));
         var excludeW = dynList(sub.exclude || [], _("Russia"));
-        var nodesW = dynList(sub.nodes || [], "vless://uuid@host:443?...");
+        var nodesW = dynList(
+            sub.nodes || [],
+            "vless://uuid@host:443?... or hysteria2://auth@host",
+        );
         var subFallback = sub.fallback || {};
         var fallbackW = makeChainPicker(cardId, subFallback.subscriptions || []);
         self._widgets[idx] = {
@@ -2500,7 +2513,7 @@ return view.extend({
         });
 
         // Source mode — a subscription is defined either by a remote URL or by
-        // inline vless:// nodes, never both (the core rejects that combination).
+        // inline node URIs, never both (the core rejects that combination).
         var sourceSel = E("select", {
             class: "cbi-input-select vpnsub-sub-source",
             change: function () {
@@ -2520,7 +2533,9 @@ return view.extend({
         var nodesRow = formRow(
             _("Nodes"),
             nodesW.node,
-            _("One vless:// URI per line — used instead of a subscription URL"),
+            _(
+                "One node URI per line (vless://, hysteria2://, hy2://) — used instead of a subscription URL",
+            ),
         );
 
         function updateSourceVisibility() {
@@ -2971,13 +2986,13 @@ return view.extend({
                     var nodeVals = w.nodes ? w.nodes.getValue() : [];
                     if (!nodeVals.length) {
                         if (needsSource) {
-                            ui.addNotification(null, E("p", _("A subscription using inline nodes needs at least one vless:// URI")), "warning");
+                            ui.addNotification(null, E("p", _("A subscription using inline nodes needs at least one node URI")), "warning");
                             valid = false;
                         }
                     } else if (nodeVals.some(function (v) { return !isValidNodeUri(v); })) {
                         // Checked even when disabled: the core parses stored
-                        // nodes with vless.Parse regardless of enabled state.
-                        ui.addNotification(null, E("p", _("Inline nodes must be valid vless:// URIs")), "warning");
+                        // nodes with nodes.Parse regardless of enabled state.
+                        ui.addNotification(null, E("p", _("Inline nodes must be valid vless://, hysteria2:// or hy2:// URIs")), "warning");
                         valid = false;
                     }
                 } else if (!url) {

@@ -617,19 +617,45 @@ Notes:
 - Modify: `horn-vpn-manager-luci/po/en/horn-vpn-manager.po`
 - Modify: `horn-vpn-manager-luci/po/ru/horn-vpn-manager.po`
 
-- [ ] generalise `isValidNodeUri` (`:1047-1060`) to a scheme allow-list (`vless`, `hysteria2`,
+- [x] generalise `isValidNodeUri` (`:1047-1060`) to a scheme allow-list (`vless`, `hysteria2`,
       `hy2`) requiring host plus userinfo, keeping it strictly looser than the core (existing
       invariant: client-side validation must never be stricter than `vpn-manager check`)
-- [ ] update the placeholder (`:2437`), help text (`:2523`), empty-list warning (`:2974`) and
+- [x] update the placeholder (`:2437`), help text (`:2523`), empty-list warning (`:2974`) and
       invalid-URI warning (`:2980`), plus the comments at `:148,2503,2979`
-- [ ] update all three msgid pairs in both `.po` files and note that changed msgids need the `.lmo`
+- [x] update all three msgid pairs in both `.po` files and note that changed msgids need the `.lmo`
       regenerated via `tools/po2lmo.py`
-- [ ] update the existing assertion on `/valid vless/` in `tests/config.test.js:238-247`
-- [ ] update the rpcd comment at `:78`; confirm the backend carries no structural `vless://` check
+- [x] update the existing assertion on `/valid vless/` in `tests/config.test.js:238-247`
+- [x] update the rpcd comment at `:78`; confirm the backend carries no structural `vless://` check
       to remove, and leave schema validation delegated to `check_with_core`
-- [ ] write `isValidNodeUri` tests: each accepted scheme, bare scheme with no host, unknown scheme,
+- [x] write `isValidNodeUri` tests: each accepted scheme, bare scheme with no host, unknown scheme,
       mixed list
-- [ ] run `make luci-test` — must pass before task 10
+- [x] run `make luci-test` — must pass before task 10
+
+Notes:
+- The allow-list is matched on `u.protocol` (already lowercased by `URL()`), not on a
+  `String.indexOf` prefix, so `VLESS://` passes the client and is rejected by the core — the safe
+  direction for the never-stricter-than-the-core invariant.
+- Userinfo presence is `u.username || u.password`: hysteria2 auth is the **whole** userinfo and may
+  be `user:password`, which `URL()` splits across the two fields. Checking `u.username` alone would
+  reject `hysteria2://:pass@host`, which the core accepts.
+- ⚠️ **Test-harness bug found and fixed:** `load-view.js` passed `URL` as a plain object carrying
+  only `createObjectURL`/`revokeObjectURL`, so `new URL(s)` inside `isValidNodeUri` threw a
+  `TypeError` and **every** node URI read as invalid under test. The pre-existing rejection test
+  passed for the wrong reason and any acceptance test would have failed. `URL` is now a subclass of
+  Node's global `URL` with the two blob statics attached. Mutation-checked: restoring the plain
+  object fails the acceptance test.
+- Three msgids changed, so a device needs the regenerated `.lmo`. Nothing is checked in — both
+  `horn-vpn-manager-luci/Makefile` and `scripts/package-luci-{apk,ipk}.sh` run `tools/po2lmo.py` at
+  package time, so `make build-luci` is the only step required. Verified both files still compile
+  (203 strings each).
+- The rpcd backend had no structural `vless://` check — only the `check_with_core` comment mentioned
+  the scheme. Schema validation stays delegated to `vpn-manager check`.
+- `isValidNodeUri` is module-scoped and `load-view.js` deliberately adds no test hooks, so all four
+  new tests drive it through the real `_validate` on mounted cards.
+- Mutation-checked (all three fail exactly one test): reverting the allow-list to the `vless://`
+  prefix check, dropping the `|| u.password` half, and removing the allow-list entirely.
+- The stale `msgid "Individual VLESS proxy outbound objects, comma-separated"` in both `.po` files
+  was left alone: it has no corresponding `_()` call in `config.js` and is unrelated to node URIs.
 
 ### Task 10: Document the protocol layer and the endpoint boundary
 

@@ -235,17 +235,95 @@ test("a disabled sourceless subscription emits no empty url", () => {
     assert.strictEqual(subs.c.url, "", "a stored empty url must survive as-is");
 });
 
-test("a vless:// URI without host or uuid is rejected", () => {
+// isValidNodeUri is module-scoped, so every case below drives it through the
+// real _validate on a mounted card rather than calling it directly.
+
+test("every scheme the core dispatches on is accepted as an inline node", () => {
     const ctx = loadView();
     mountSubscriptions(ctx, [
-        { id: "self", name: "Self", default: true, nodes: ["vless://"] },
+        {
+            id: "self",
+            name: "Self",
+            default: true,
+            nodes: [
+                "vless://uuid@vps.example:443?encryption=none#VPS",
+                "hysteria2://secret@vps.example:443?sni=vps.example#HY2",
+                "hy2://secret@vps.example:443#Alias",
+                // hysteria2 auth is the whole userinfo and may hold a colon;
+                // URL() splits it across username and password.
+                "hysteria2://user:pass@vps.example:443#Userpass",
+                // Odd but accepted by the core, which takes the whole userinfo
+                // verbatim — the client must never be the stricter of the two.
+                "hysteria2://:pass@vps.example:443#EmptyUser",
+                // The port is optional and defaults to 443 in the hysteria2 spec.
+                "hy2://secret@vps.example#NoPort",
+            ],
+        },
+    ]);
+
+    assert.notStrictEqual(
+        ctx.view._validate(),
+        false,
+        "should be saveable: " + notificationTexts(ctx),
+    );
+});
+
+test("a node URI without host or userinfo is rejected", () => {
+    ["vless://", "hysteria2://", "hy2://", "hysteria2://vps.example:443"].forEach(
+        (uri) => {
+            const ctx = loadView();
+            mountSubscriptions(ctx, [
+                { id: "self", name: "Self", default: true, nodes: [uri] },
+            ]);
+
+            assert.strictEqual(ctx.view._validate(), false, "accepted " + uri);
+            assert.ok(
+                notificationTexts(ctx).some((t) => /must be valid/.test(t)),
+                "expected a node URI validation message for " +
+                    uri +
+                    ", got: " +
+                    notificationTexts(ctx),
+            );
+        },
+    );
+});
+
+test("an inline node with a scheme the core does not dispatch is rejected", () => {
+    // trojan:// parses as a URL with host and userinfo, so only the scheme
+    // allow-list catches it.
+    const ctx = loadView();
+    mountSubscriptions(ctx, [
+        {
+            id: "self",
+            name: "Self",
+            default: true,
+            nodes: ["trojan://secret@vps.example:443#T"],
+        },
     ]);
 
     assert.strictEqual(ctx.view._validate(), false);
     assert.ok(
-        notificationTexts(ctx).some((t) => /valid vless/.test(t)),
-        "expected a vless validation message, got: " + notificationTexts(ctx),
+        notificationTexts(ctx).some((t) => /must be valid/.test(t)),
+        "expected a node URI validation message, got: " + notificationTexts(ctx),
     );
+});
+
+test("one bad URI in an otherwise valid mixed list blocks the save", () => {
+    const ctx = loadView();
+    mountSubscriptions(ctx, [
+        {
+            id: "self",
+            name: "Self",
+            default: true,
+            nodes: [
+                "vless://uuid@vps.example:443?encryption=none#VPS",
+                "hysteria2://",
+                "hy2://secret@vps.example#NoPort",
+            ],
+        },
+    ]);
+
+    assert.strictEqual(ctx.view._validate(), false);
 });
 
 // ── fallback chains ──────────────────────────────────────────────────────────
