@@ -169,6 +169,75 @@ expect_core bad "rejection printing only on stdout still rejects" \
 
 rm -rf "$STUB_BIN" "$EMPTY_BIN"
 
+echo "── call dispatcher ──"
+
+# The checks above drive the functions directly, which says nothing about
+# set_config/set_full_config actually calling them before writing. These run the
+# real `call` dispatcher against a temporary CONF_DIR, so dropping either
+# validation call — or writing the file before it — fails here.
+
+DISPATCH_BIN=$(mktemp -d)
+# dash, not the host sh, for the same reason the file header gives: macOS sh is
+# bash 3.2 and mis-parses a pre-existing case-inside-$().
+DISPATCH_SH=$(command -v dash 2>/dev/null || echo sh)
+
+# expect_call <want:written|rejected> <label> <method> <payload> <core stub body> <want reply substring>
+expect_call() {
+    want="$1"; label="$2"; method="$3"; payload="$4"; body="$5"; want_reply="$6"
+    checks=$((checks + 1))
+
+    conf=$(mktemp -d)
+    printf '#!/bin/sh\n%s\n' "$body" > "${DISPATCH_BIN}/vpn-manager"
+    chmod +x "${DISPATCH_BIN}/vpn-manager"
+
+    reply=$(printf '%s\n' "$payload" | \
+        HORN_VPN_MANAGER_CONF_DIR="$conf" PATH="${DISPATCH_BIN}:${PATH}" \
+        "$DISPATCH_SH" "$RPCD" call "$method" 2>/dev/null)
+
+    if [ -f "${conf}/config.json" ]; then
+        got=written
+    else
+        got=rejected
+    fi
+    if [ "$got" != "$want" ]; then
+        echo "FAIL: $label: want $want, got $got (reply: $reply)"
+        fails=$((fails + 1))
+        rm -rf "$conf"
+        return
+    fi
+    case "$reply" in
+        *"$want_reply"*) ;;
+        *)
+            echo "FAIL: $label: reply [$reply] does not contain [$want_reply]"
+            fails=$((fails + 1))
+            ;;
+    esac
+    rm -rf "$conf"
+}
+
+VALID_SUB='{"main":{"name":"Main","default":true,"url":"https://a.invalid/s"}}'
+BOTH_SOURCES='{"main":{"name":"Main","default":true,"url":"https://a.invalid/s","nodes":["vless://u@h:443"]}}'
+
+for method in set_config set_full_config; do
+    expect_call written "$method: accepted config is written" "$method" \
+        "{\"config\":{\"subscriptions\":${VALID_SUB}}}" 'exit 0' '"result":"ok"'
+
+    # check_with_core rejects → nothing may reach disk, and the core's own
+    # message has to survive to the reply.
+    expect_call rejected "$method: core rejection blocks the write" "$method" \
+        "{\"config\":{\"subscriptions\":${VALID_SUB}}}" \
+        'echo "error: subscription \"main\" has an invalid node at position 1: missing port in VLESS URI" >&2; exit 1' \
+        'has an invalid node at position 1'
+
+    # check_sub_sources rejects → the core is never even consulted, so a stub
+    # that would have accepted must not rescue the payload.
+    expect_call rejected "$method: structural rejection blocks the write" "$method" \
+        "{\"config\":{\"subscriptions\":${BOTH_SOURCES}}}" 'exit 0' \
+        'either a url or inline nodes'
+done
+
+rm -rf "$DISPATCH_BIN"
+
 echo
 if [ "$fails" -eq 0 ]; then
     echo "ok — $checks checks passed"

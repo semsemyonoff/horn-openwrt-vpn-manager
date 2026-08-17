@@ -86,15 +86,53 @@ class Element {
         this.style = {};
         this.classList = new ClassList(this);
         this._listeners = Object.create(null);
-        this.value = "";
+        // Backing store for .value. Deliberately not named _value: config.js
+        // keeps its own chain-picker bookkeeping in sel._value, and reusing the
+        // name would make that expando silently drive the DOM value.
+        this._stubValue = "";
+        this._selectCleared = false;
         this.checked = false;
         this.disabled = false;
+    }
+
+    // ── form value ──
+    // A <select> derives its value from the selected <option>, which is the only
+    // way render() communicates the stored log level. A plain data property
+    // would read back "" and let a round-trip assertion pass vacuously.
+    _optionChildren() {
+        return this.childNodes.filter(function (n) {
+            return n.nodeType === 1 && n.tagName === "OPTION";
+        });
+    }
+    get value() {
+        if (this.tagName !== "SELECT") return this._stubValue;
+        var opts = this._optionChildren();
+        for (var i = 0; i < opts.length; i++) {
+            if (opts[i].selected) return opts[i].value;
+        }
+        // With nothing explicitly selected a browser falls back to the first
+        // option — unless an assignment matched no option and cleared the
+        // selection, which leaves the select empty.
+        return this._selectCleared || !opts.length ? "" : opts[0].value;
+    }
+    set value(v) {
+        if (this.tagName !== "SELECT") {
+            this._stubValue = String(v);
+            return;
+        }
+        var want = String(v);
+        var matched = false;
+        this._optionChildren().forEach(function (o) {
+            var m = !matched && o.value === want;
+            o.selected = m;
+            if (m) matched = true;
+        });
+        this._selectCleared = !matched;
     }
 
     // ── attributes ──
     setAttribute(k, v) {
         this.attributes[k] = String(v);
-        if (k === "id") registry.byId[String(v)] = this;
         if (k === "value") this.value = String(v);
         if (k === "checked") this.checked = v !== false && v !== "false";
     }
@@ -307,9 +345,23 @@ function walk(node, fn) {
     });
 }
 
-// ── document / registry ──────────────────────────────────────────────────────
+// ── document ─────────────────────────────────────────────────────────────────
 
-var registry = { byId: Object.create(null) };
+// Depth-first, first match wins, scoped to the tree it is called on — the same
+// three properties the browser lookup has. Deliberately not a shared id→node
+// map: two documents in one node process would overwrite each other's entries,
+// so an assertion against the older ctx would read as "element absent" and pass
+// vacuously.
+function findById(node, id) {
+    // Text nodes carry neither attributes nor children.
+    if (node.nodeType !== 1) return null;
+    if (node.attributes["id"] === id) return node;
+    for (var i = 0; i < node.childNodes.length; i++) {
+        var found = findById(node.childNodes[i], id);
+        if (found) return found;
+    }
+    return null;
+}
 
 function makeDocument() {
     var doc = new Element("html");
@@ -319,13 +371,11 @@ function makeDocument() {
     doc.createTextNode = function (t) {
         return new TextNode(t);
     };
+    // Detached nodes read as absent for free: card removal is how the view drops
+    // a subscription, and refreshChainPickers relies on the lookup failing
+    // afterwards.
     doc.getElementById = function (id) {
-        var el = registry.byId[id];
-        // Detached nodes must read as absent: card removal is how the view
-        // drops a subscription, and refreshChainPickers relies on the lookup
-        // failing afterwards.
-        for (var n = el; n; n = n.parentNode) if (n === doc) return el;
-        return null;
+        return findById(doc, String(id));
     };
     doc.head = new Element("head");
     doc.body = new Element("body");

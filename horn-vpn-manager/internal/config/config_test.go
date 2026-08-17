@@ -504,6 +504,53 @@ func TestValidateSubscriptions_source_errors_list_schemes(t *testing.T) {
 	}
 }
 
+// A node URI carries a VLESS UUID or a hysteria2 password, and this error is
+// relayed to the subscriptions log and — through rpcd check_with_core — to a
+// LuCI notification. It must locate the node without quoting it, the way
+// nodes.Parse already does one layer down.
+func TestValidateSubscriptions_invalid_node_error_hides_the_uri(t *testing.T) {
+	const secret = "3f2a1b7c-dead-beef-cafe-000000000001"
+	cases := map[string]string{
+		"vless with a bad port": "vless://" + secret + "@203.0.113.30:notaport#N",
+		"unknown scheme":        "trojan://" + secret + "@203.0.113.30:443#N",
+		"hysteria2 bad obfs":    "hysteria2://" + secret + "@203.0.113.20?obfs=gecko",
+	}
+	for name, uri := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg := &Config{Subscriptions: map[string]*Subscription{
+				"s1": {Name: "S1", Default: true, Nodes: []string{testNodeURI, uri}},
+			}}
+			err := cfg.ValidateSubscriptions()
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			if strings.Contains(err.Error(), secret) {
+				t.Errorf("error leaks the node credential: %v", err)
+			}
+			if strings.Contains(err.Error(), uri) {
+				t.Errorf("error quotes the node URI: %v", err)
+			}
+			// Position, not content, is what lets the operator find the node.
+			if !strings.Contains(err.Error(), "position 2") {
+				t.Errorf("error should locate the node by position: %v", err)
+			}
+		})
+	}
+
+	t.Run("empty node", func(t *testing.T) {
+		cfg := &Config{Subscriptions: map[string]*Subscription{
+			"s1": {Name: "S1", Default: true, Nodes: []string{""}},
+		}}
+		err := cfg.ValidateSubscriptions()
+		if err == nil {
+			t.Fatal("expected an error")
+		}
+		if !strings.Contains(err.Error(), "position 1") {
+			t.Errorf("error should locate the empty node by position: %v", err)
+		}
+	})
+}
+
 func TestValidateSubscriptions_disabled_without_source(t *testing.T) {
 	f := false
 	cfg := &Config{

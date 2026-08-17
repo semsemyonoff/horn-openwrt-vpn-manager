@@ -13,7 +13,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert");
-const { loadView, mountSubscriptions } = require("./load-view.js");
+const { loadView, mountSubscriptions, renderView } = require("./load-view.js");
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -37,6 +37,86 @@ function setChecked(card, cls, on) {
 function notificationTexts(ctx) {
     return ctx.notifications.map((n) => n.node.textContent);
 }
+
+// ── render() wiring ──────────────────────────────────────────────────────────
+//
+// The tests below go through the real render() instead of mountSubscriptions,
+// because the setup mountSubscriptions performs by hand — seeding _rawSingbox
+// and _subIdx, resetting the chain pickers — is exactly what is under test here.
+
+test("a config loaded through render() survives a no-op save byte for byte", () => {
+    const ctx = loadView();
+    const stored = {
+        singbox: {
+            log_level: "info",
+            test_url: "https://probe.invalid/generate_204",
+            connect_timeout: "5s",
+            template: "",
+            // Not rendered anywhere: the additive rpcd merge means dropping it
+            // here would still be invisible on the router, but the next clear of
+            // a sibling key would be written against a wrong snapshot.
+            future_singbox_key: "keep",
+        },
+        subscriptions: {
+            main: {
+                name: "Main",
+                default: true,
+                url: "https://a.invalid/s",
+                interval: "5m",
+                tolerance: 300,
+                future_key: 7,
+                fallback: { subscriptions: ["backup"], blacklist_timeout: "1m" },
+            },
+            backup: {
+                name: "Backup",
+                nodes: ["hysteria2://pass@h.example.invalid:443#B"],
+                exclude: ["ru"],
+            },
+        },
+    };
+    const before = JSON.stringify(stored);
+
+    renderView(ctx, JSON.parse(before));
+    const collected = ctx.view._collectConfig();
+
+    assert.strictEqual(
+        JSON.stringify(collected.subscriptions),
+        JSON.stringify(stored.subscriptions),
+        "render() → _collectConfig() must round-trip the subscriptions unchanged",
+    );
+    assert.strictEqual(
+        JSON.stringify(collected.singbox),
+        JSON.stringify(stored.singbox),
+        "render() → _collectConfig() must round-trip singbox unchanged",
+    );
+    assert.strictEqual(JSON.stringify(stored), before, "the loaded config was mutated in place");
+});
+
+test("render() seeds _rawSingbox, so a key it never renders is not dropped", () => {
+    const ctx = loadView();
+    renderView(ctx, {
+        singbox: { log_level: "warn", connect_timeout: "3s", future_singbox_key: "keep" },
+        subscriptions: { main: { name: "Main", default: true, url: "https://a.invalid/s" } },
+    });
+
+    // _collectConfig starts from the _rawSingbox snapshot render() took. Without
+    // that seeding it starts from {} and every unrendered key disappears.
+    assert.strictEqual(ctx.view._rawSingbox.future_singbox_key, "keep");
+    assert.strictEqual(ctx.view._collectConfig().singbox.future_singbox_key, "keep");
+});
+
+test("render() takes _subIdx from the stored config so a new card gets a fresh key", () => {
+    const ctx = loadView();
+    renderView(ctx, {
+        singbox: {},
+        subscriptions: {
+            main: { name: "Main", default: true, url: "https://a.invalid/s" },
+            other: { name: "Other", url: "https://b.invalid/s" },
+        },
+    });
+
+    assert.strictEqual(ctx.view._subIdx, 2, "_subIdx must start past the stored subscriptions");
+});
 
 // ── field preservation ───────────────────────────────────────────────────────
 
@@ -439,6 +519,41 @@ test("a cycle between enabled subscriptions is rejected at save time", () => {
     assert.ok(
         notificationTexts(ctx).some((t) => /cycle/i.test(t)),
         "expected a cycle message, got: " + notificationTexts(ctx),
+    );
+});
+
+// A pick whose subscription stopped existing must survive as data — silently
+// rewriting it would drop a chain entry the operator meant to keep, and hiding
+// it would leave the save failing with nothing to point at.
+test("a chain pick whose subscription was removed stays visible and blocks the save", () => {
+    const ctx = loadView();
+    const { cards } = mountSubscriptions(ctx, [
+        {
+            id: "a",
+            name: "A",
+            url: "https://a/s",
+            default: true,
+            fallback: { subscriptions: ["gone"] },
+        },
+    ]);
+
+    const sel = cards[0].querySelector(".vpnsub-chain-select");
+    assert.ok(sel, "no chain select rendered");
+    assert.strictEqual(sel.value, "gone", "the stale pick must stay selected, not be reset");
+    assert.ok(
+        sel.classList.contains("vpnsub-invalid"),
+        "a pick that matches no candidate must be marked invalid",
+    );
+
+    // It is still collected, so the message names something the config contains.
+    assert.deepStrictEqual(
+        ctx.view._collectConfig().subscriptions.a.fallback.subscriptions,
+        ["gone"],
+    );
+    assert.strictEqual(ctx.view._validate(), false);
+    assert.ok(
+        notificationTexts(ctx).some((t) => /unknown subscription/i.test(t) && t.includes("gone")),
+        "expected an unknown-subscription message naming it, got: " + notificationTexts(ctx),
     );
 });
 

@@ -233,6 +233,7 @@ func (r *Runner) Run(ctx context.Context) error { //nolint:gocognit,gocyclo // o
 		enabledCount++
 
 		var uris []string
+		fromPayload := len(sub.Nodes) == 0
 		if len(sub.Nodes) > 0 {
 			logx.Info("Subscription %s: %s inline node(s)", logx.Bold(defaultID), strconv.Itoa(len(sub.Nodes)))
 			uris = slices.Clone(sub.Nodes)
@@ -285,6 +286,10 @@ func (r *Runner) Run(ctx context.Context) error { //nolint:gocognit,gocyclo // o
 		logx.OK("Subscription %s: %s node(s)", defaultID, logx.Bold(strconv.Itoa(len(uris))))
 		for _, uri := range uris {
 			logx.Debug("  %s", uri)
+		}
+
+		if fromPayload {
+			warnTopologyShift(defaultID, uris)
 		}
 
 		if r.DryRun {
@@ -591,6 +596,7 @@ func (r *Runner) processSub(ctx context.Context, id string, sub *config.Subscrip
 	opts := r.fetchOptsForSub(sub)
 
 	var uris []string
+	fromPayload := len(sub.Nodes) == 0
 	cached, cacheHit := urlCache[sub.URL]
 	switch {
 	case len(sub.Nodes) > 0:
@@ -643,6 +649,10 @@ func (r *Runner) processSub(ctx context.Context, id string, sub *config.Subscrip
 	logx.OK("Subscription %s: %s node(s)", id, logx.Bold(strconv.Itoa(len(uris))))
 	for _, uri := range uris {
 		logx.Debug("  %s", uri)
+	}
+
+	if fromPayload {
+		warnTopologyShift(id, uris)
 	}
 
 	if r.DryRun {

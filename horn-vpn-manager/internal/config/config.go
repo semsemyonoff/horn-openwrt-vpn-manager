@@ -220,12 +220,16 @@ func validateSource(id string, sub *Subscription) error {
 		}
 		return nil
 	}
-	for _, uri := range sub.Nodes {
+	for i, uri := range sub.Nodes {
 		if uri == "" {
-			return fmt.Errorf("subscription %q has an empty node: remove it or provide a node URI (supported schemes: %s)", id, supportedSchemes())
+			return fmt.Errorf("subscription %q has an empty node at position %d: remove it or provide a node URI (supported schemes: %s)", id, i+1, supportedSchemes())
 		}
+		// The URI is identified by position, never quoted: it carries a VLESS
+		// UUID or a hysteria2 password, and this message reaches the CLI log and
+		// — through the rpcd check_with_core relay — a LuCI notification.
+		// nodes.Parse keeps the same rule one layer down.
 		if _, err := nodes.Parse(uri); err != nil {
-			return fmt.Errorf("subscription %q has an invalid node %q: %w", id, uri, err)
+			return fmt.Errorf("subscription %q has an invalid node at position %d: %w", id, i+1, err)
 		}
 	}
 	return nil

@@ -402,46 +402,62 @@ func TestDecodePayload_unregistered_scheme_only(t *testing.T) {
 	}
 }
 
-// A payload that used to yield exactly one node and now yields several silently
-// moves the subscription's final tag from <id>-single to <id>-manual, which
+// Decoding on its own must stay silent: whether a subscription ends up
+// single- or multi-node is only known after include/exclude have run, so the
+// warning belongs to the pipeline and not to DecodePayload.
+func TestDecodePayload_does_not_warn_about_topology(t *testing.T) {
+	buf := captureLog(t)
+	data := []byte("vless://uuid1@host1.example.com:443?encryption=none#Node+1\n" + hy2Line + "\n")
+	if _, err := DecodePayload(data); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(buf.String(), topologyWarning) {
+		t.Errorf("DecodePayload emitted a topology-shift warning, log:\n%s", buf.String())
+	}
+}
+
+const topologyWarning = "single-node before and is multi-node now"
+
+// A subscription that used to yield exactly one node and now yields several
+// silently moves its final tag from <id>-single to <id>-manual, which
 // invalidates the saved selector choice and the clash.db entry.
-func TestDecodePayload_topology_shift_warning(t *testing.T) {
-	const warning = "single-node before and is multi-node now"
+func TestWarnTopologyShift(t *testing.T) {
+	const vless1 = "vless://uuid1@host1.example.com:443?encryption=none#Node+1"
+	const vless2 = "vless://uuid2@host2.example.com:443?encryption=none#Node+2"
 
 	t.Run("warns on single vless plus a new scheme", func(t *testing.T) {
 		buf := captureLog(t)
-		data := []byte("vless://uuid1@host1.example.com:443?encryption=none#Node+1\n" + hy2Line + "\n")
-		if _, err := DecodePayload(data); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		warnTopologyShift("api", []string{vless1, hy2Line})
 		log := buf.String()
-		if !strings.Contains(log, warning) {
+		if !strings.Contains(log, topologyWarning) {
 			t.Fatalf("expected a topology-shift warning, log:\n%s", log)
 		}
 		if !strings.Contains(log, "hysteria2") {
 			t.Errorf("warning does not name the newly accepted scheme, log:\n%s", log)
 		}
-	})
-
-	t.Run("silent when the payload was already multi-node", func(t *testing.T) {
-		buf := captureLog(t)
-		data := []byte("vless://uuid1@host1.example.com:443?encryption=none#Node+1\n" +
-			"vless://uuid2@host2.example.com:443?encryption=none#Node+2\n" + hy2Line + "\n")
-		if _, err := DecodePayload(data); err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		// Phase 2 decodes concurrently, so an unattributed warning cannot be
+		// traced back to a subscription.
+		if !strings.Contains(log, "subscription api") {
+			t.Errorf("warning does not name the subscription, log:\n%s", log)
 		}
-		if strings.Contains(buf.String(), warning) {
-			t.Errorf("unexpected topology-shift warning for an already multi-node payload, log:\n%s", buf.String())
+		if !strings.Contains(log, "api-single") || !strings.Contains(log, "api-manual") {
+			t.Errorf("warning does not name the concrete tags, log:\n%s", log)
 		}
 	})
 
-	t.Run("silent when the payload stays single-node", func(t *testing.T) {
+	t.Run("silent when already multi-node", func(t *testing.T) {
 		buf := captureLog(t)
-		if _, err := DecodePayload([]byte(hy2Line + "\n")); err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		warnTopologyShift("api", []string{vless1, vless2, hy2Line})
+		if strings.Contains(buf.String(), topologyWarning) {
+			t.Errorf("unexpected warning for an already multi-node subscription, log:\n%s", buf.String())
 		}
-		if strings.Contains(buf.String(), warning) {
-			t.Errorf("unexpected topology-shift warning for a single-node payload, log:\n%s", buf.String())
+	})
+
+	t.Run("silent when still single-node", func(t *testing.T) {
+		buf := captureLog(t)
+		warnTopologyShift("api", []string{hy2Line})
+		if strings.Contains(buf.String(), topologyWarning) {
+			t.Errorf("unexpected warning for a single-node subscription, log:\n%s", buf.String())
 		}
 	})
 
@@ -449,11 +465,9 @@ func TestDecodePayload_topology_shift_warning(t *testing.T) {
 	// is no saved selector choice to invalidate.
 	t.Run("silent when no vless node is present", func(t *testing.T) {
 		buf := captureLog(t)
-		if _, err := DecodePayload([]byte(hy2Line + "\n" + hy2ShortLine + "\n")); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if strings.Contains(buf.String(), warning) {
-			t.Errorf("unexpected topology-shift warning for a vless-free payload, log:\n%s", buf.String())
+		warnTopologyShift("api", []string{hy2Line, hy2ShortLine})
+		if strings.Contains(buf.String(), topologyWarning) {
+			t.Errorf("unexpected warning for a vless-free subscription, log:\n%s", buf.String())
 		}
 	})
 }

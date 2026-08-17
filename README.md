@@ -14,7 +14,8 @@
 
 1. Читает подписки из `config.json`
 2. Скачивает каждую подписку по URL (или берёт узлы из `nodes`, если они заданы inline)
-3. Автоопределяет формат: raw `vless://`, base64, base64url, gzip
+3. Автоопределяет формат: raw-строки узлов, base64, base64url, gzip; строки схем, которых нет
+   в [поддерживаемых протоколах](#поддерживаемые-протоколы-узлов), молча пропускаются
 4. Фильтрует узлы по `include` / `exclude` и отбрасывает узлы-дубликаты (одинаковые по всем параметрам outbound)
 5. Для multi-node подписок создаёт стабильные node tags, `urltest`-группу `<id>-auto` и selector `<id>-manual`
 6. Для single-node подписок создаёт прямой outbound `<id>-single`
@@ -99,7 +100,8 @@ Init script `/etc/init.d/horn-vpn-manager` ждёт доступ в интерн
     "personal": {
       "name": "Personal VPS",
       "nodes": [
-        "vless://11111111-2222-3333-4444-555555555555@203.0.113.10:443?type=tcp&security=reality&sni=example.com&fp=chrome&pbk=PUBLIC_KEY&sid=00112233#Personal"
+        "vless://11111111-2222-3333-4444-555555555555@203.0.113.10:443?type=tcp&security=reality&sni=example.com&fp=chrome&pbk=PUBLIC_KEY&sid=00112233#Personal",
+        "hysteria2://AUTH_PASSWORD@203.0.113.10:8443?sni=example.com&obfs=salamander&obfs-password=OBFS_PASSWORD#Personal+HY2"
       ],
       "default": true,
       "enabled": true,
@@ -166,8 +168,9 @@ Init script `/etc/init.d/horn-vpn-manager` ждёт доступ в интерн
 
 - `name` — человекочитаемое имя
 - `url` — URL подписки; **взаимоисключающий** с `nodes`
-- `nodes` — список inline `vless://` URI для своего узла (personal provider), когда публиковать
-  subscription-эндпоинт незачем. Ни одного HTTP-запроса такая подписка не делает; `include` / `exclude`,
+- `nodes` — список inline URI узлов любой [поддерживаемой схемы](#поддерживаемые-протоколы-узлов)
+  для своего узла (personal provider), когда публиковать subscription-эндпоинт незачем. Список может
+  смешивать протоколы. Ни одного HTTP-запроса такая подписка не делает; `include` / `exclude`,
   `route`, `default` и `fallback` работают так же, как у подписки с `url`. У включённой подписки должно
   быть ровно одно из `url` / `nodes` (пустая строка в `url` считается отсутствием)
 - `default` — ровно одна подписка должна иметь `true`; её outbound попадёт в `route.final`
@@ -191,6 +194,32 @@ Init script `/etc/init.d/horn-vpn-manager` ждёт доступ в интерн
   - `ip_cidrs` — список CIDR для `ip_cidr` route rule
   - `ip_urls` — URL-ы со списками IP/CIDR; аналогично `domain_urls`
 
+### Поддерживаемые протоколы узлов
+
+Узлы приходят либо из подписки, либо из inline-списка `nodes`, и в обоих случаях разбираются одним
+диспетчером схем. Сопоставление схемы **регистрозависимое**: `VLESS://` — неизвестная схема.
+
+| Схема | Протокол | Заметки |
+| --- | --- | --- |
+| `vless://` | VLESS | TLS / Reality, транспорты tcp, ws, grpc, http, httpupgrade, xhttp |
+| `hysteria2://`, `hy2://` | Hysteria2 | обе схемы официальные и равнозначны |
+
+Особенности hysteria2 URI:
+
+- **порт необязателен и по умолчанию равен `443`**
+- auth — это **весь** userinfo-компонент, он может содержать двоеточие (`user:password`)
+- параметры: `sni`, `insecure`, `alpn`, `obfs`, `obfs-password`, `upmbps`, `downmbps`
+  (последние три — клиентские расширения, а не часть URI-спеки)
+- если не задать ни `upmbps`, ни `downmbps`, sing-box использует BBR вместо Brutal
+- поддерживается только обфускация `salamander`: любое другое значение `obfs` (включая `gecko` из
+  спеки), а также `salamander` с пустым паролем — узел отбрасывается с предупреждением, вся подписка
+  при этом не падает
+- port hopping (`mport` / `server_ports` / `hop_interval`), `pinSHA256` и `ech` не поддерживаются
+
+Узел неизвестной схемы в скачанной подписке пропускается молча — провайдеры регулярно отдают
+протоколы, которых тут нет, и ронять из-за этого всю подписку было бы хуже. В inline-списке `nodes`
+такой URI, наоборот, отвергается на этапе валидации конфига.
+
 ### Схема тегов
 
 - single-node: `<id>-single`
@@ -198,6 +227,12 @@ Init script `/etc/init.d/horn-vpn-manager` ждёт доступ в интерн
 - multi-node manual (selector): `<id>-manual`
 - отдельные узлы: `<id>-node-<hash>`
 - fallback-цепочка: `<id>-fallback`
+
+> **Обновление.** С добавлением новых схем подписка, в которой раньше распознавался ровно один
+> `vless://` узел, а теперь распознаётся ещё и hysteria2, становится multi-node: её итоговый тег
+> меняется с `<id>-single` на `<id>-manual`, сохранённый выбор в selector и запись в `clash.db`
+> перестают резолвиться, и узел нужно один раз выбрать заново в LuCI. `vpn-manager` пишет об этом
+> предупреждение в лог с именем подписки. Это разовое событие на подписку, а не ошибка.
 
 ### Fallback-цепочки
 
@@ -487,6 +522,7 @@ ssh root@192.168.1.1 "apk add --allow-untrusted /tmp/horn-vpn-manager-*.apk"
 ```sh
 make help
 make lint
+make luci-test
 make shell
 ```
 
@@ -494,6 +530,9 @@ make shell
 
 - `gofmt` — проверка форматирования Go кода
 - `golangci-lint run` — статический анализ Go кода
+
+`make luci-test` выполняет тесты LuCI-вьюхи (`node --test`) и rpcd-бэкенда (`dash`) плюс
+синтаксические гейты `node --check` / `dash -n`; нужны `node` и `dash`.
 
 ### Debug режим
 

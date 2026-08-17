@@ -721,6 +721,77 @@ func TestRunner_Run_inline_nodes_filtering(t *testing.T) {
 	}
 }
 
+// The topology-shift warning is about a saved selector choice that stopped
+// resolving, so it must reflect the node list the subscription actually builds
+// outbounds from — not the raw payload. Filtering runs after decoding, and
+// inline nodes never had a pre-multi-protocol tag to invalidate at all.
+func TestRunner_Run_topology_shift_warning(t *testing.T) {
+	const oneVlessOneHy2 = "vless://uuid1@h1.example.com:443?encryption=none#Node+1\n" +
+		"hysteria2://pass@h2.example.com:443#Gamma\n"
+
+	run := func(t *testing.T, sub *config.Subscription, srvBody string) string {
+		t.Helper()
+		buf := captureLog(t)
+		if srvBody != "" {
+			srv := newTestServer(t, srvBody, http.StatusOK)
+			defer srv.Close()
+			sub.URL = srv.URL
+		}
+		sub.Name = "Main"
+		sub.Default = true
+		cfg := &config.Config{
+			Fetch:         config.Fetch{Retries: 1, TimeoutSeconds: 5, Parallelism: 1},
+			Subscriptions: map[string]*config.Subscription{"main": sub},
+		}
+		runner := NewRunner(cfg, &fakeApplier{})
+		runner.OutDir = t.TempDir()
+		runner.DryRun = true
+		if err := runner.Run(context.Background()); err != nil {
+			t.Fatalf("Run() error: %v", err)
+		}
+		return buf.String()
+	}
+
+	t.Run("warns and names the subscription", func(t *testing.T) {
+		log := run(t, &config.Subscription{}, oneVlessOneHy2)
+		if !strings.Contains(log, topologyWarning) {
+			t.Fatalf("expected a topology-shift warning, log:\n%s", log)
+		}
+		if !strings.Contains(log, "subscription main") {
+			t.Errorf("warning does not name the subscription, log:\n%s", log)
+		}
+	})
+
+	// The whole point of moving the check out of DecodePayload: excluding the
+	// new-scheme node leaves the subscription single-node, so warning about a
+	// tag move that never happens would be a false alarm on every cron run.
+	t.Run("silent when the new-scheme node is excluded", func(t *testing.T) {
+		log := run(t, &config.Subscription{Exclude: []string{"Gamma"}}, oneVlessOneHy2)
+		if strings.Contains(log, topologyWarning) {
+			t.Errorf("warned although the excluded node kept the subscription single-node, log:\n%s", log)
+		}
+	})
+
+	t.Run("silent when include keeps only the vless node", func(t *testing.T) {
+		log := run(t, &config.Subscription{Include: []string{"Node"}}, oneVlessOneHy2)
+		if strings.Contains(log, topologyWarning) {
+			t.Errorf("warned although include kept the subscription single-node, log:\n%s", log)
+		}
+	})
+
+	t.Run("silent for inline nodes", func(t *testing.T) {
+		log := run(t, &config.Subscription{
+			Nodes: []string{
+				"vless://uuid1@h1.example.com:443?encryption=none#Node+1",
+				"hysteria2://pass@h2.example.com:443#Gamma",
+			},
+		}, "")
+		if strings.Contains(log, topologyWarning) {
+			t.Errorf("warned about inline nodes, which have no prior topology, log:\n%s", log)
+		}
+	})
+}
+
 // TestRunner_Run_inline_nodes_skipped_when_disabled_sibling_has_no_source verifies a
 // disabled sourceless subscription is skipped while inline ones still render.
 func TestRunner_Run_inline_nodes_skipped_when_disabled_sibling_has_no_source(t *testing.T) {

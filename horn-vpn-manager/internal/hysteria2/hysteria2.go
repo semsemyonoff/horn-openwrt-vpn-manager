@@ -99,6 +99,18 @@ func (n *Node) UpMbps() int { return n.upMbps }
 // DownMbps returns the downlink bandwidth hint, 0 when the URI carried none.
 func (n *Node) DownMbps() int { return n.downMbps }
 
+// parseReason strips the URI out of a url.Error. Its Error() renders as
+// `parse "<the whole URI>": <reason>`, and a hysteria2 URI carries the auth
+// credential in its userinfo — the reason alone is what may be logged or shown
+// in LuCI.
+func parseReason(err error) error {
+	var uerr *url.Error
+	if errors.As(err, &uerr) && uerr.Err != nil {
+		return uerr.Err
+	}
+	return err
+}
+
 // Parse parses a hysteria2 URI into a Node.
 // The URI must start with "hysteria2://" or "hy2://".
 func Parse(rawURI string) (*Node, error) {
@@ -108,7 +120,7 @@ func Parse(rawURI string) (*Node, error) {
 
 	u, err := url.Parse(rawURI)
 	if err != nil {
-		return nil, fmt.Errorf("parse URI: %w", err)
+		return nil, fmt.Errorf("parse URI: %w", parseReason(err))
 	}
 
 	if u.User == nil {

@@ -1,7 +1,9 @@
 #!/bin/sh
 # shellcheck disable=SC3043
 
-CONF_DIR="/etc/horn-vpn-manager"
+# Overridable so tests can drive the `call` dispatcher end to end against a
+# temporary tree. rpcd never sets it, so on a device this is the fixed path.
+CONF_DIR="${HORN_VPN_MANAGER_CONF_DIR:-/etc/horn-vpn-manager}"
 CONFIG_FILE="${CONF_DIR}/config.json"
 CUSTOM_TEMPLATE="${CONF_DIR}/sing-box.template.json"
 DEFAULT_TEMPLATE_FILE="/usr/share/horn-vpn-manager/sing-box.template.json"

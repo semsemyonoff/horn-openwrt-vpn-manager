@@ -121,6 +121,18 @@ func (n *Node) Mode() string { return n.mode }
 // HeaderType returns the headerType parameter.
 func (n *Node) HeaderType() string { return n.headerType }
 
+// parseReason strips the URI out of a url.Error. Its Error() renders as
+// `parse "<the whole URI>": <reason>`, and a VLESS URI carries the UUID that
+// authenticates to the server — the reason alone is what may be logged or shown
+// in LuCI.
+func parseReason(err error) error {
+	var uerr *url.Error
+	if errors.As(err, &uerr) && uerr.Err != nil {
+		return uerr.Err
+	}
+	return err
+}
+
 // Parse parses a VLESS URI into a Node.
 // The URI must start with "vless://".
 func Parse(rawURI string) (*Node, error) {
@@ -130,7 +142,7 @@ func Parse(rawURI string) (*Node, error) {
 
 	u, err := url.Parse(rawURI)
 	if err != nil {
-		return nil, fmt.Errorf("parse URI: %w", err)
+		return nil, fmt.Errorf("parse URI: %w", parseReason(err))
 	}
 
 	if u.User == nil {

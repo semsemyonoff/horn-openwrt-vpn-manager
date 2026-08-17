@@ -65,6 +65,17 @@ function loadView() {
         location: { reload: function () {} },
     };
 
+    // render() only uses MutationObserver to reveal an "unsaved changes" marker,
+    // so a recorder is enough — but it has to exist, or render() throws before
+    // any of the wiring under test runs.
+    const observed = [];
+    function MutationObserverStub(cb) {
+        this.observe = function (node, opts) {
+            observed.push({ node, opts, cb });
+        };
+        this.disconnect = function () {};
+    }
+
     // eslint-disable-next-line no-new-func
     const factory = new Function(
         "view",
@@ -76,6 +87,7 @@ function loadView() {
         "document",
         "window",
         "URL",
+        "MutationObserver",
         "setTimeout",
         "clearTimeout",
         "_",
@@ -92,12 +104,13 @@ function loadView() {
         document,
         window,
         URLStub,
+        MutationObserverStub,
         (fn) => fn,
         () => {},
         (s) => s,
     );
 
-    return { view: viewObj, document, E, ui, notifications, stub };
+    return { view: viewObj, document, E, ui, notifications, stub, observed };
 }
 
 // Builds the three page-level inputs _collectConfig reads by id, plus the card
@@ -140,4 +153,33 @@ function mountSubscriptions(ctx, subs, opts) {
     return { page, cards };
 }
 
-module.exports = { loadView, mountSubscriptions, VIEW_PATH };
+// Drives the real render() with the array load() resolves to, and attaches the
+// result to the document the way LuCI does — _collectConfig reads page-level
+// inputs through document.getElementById, which only resolves attached nodes.
+//
+// mountSubscriptions reproduces render()'s setup by hand, which is what makes it
+// usable for focused card tests; the cost is that everything render() itself
+// wires (_rawSingbox, _subIdx, the chain-picker reset) goes unexercised there.
+// Use this when the wiring is the thing under test.
+function renderView(ctx, cfg, opts) {
+    opts = opts || {};
+    const results = [
+        { config: cfg },
+        opts.sbStatus || { running: false, proxies: {}, tag_names: {} },
+        { template: opts.template || "{}" },
+        { config: opts.routing || {} },
+        { ips: opts.manualIps || "" },
+        { domains: opts.manualDomains || [] },
+        { subs: false, routing: false },
+    ];
+    // LuCI replaces the page content on a re-render; stacking two trees in one
+    // document would make getElementById resolve to the stale one.
+    while (ctx.document.body.firstChild) {
+        ctx.document.body.removeChild(ctx.document.body.firstChild);
+    }
+    const node = ctx.view.render.call(ctx.view, results);
+    ctx.document.body.appendChild(node);
+    return node;
+}
+
+module.exports = { loadView, mountSubscriptions, renderView, VIEW_PATH };

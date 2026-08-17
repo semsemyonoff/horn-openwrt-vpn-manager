@@ -162,6 +162,34 @@ func TestParse_UnknownSchemeDoesNotLeakURI(t *testing.T) {
 	}
 }
 
+// The no-leak rule covers every rejection path, not just an unknown scheme. It
+// is easiest to break through url.Parse, whose *url.Error renders as
+// `parse "<the whole URI>": <reason>` — wrapping it verbatim puts the VLESS UUID
+// or the hysteria2 auth into the subscriptions log and into the LuCI
+// notification that rpcd check_with_core relays.
+func TestParse_ErrorsDoNotLeakCredentials(t *testing.T) {
+	const secret = "sup3rsecret"
+	uris := map[string]string{
+		"vless control byte in host":     "vless://" + secret + "@exa\x7fmple.com:443",
+		"vless invalid port":             "vless://" + secret + "@example.com:notaport",
+		"hysteria2 control byte in host": "hysteria2://" + secret + "@exa\x7fmple.com:443",
+		"hysteria2 invalid port":         "hysteria2://" + secret + "@example.com:notaport",
+		"hy2 invalid port":               "hy2://" + secret + "@example.com:notaport",
+		"unknown scheme":                 "trojan://" + secret + "@example.com:443",
+	}
+	for name, uri := range uris {
+		t.Run(name, func(t *testing.T) {
+			_, err := nodes.Parse(uri)
+			if err == nil {
+				t.Fatalf("Parse(%q) error = nil, want error", name)
+			}
+			if strings.Contains(err.Error(), secret) {
+				t.Errorf("error %q leaks the URI credentials", err.Error())
+			}
+		})
+	}
+}
+
 // A URI with a known scheme but a broken body must surface the protocol
 // package's own error, not ErrUnknownScheme.
 func TestParse_PropagatesProtocolError(t *testing.T) {

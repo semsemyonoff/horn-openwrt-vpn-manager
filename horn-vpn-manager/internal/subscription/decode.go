@@ -56,12 +56,7 @@ func (f Format) String() string {
 // Detection order: raw → gzip → base64 (with gzip probe) → base64url (with gzip probe).
 // Returns an error if the payload cannot be decoded into any known format.
 func DecodePayload(data []byte) ([]string, error) {
-	uris, err := decodePayload(data)
-	if err != nil {
-		return nil, err
-	}
-	warnTopologyShift(uris)
-	return uris, nil
+	return decodePayload(data)
 }
 
 // decodePayload runs the format probes in order and returns the extracted URIs.
@@ -233,7 +228,13 @@ const legacyScheme = "vless://"
 // The zero-to-many case is deliberately not warned about: a payload carrying no
 // vless:// line failed to decode at all before, so there is no saved state to
 // invalidate.
-func warnTopologyShift(uris []string) {
+//
+// It takes the URI list the subscription actually builds outbounds from, not the
+// freshly decoded payload: include/exclude run after decoding, so a subscription
+// that filters the new-scheme nodes back out keeps its "<id>-single" tag and must
+// not be told otherwise on every run. For the same reason it is never called for
+// inline nodes, which have no pre-multi-protocol history at all.
+func warnTopologyShift(id string, uris []string) {
 	if len(uris) < 2 {
 		return
 	}
@@ -251,8 +252,8 @@ func warnTopologyShift(uris []string) {
 	if legacy != 1 {
 		return
 	}
-	logx.Warn("subscription payload yields %d node(s): 1 vless:// node plus %d node(s) of newly supported scheme(s) (%s). "+
-		"This subscription was single-node before and is multi-node now, so its final outbound tag moves from <id>-single to <id>-manual; "+
+	logx.Warn("subscription %s yields %d node(s): 1 vless:// node plus %d node(s) of newly supported scheme(s) (%s). "+
+		"This subscription was single-node before and is multi-node now, so its final outbound tag moves from %s-single to %s-manual; "+
 		"its saved selector choice and clash.db entry no longer resolve and a node has to be re-picked once in LuCI",
-		len(uris), len(uris)-1, strings.Join(gained, ", "))
+		id, len(uris), len(uris)-1, strings.Join(gained, ", "), id, id)
 }
