@@ -140,6 +140,22 @@ test("connect_timeout survives a save made while its input is absent", () => {
     assert.strictEqual(ctx.view._collectConfig().singbox.connect_timeout, "3s");
 });
 
+test("connect_timeout can be cleared after being set in the same page session", async () => {
+    const ctx = loadView();
+    // Stored config has no connect_timeout, so _rawSingbox starts without it.
+    mountSubscriptions(ctx, [{ id: "a", name: "A", url: "https://a/s", default: true }], {
+        connectTimeout: "3s",
+    });
+
+    await ctx.view.handleSave();
+
+    // handleSave must re-seed the snapshot from what it just sent: rpcd merges
+    // singbox additively, so a stale snapshot would make the clear below drop
+    // the key instead of emitting "" and the stored "3s" would survive.
+    ctx.document.getElementById("vpnsub-connect-timeout").value = "";
+    assert.strictEqual(ctx.view._collectConfig().singbox.connect_timeout, "");
+});
+
 test("a subscription id that names an Object.prototype member is still saved", () => {
     const ctx = loadView();
     // The ID field is free text, so "__proto__" is reachable; on a "{}" map the

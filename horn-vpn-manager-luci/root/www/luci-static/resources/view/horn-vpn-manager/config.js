@@ -3103,6 +3103,12 @@ return view.extend({
         return callSetConfig(cfg)
             .then(function (res) {
                 if (res && res.error) throw new Error(res.error);
+                // The snapshot must track what is now on disk: rpcd merges
+                // singbox additively, so a key first set in this page session
+                // would otherwise stay absent from _rawSingbox and a later
+                // clear would drop it from the payload instead of sending ""
+                // — leaving the stored value in place behind an empty input.
+                self._rawSingbox = Object.assign({}, cfg.singbox || {});
                 if (self._settingsDirtyEl)
                     self._settingsDirtyEl.style.display = "none";
                 return self._refreshSyncStatus();
@@ -3144,12 +3150,11 @@ return view.extend({
 
                 if (!res || res.error) {
                     resultsEl.appendChild(
-                        E(
-                            "p",
-                            { class: "vpnsub-test-error" },
+                        textP(
                             _("Error: ") +
                                 ((res && res.error) ||
                                     _("no response from backend")),
+                            { class: "vpnsub-test-error" },
                         ),
                     );
                     return;
@@ -3178,9 +3183,12 @@ return view.extend({
                     "div",
                     { class: "vpnsub-test-table" },
                     rows.map(function (r) {
+                        // Values carry backend data (domain is derived from the
+                        // typed URL, outbound from route.final) — textContent,
+                        // never an E() string child.
                         return E("div", { class: "vpnsub-test-kv" }, [
                             E("span", { class: "vpnsub-test-key" }, r[0]),
-                            E("span", { class: "vpnsub-test-val" }, r[1]),
+                            nodeNameSpan(r[1], "vpnsub-test-val"),
                         ]);
                     }),
                 );
