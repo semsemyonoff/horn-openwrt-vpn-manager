@@ -495,23 +495,44 @@ Notes:
 - Modify: `horn-vpn-manager/internal/subscription/subscription.go`
 - Modify: `horn-vpn-manager/internal/subscription/outbound_test.go`
 
-- [ ] change `OutboundPlan.NodeOutbounds` to `[]any` and add `NodeTags []string` kept in the same
+- [x] change `OutboundPlan.NodeOutbounds` to `[]any` and add `NodeTags []string` kept in the same
       order
-- [ ] replace `vless.Parse`/`vless.StableHash` with `nodes.Parse` and `node.StableHash()`; drop the
+- [x] replace `vless.Parse`/`vless.StableHash` with `nodes.Parse` and `node.StableHash()`; drop the
       `vless` import
-- [ ] build the dedup key from `node.Outbound("", ct)` and the stored value from
+- [x] build the dedup key from `node.Outbound("", ct)` and the stored value from
       `node.Outbound(tag, ct)`, so no post-marshal tag mutation is needed
-- [ ] keep the suffix counter advancing for skipped duplicates (invariant from the previous plan)
-- [ ] update the two debug log sites that read `ob.Tag` (`subscription.go:301,662`) to use
+- [x] keep the suffix counter advancing for skipped duplicates (invariant from the previous plan)
+- [x] update the two debug log sites that read `ob.Tag` (`subscription.go:301,662`) to use
       `NodeTags`
-- [ ] reword the two user-visible strings at `outbound.go:260,266` to name the scheme rather than
+- [x] reword the two user-visible strings at `outbound.go:260,266` to name the scheme rather than
       VLESS
-- [ ] update `extractNodeName` (`subscription.go:114-128`) and its doc comment — it feeds
+- [x] update `extractNodeName` (`subscription.go:114-128`) and its doc comment — it feeds
       `include`/`exclude` for every protocol now
-- [ ] verify the Task 1 golden is still byte-identical; update tests referencing `*VLESSOutbound`
-- [ ] write a test building a mixed VLESS + hysteria2 subscription: both nodes tagged, one shared
+- [x] verify the Task 1 golden is still byte-identical; update tests referencing `*VLESSOutbound`
+- [x] write a test building a mixed VLESS + hysteria2 subscription: both nodes tagged, one shared
       `urltest`/`selector` pair, `FinalTag` unchanged
-- [ ] run `go test ./...` — must pass before task 7
+- [x] run `go test ./...` — must pass before task 7
+
+Notes:
+- The golden is untouched and still passes byte-identically: `Outbound(tag, ct)` renders exactly what
+  the old `NewOutbound` + `ob.Tag = tag` produced.
+- The local `nodes` slice variable in `BuildOutbounds` was renamed to `parsed` — it shadowed the
+  dispatcher package. `parsed` is `[]proto.Node`.
+- The "no valid nodes" error now appends `(supported schemes: …)` from `nodes.Schemes()`, so the
+  operator-facing failure names what would have worked instead of asserting VLESS.
+- Node-count-changed detection is deliberately **not** here: it needs the decode-side line counts and
+  belongs with the newly-accepted-schemes warning in Task 7.
+- Tests: `vlessOB` helper type-asserts `NodeOutbounds[i]`; tag assertions moved to `NodeTags`.
+  New `TestBuildOutbounds_MixedProtocols` (vless + hysteria2 + hy2 alias, one shared
+  urltest/selector, per-protocol concrete struct types, colon-in-auth password),
+  `TestBuildOutbounds_SingleHysteria2Node`, `TestBuildOutbounds_SkipsUnparseableKeepsRest` and
+  `TestBuildOutbounds_NoValidNodesNamesSchemes`.
+- Mutation-checked: dropping `plan.NodeTags = nodeTags` fails `TestBuildOutbounds_MultiNode` and a
+  dedup subtest; storing the tagless outbound in the plan fails the mixed test *and* the golden.
+- ➕ `collectSingboxParts` and `renderGoldenConfig` collapsed their per-node append loops into
+  `append(outbounds, plan.NodeOutbounds...)` — `staticcheck` S1011 flags the loop once the element
+  type is `any`.
+- `go test ./...`, `gofmt -l` and `make lint` (0 issues) all clean.
 
 ### Task 7: Accept every dispatcher scheme when decoding subscriptions
 

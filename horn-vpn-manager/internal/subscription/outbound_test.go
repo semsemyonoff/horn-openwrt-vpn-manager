@@ -8,8 +8,10 @@ import (
 	"testing"
 
 	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/config"
+	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/hysteria2"
 	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/singbox"
 	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/subscription"
+	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/vless"
 )
 
 const testURL = "https://www.gstatic.com/generate_204"
@@ -17,6 +19,21 @@ const testURL = "https://www.gstatic.com/generate_204"
 // buildOpts are the explicit-value options used by tests that do not exercise
 // defaulting or connect_timeout.
 var buildOpts = subscription.BuildOptions{Interval: "5m", Tolerance: 100, TestURL: testURL}
+
+// vlessOB returns the plan's i-th node outbound as the concrete VLESS type.
+// NodeOutbounds is []any because each protocol owns its outbound struct, so a
+// test asserting on VLESS fields has to state which type it expects.
+func vlessOB(t *testing.T, plan *subscription.OutboundPlan, i int) *vless.Outbound {
+	t.Helper()
+	if i >= len(plan.NodeOutbounds) {
+		t.Fatalf("NodeOutbounds[%d] out of range: len %d", i, len(plan.NodeOutbounds))
+	}
+	ob, ok := plan.NodeOutbounds[i].(*vless.Outbound)
+	if !ok {
+		t.Fatalf("NodeOutbounds[%d] is %T, want *vless.Outbound", i, plan.NodeOutbounds[i])
+	}
+	return ob
+}
 
 func TestBuildOutbounds_SingleNode(t *testing.T) {
 	uris := []string{
@@ -34,9 +51,12 @@ func TestBuildOutbounds_SingleNode(t *testing.T) {
 	if len(plan.NodeOutbounds) != 1 {
 		t.Fatalf("NodeOutbounds len: got %d want 1", len(plan.NodeOutbounds))
 	}
-	ob := plan.NodeOutbounds[0]
+	ob := vlessOB(t, plan, 0)
 	if ob.Tag != "default-single" {
 		t.Errorf("outbound Tag: got %q want %q", ob.Tag, "default-single")
+	}
+	if len(plan.NodeTags) != 1 || plan.NodeTags[0] != "default-single" {
+		t.Errorf("NodeTags: got %v want [default-single]", plan.NodeTags)
 	}
 	if ob.Type != "vless" {
 		t.Errorf("outbound Type: got %q want %q", ob.Type, "vless")
@@ -86,14 +106,25 @@ func TestBuildOutbounds_MultiNode(t *testing.T) {
 		t.Fatalf("NodeOutbounds len: got %d want 3", len(plan.NodeOutbounds))
 	}
 
-	// Each node must be tagged <id>-node-<8char-hash>.
-	for _, ob := range plan.NodeOutbounds {
-		if !strings.HasPrefix(ob.Tag, "default-node-") {
-			t.Errorf("node tag %q should start with 'default-node-'", ob.Tag)
+	// NodeTags must stay aligned with NodeOutbounds: it is the only way to read
+	// a tag back once the outbound is opaque.
+	if len(plan.NodeTags) != len(plan.NodeOutbounds) {
+		t.Fatalf("NodeTags len %d != NodeOutbounds len %d", len(plan.NodeTags), len(plan.NodeOutbounds))
+	}
+	for i, tag := range plan.NodeTags {
+		if got := vlessOB(t, plan, i).Tag; got != tag {
+			t.Errorf("NodeTags[%d] = %q but outbound carries %q", i, tag, got)
 		}
-		hash := strings.TrimPrefix(ob.Tag, "default-node-")
+	}
+
+	// Each node must be tagged <id>-node-<8char-hash>.
+	for _, tag := range plan.NodeTags {
+		if !strings.HasPrefix(tag, "default-node-") {
+			t.Errorf("node tag %q should start with 'default-node-'", tag)
+		}
+		hash := strings.TrimPrefix(tag, "default-node-")
 		if len(hash) != 8 {
-			t.Errorf("node hash should be 8 chars, got %d in tag %q", len(hash), ob.Tag)
+			t.Errorf("node hash should be 8 chars, got %d in tag %q", len(hash), tag)
 		}
 	}
 
@@ -146,9 +177,9 @@ func TestBuildOutbounds_MultiNode(t *testing.T) {
 			t.Errorf("TagNames missing %q", tag)
 		}
 	}
-	for _, ob := range plan.NodeOutbounds {
-		if _, ok := plan.TagNames[ob.Tag]; !ok {
-			t.Errorf("TagNames missing node tag %q", ob.Tag)
+	for _, tag := range plan.NodeTags {
+		if _, ok := plan.TagNames[tag]; !ok {
+			t.Errorf("TagNames missing node tag %q", tag)
 		}
 	}
 }
@@ -167,9 +198,9 @@ func TestBuildOutbounds_TagsAreStable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second call error: %v", err)
 	}
-	for i, ob := range p1.NodeOutbounds {
-		if ob.Tag != p2.NodeOutbounds[i].Tag {
-			t.Errorf("node %d tag mismatch: %q vs %q", i, ob.Tag, p2.NodeOutbounds[i].Tag)
+	for i, tag := range p1.NodeTags {
+		if tag != p2.NodeTags[i] {
+			t.Errorf("node %d tag mismatch: %q vs %q", i, tag, p2.NodeTags[i])
 		}
 	}
 }
@@ -212,7 +243,8 @@ func TestBuildOutbounds_ConnectTimeout(t *testing.T) {
 				if len(plan.NodeOutbounds) != len(uris) {
 					t.Fatalf("NodeOutbounds len: got %d want %d", len(plan.NodeOutbounds), len(uris))
 				}
-				for _, ob := range plan.NodeOutbounds {
+				for i := range plan.NodeOutbounds {
+					ob := vlessOB(t, plan, i)
 					if ob.ConnectTimeout != "3s" {
 						t.Errorf("%s: ConnectTimeout = %q, want %q", ob.Tag, ob.ConnectTimeout, "3s")
 					}
@@ -230,10 +262,10 @@ func TestBuildOutbounds_ConnectTimeout(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		for _, ob := range plan.NodeOutbounds {
-			m := marshalToMap(t, ob)
+		for i, tag := range plan.NodeTags {
+			m := marshalToMap(t, plan.NodeOutbounds[i])
 			if _, ok := m["connect_timeout"]; ok {
-				t.Errorf("%s: connect_timeout present in JSON with empty option: %v", ob.Tag, m["connect_timeout"])
+				t.Errorf("%s: connect_timeout present in JSON with empty option: %v", tag, m["connect_timeout"])
 			}
 		}
 	})
@@ -286,7 +318,7 @@ func TestBuildOutbounds_TLSBlock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	ob := plan.NodeOutbounds[0]
+	ob := vlessOB(t, plan, 0)
 	if ob.TLS == nil {
 		t.Fatal("TLS block should not be nil for security=tls")
 	}
@@ -312,7 +344,7 @@ func TestBuildOutbounds_RealityBlock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	ob := plan.NodeOutbounds[0]
+	ob := vlessOB(t, plan, 0)
 	if ob.TLS == nil {
 		t.Fatal("TLS block should not be nil for security=reality")
 	}
@@ -338,7 +370,7 @@ func TestBuildOutbounds_WSTransport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	ob := plan.NodeOutbounds[0]
+	ob := vlessOB(t, plan, 0)
 	if ob.Transport == nil {
 		t.Fatal("Transport should not be nil for ws type")
 	}
@@ -375,7 +407,7 @@ func TestBuildOutbounds_GRPCTransport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	ob := plan.NodeOutbounds[0]
+	ob := vlessOB(t, plan, 0)
 	if ob.Transport == nil {
 		t.Fatal("Transport should not be nil for grpc type")
 	}
@@ -402,7 +434,7 @@ func TestBuildOutbounds_XHTTPTransport(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		ob := plan.NodeOutbounds[0]
+		ob := vlessOB(t, plan, 0)
 
 		// Transport defaults.
 		if ob.Transport == nil {
@@ -438,7 +470,7 @@ func TestBuildOutbounds_XHTTPTransport(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		ob := plan.NodeOutbounds[0]
+		ob := vlessOB(t, plan, 0)
 
 		data, err := json.Marshal(ob.Transport)
 		if err != nil {
@@ -472,9 +504,9 @@ func TestBuildOutbounds_DeduplicatesIdenticalNodes(t *testing.T) {
 		t.Fatalf("NodeOutbounds len: got %d want 2", len(plan.NodeOutbounds))
 	}
 	// Duplicates must be dropped, not suffixed.
-	for _, ob := range plan.NodeOutbounds {
-		if strings.HasSuffix(ob.Tag, "-2") || strings.HasSuffix(ob.Tag, "-3") {
-			t.Errorf("duplicate node kept with suffixed tag %q", ob.Tag)
+	for _, tag := range plan.NodeTags {
+		if strings.HasSuffix(tag, "-2") || strings.HasSuffix(tag, "-3") {
+			t.Errorf("duplicate node kept with suffixed tag %q", tag)
 		}
 	}
 	if len(plan.TagNames) != 4 { // 2 nodes + auto + manual
@@ -547,7 +579,7 @@ func TestBuildOutbounds_DeduplicationIgnoresStableHash(t *testing.T) {
 			if len(plan.NodeOutbounds) != 2 {
 				t.Fatalf("NodeOutbounds len: got %d want 2 — dedup dropped a distinct node", len(plan.NodeOutbounds))
 			}
-			first, second := plan.NodeOutbounds[0].Tag, plan.NodeOutbounds[1].Tag
+			first, second := plan.NodeTags[0], plan.NodeTags[1]
 			if first == second {
 				t.Fatalf("both nodes share tag %q", first)
 			}
@@ -583,21 +615,161 @@ func TestBuildOutbounds_DeduplicationDoesNotRenameSurvivors(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(plan.NodeOutbounds) != 2 {
-		t.Fatalf("NodeOutbounds len: got %d want 2 (%v)", len(plan.NodeOutbounds), collectTags(plan))
+		t.Fatalf("NodeOutbounds len: got %d want 2 (%v)", len(plan.NodeOutbounds), plan.NodeTags)
 	}
 
-	base := plan.NodeOutbounds[0].Tag
-	if got, want := plan.NodeOutbounds[1].Tag, base+"-3"; got != want {
+	base := plan.NodeTags[0]
+	if got, want := plan.NodeTags[1], base+"-3"; got != want {
 		t.Errorf("surviving distinct node tag: got %q want %q — dedup shifted the collision suffix", got, want)
 	}
 }
 
-func collectTags(plan *subscription.OutboundPlan) []string {
-	tags := make([]string, 0, len(plan.NodeOutbounds))
-	for _, ob := range plan.NodeOutbounds {
-		tags = append(tags, ob.Tag)
+// TestBuildOutbounds_MixedProtocols pins that a subscription carrying more than
+// one protocol produces one outbound per node, each in its own protocol's struct,
+// under a single shared urltest/selector pair — groups reference members by tag,
+// so nothing there is protocol-aware.
+func TestBuildOutbounds_MixedProtocols(t *testing.T) {
+	uris := []string{
+		"vless://uuid1@vless.example.com:443?security=tls&sni=vless.example.com#VLESS+Node",
+		"hysteria2://user:pass@hy2.example.com?sni=hy2.example.com&obfs=salamander&obfs-password=obfspw#HY2+Node",
+		"hy2://token@short.example.com:8443#Short+Node",
 	}
-	return tags
+	opts := subscription.BuildOptions{Interval: "3m", Tolerance: 300, TestURL: testURL, ConnectTimeout: "3s"}
+	plan, err := subscription.BuildOutbounds("mixed", uris, opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(plan.NodeOutbounds) != 3 {
+		t.Fatalf("NodeOutbounds len: got %d want 3", len(plan.NodeOutbounds))
+	}
+	if len(plan.NodeTags) != 3 {
+		t.Fatalf("NodeTags len: got %d want 3 (%v)", len(plan.NodeTags), plan.NodeTags)
+	}
+
+	wantTypes := []string{"vless", "hysteria2", "hysteria2"}
+	for i, want := range wantTypes {
+		m := marshalToMap(t, plan.NodeOutbounds[i])
+		if m["type"] != want {
+			t.Errorf("node %d type: got %v want %v", i, m["type"], want)
+		}
+		if m["tag"] != plan.NodeTags[i] {
+			t.Errorf("node %d tag: outbound has %v, NodeTags has %q", i, m["tag"], plan.NodeTags[i])
+		}
+		if !strings.HasPrefix(plan.NodeTags[i], "mixed-node-") {
+			t.Errorf("node %d tag %q should start with 'mixed-node-'", i, plan.NodeTags[i])
+		}
+		if m["connect_timeout"] != "3s" {
+			t.Errorf("node %d connect_timeout: got %v want 3s", i, m["connect_timeout"])
+		}
+	}
+
+	// The concrete structs must be the protocol packages' own types.
+	if _, ok := plan.NodeOutbounds[0].(*vless.Outbound); !ok {
+		t.Errorf("node 0 is %T, want *vless.Outbound", plan.NodeOutbounds[0])
+	}
+	hy2, ok := plan.NodeOutbounds[1].(*hysteria2.Outbound)
+	if !ok {
+		t.Fatalf("node 1 is %T, want *hysteria2.Outbound", plan.NodeOutbounds[1])
+	}
+	if hy2.Password != "user:pass" {
+		t.Errorf("hysteria2 password: got %q want %q", hy2.Password, "user:pass")
+	}
+	if hy2.Obfs == nil || hy2.Obfs.Type != "salamander" {
+		t.Errorf("hysteria2 obfs: got %+v want salamander block", hy2.Obfs)
+	}
+
+	// One shared urltest/selector pair covering every node regardless of protocol.
+	if plan.URLTestGroup == nil || plan.SelectorGroup == nil {
+		t.Fatal("mixed-protocol subscription must still get one urltest and one selector group")
+	}
+	if len(plan.URLTestGroup.Outbounds) != 3 {
+		t.Errorf("URLTestGroup Outbounds: got %v want all 3 node tags", plan.URLTestGroup.Outbounds)
+	}
+	for i, tag := range plan.NodeTags {
+		if plan.URLTestGroup.Outbounds[i] != tag {
+			t.Errorf("URLTestGroup Outbounds[%d]: got %q want %q", i, plan.URLTestGroup.Outbounds[i], tag)
+		}
+		if plan.SelectorGroup.Outbounds[i+1] != tag { // [0] is the auto group
+			t.Errorf("SelectorGroup Outbounds[%d]: got %q want %q", i+1, plan.SelectorGroup.Outbounds[i+1], tag)
+		}
+	}
+	if plan.FinalTag != "mixed-manual" {
+		t.Errorf("FinalTag: got %q want %q", plan.FinalTag, "mixed-manual")
+	}
+	for _, tag := range plan.NodeTags {
+		if _, ok := plan.TagNames[tag]; !ok {
+			t.Errorf("TagNames missing node tag %q", tag)
+		}
+	}
+	if plan.TagNames[plan.NodeTags[1]] != "HY2 Node" {
+		t.Errorf("TagNames[%q]: got %q want %q", plan.NodeTags[1], plan.TagNames[plan.NodeTags[1]], "HY2 Node")
+	}
+}
+
+// TestBuildOutbounds_SingleHysteria2Node pins that a non-VLESS node also takes
+// the single-node path, tag and all.
+func TestBuildOutbounds_SingleHysteria2Node(t *testing.T) {
+	uris := []string{"hysteria2://pw@hy2.example.com#Personal+HY2"}
+	plan, err := subscription.BuildOutbounds("personal", uris, buildOpts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if plan.FinalTag != "personal-single" {
+		t.Errorf("FinalTag: got %q want %q", plan.FinalTag, "personal-single")
+	}
+	if len(plan.NodeTags) != 1 || plan.NodeTags[0] != "personal-single" {
+		t.Fatalf("NodeTags: got %v want [personal-single]", plan.NodeTags)
+	}
+	ob, ok := plan.NodeOutbounds[0].(*hysteria2.Outbound)
+	if !ok {
+		t.Fatalf("node 0 is %T, want *hysteria2.Outbound", plan.NodeOutbounds[0])
+	}
+	if ob.Tag != "personal-single" {
+		t.Errorf("outbound Tag: got %q want %q", ob.Tag, "personal-single")
+	}
+	if ob.ServerPort != 443 {
+		t.Errorf("ServerPort: got %d want 443 (spec default)", ob.ServerPort)
+	}
+	if plan.TagNames["personal-single"] != "Personal HY2" {
+		t.Errorf("TagNames: got %q want %q", plan.TagNames["personal-single"], "Personal HY2")
+	}
+}
+
+// TestBuildOutbounds_SkipsUnparseableKeepsRest pins that one bad URI costs one
+// node, not the subscription, and that a node whose scheme has no parser is
+// skipped the same way.
+func TestBuildOutbounds_SkipsUnparseableKeepsRest(t *testing.T) {
+	uris := []string{
+		"trojan://pw@trojan.example.com:443#Unsupported",
+		"hysteria2://@broken.example.com#Empty+Auth",
+		"vless://uuid1@host1.example.com:443?security=tls#Good+1",
+		"vless://uuid2@host2.example.com:443?security=tls#Good+2",
+	}
+	plan, err := subscription.BuildOutbounds("sub", uris, buildOpts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(plan.NodeOutbounds) != 2 {
+		t.Fatalf("NodeOutbounds len: got %d want 2 (%v)", len(plan.NodeOutbounds), plan.NodeTags)
+	}
+}
+
+func TestBuildOutbounds_NoValidNodesNamesSchemes(t *testing.T) {
+	// The error is what an operator sees when a whole subscription fails to
+	// parse, so it has to say which schemes would have worked.
+	_, err := subscription.BuildOutbounds("sub", []string{"trojan://pw@host.example.com:443#X"}, buildOpts)
+	if err == nil {
+		t.Fatal("expected an error for a subscription with no parseable node")
+	}
+	for _, want := range []string{`"sub"`, "vless", "hysteria2", "hy2"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "VLESS") {
+		t.Errorf("error %q still claims VLESS is the only protocol", err)
+	}
 }
 
 func TestBuildOutbounds_NoURIs(t *testing.T) {
@@ -623,7 +795,7 @@ func TestBuildOutbounds_PacketEncoding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	ob := plan.NodeOutbounds[0]
+	ob := vlessOB(t, plan, 0)
 	if ob.PacketEncoding != "xudp" {
 		t.Errorf("PacketEncoding: got %q want %q", ob.PacketEncoding, "xudp")
 	}
@@ -638,7 +810,7 @@ func TestBuildOutbounds_JSONMarshal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	ob := plan.NodeOutbounds[0]
+	ob := vlessOB(t, plan, 0)
 	data, err := json.Marshal(ob)
 	if err != nil {
 		t.Fatalf("marshal outbound: %v", err)
@@ -837,9 +1009,7 @@ func renderGoldenConfig(t *testing.T) []byte {
 		if err != nil {
 			t.Fatalf("BuildOutbounds(%q): %v", sub.id, err)
 		}
-		for _, ob := range plan.NodeOutbounds {
-			outbounds = append(outbounds, ob)
-		}
+		outbounds = append(outbounds, plan.NodeOutbounds...)
 		if plan.URLTestGroup != nil {
 			outbounds = append(outbounds, plan.URLTestGroup)
 		}

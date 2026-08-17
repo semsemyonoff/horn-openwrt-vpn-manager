@@ -111,8 +111,10 @@ func urlHost(raw string) string {
 	return u.Scheme + "://" + u.Host + "/..."
 }
 
-// extractNodeName returns the display name from a VLESS URI fragment.
-// Converts '+' to space to match vless.Parse behavior, since subscription
+// extractNodeName returns the display name from a node URI fragment, for any
+// scheme: every supported protocol carries its name the same way, and this
+// drives include/exclude filtering before the URI is handed to a parser.
+// Converts '+' to space to match the parsers' behavior, since subscription
 // generators commonly encode spaces as '+' in URI fragments.
 // Returns an empty string if no fragment is present.
 func extractNodeName(uri string) string {
@@ -297,8 +299,8 @@ func (r *Runner) Run(ctx context.Context) error { //nolint:gocognit,gocyclo // o
 		}
 
 		logx.Detail("  Subscription %s: final outbound tag: %s", defaultID, logx.Bold(plan.FinalTag))
-		for _, ob := range plan.NodeOutbounds {
-			logx.Debug("  node: %s (%s)", ob.Tag, plan.TagNames[ob.Tag])
+		for _, tag := range plan.NodeTags {
+			logx.Debug("  node: %s (%s)", tag, plan.TagNames[tag])
 		}
 		if plan.URLTestGroup != nil {
 			logx.Debug("  group(urltest): %s", plan.URLTestGroup.Tag)
@@ -546,9 +548,7 @@ func (r *Runner) applyFallbackChains(plans []*OutboundPlan, defaultID string, ta
 // singbox.RenderConfig: all outbounds (nodes, urltest, selector) and all route rules.
 func collectSingboxParts(plans []*OutboundPlan) (outbounds, routeRules []any) {
 	for _, plan := range plans {
-		for _, ob := range plan.NodeOutbounds {
-			outbounds = append(outbounds, ob)
-		}
+		outbounds = append(outbounds, plan.NodeOutbounds...)
 		if plan.URLTestGroup != nil {
 			outbounds = append(outbounds, plan.URLTestGroup)
 		}
@@ -658,8 +658,8 @@ func (r *Runner) processSub(ctx context.Context, id string, sub *config.Subscrip
 	}
 
 	logx.Detail("  Subscription %s: final outbound tag: %s", id, logx.Bold(plan.FinalTag))
-	for _, ob := range plan.NodeOutbounds {
-		logx.Debug("  node: %s (%s)", ob.Tag, plan.TagNames[ob.Tag])
+	for _, tag := range plan.NodeTags {
+		logx.Debug("  node: %s (%s)", tag, plan.TagNames[tag])
 	}
 	if plan.URLTestGroup != nil {
 		logx.Debug("  group(urltest): %s", plan.URLTestGroup.Tag)

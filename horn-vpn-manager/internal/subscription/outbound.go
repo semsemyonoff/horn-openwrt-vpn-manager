@@ -3,9 +3,11 @@ package subscription
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/logx"
-	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/vless"
+	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/nodes"
+	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/proto"
 )
 
 const (
@@ -28,10 +30,19 @@ type OutboundPlan struct {
 	// reference subscriptions by id, so plans must stay resolvable by it.
 	ID string
 
-	// NodeOutbounds holds individual VLESS node outbounds.
+	// NodeOutbounds holds individual node outbounds, one per surviving node, in
+	// the protocol-specific struct the owning package produced.
 	// Single-node: one entry tagged "<id>-single".
 	// Multi-node: entries tagged "<id>-node-<hash>".
-	NodeOutbounds []*vless.Outbound
+	//
+	// The element type is any because each protocol owns its own outbound
+	// struct. Read tags from NodeTags rather than reflecting on the values.
+	NodeOutbounds []any
+
+	// NodeTags holds the tag of each NodeOutbounds entry, in the same order.
+	// The tags are not readable off the outbounds themselves once they are
+	// opaque, and callers (logging, groups) need them.
+	NodeTags []string
 
 	// URLTestGroup is the auto-select group for multi-node subscriptions.
 	// Nil for single-node subscriptions.
@@ -122,12 +133,14 @@ type BuildOptions struct {
 }
 
 // BuildOutbounds generates the sing-box outbound configuration for a subscription
-// from its VLESS URIs. The id parameter is the stable subscription key used to
-// derive outbound tags.
+// from its node URIs, of any scheme the nodes dispatcher supports. The id
+// parameter is the stable subscription key used to derive outbound tags.
 //
-// For a single node, one vless.Outbound is produced with tag "<id>-single".
+// For a single node, one outbound is produced with tag "<id>-single".
 // For multiple nodes, per-node outbounds tagged "<id>-node-<hash>" are produced
 // alongside a urltest group "<id>-auto" and a selector group "<id>-manual".
+// Groups reference their members by tag only, so a subscription mixing
+// protocols yields one shared urltest/selector pair like any other.
 func BuildOutbounds(id string, uris []string, opts BuildOptions) (*OutboundPlan, error) {
 	if len(uris) == 0 {
 		return nil, fmt.Errorf("no URIs for subscription %q", id)
@@ -148,26 +161,27 @@ func BuildOutbounds(id string, uris []string, opts BuildOptions) (*OutboundPlan,
 		TagNames: make(map[string]string),
 	}
 
-	nodes := make([]*vless.Node, 0, len(uris))
+	parsed := make([]proto.Node, 0, len(uris))
 	for _, u := range uris {
-		n, err := vless.Parse(u)
+		n, err := nodes.Parse(u)
 		if err != nil {
-			logx.Warn("skipping unparseable VLESS URI: %v", err)
+			logx.Warn("skipping unparseable node URI: %v", err)
 			continue
 		}
-		nodes = append(nodes, n)
+		parsed = append(parsed, n)
 	}
-	if len(nodes) == 0 {
-		return nil, fmt.Errorf("no valid VLESS nodes found in subscription %q", id)
+	if len(parsed) == 0 {
+		return nil, fmt.Errorf("no valid nodes found in subscription %q (supported schemes: %s)",
+			id, strings.Join(nodes.Schemes(), ", "))
 	}
 
-	if len(nodes) == 1 {
+	if len(parsed) == 1 {
 		// Single-node mode: use <id>-single tag directly.
 		tag := id + "-single"
-		ob := vless.NewOutbound(nodes[0], tag, opts.ConnectTimeout)
-		plan.NodeOutbounds = append(plan.NodeOutbounds, ob)
+		plan.NodeOutbounds = append(plan.NodeOutbounds, parsed[0].Outbound(tag, opts.ConnectTimeout))
+		plan.NodeTags = append(plan.NodeTags, tag)
 		plan.FinalTag = tag
-		plan.TagNames[tag] = nodes[0].Name()
+		plan.TagNames[tag] = parsed[0].Name()
 	} else {
 		// Multi-node mode: hash-tagged nodes + urltest + selector.
 		//
@@ -183,18 +197,19 @@ func BuildOutbounds(id string, uris []string, opts BuildOptions) (*OutboundPlan,
 		// selector choices and experimental.cache_file state stay valid — which
 		// is also why the collision suffix below has to stay: two distinct nodes
 		// can share a hash.
-		nodeTags := make([]string, 0, len(nodes))
-		seenTags := make(map[string]int, len(nodes))
-		seenOutbounds := make(map[string]struct{}, len(nodes))
+		nodeTags := make([]string, 0, len(parsed))
+		seenTags := make(map[string]int, len(parsed))
+		seenOutbounds := make(map[string]struct{}, len(parsed))
 		duplicates := 0
-		for _, n := range nodes {
-			ob := vless.NewOutbound(n, "", opts.ConnectTimeout)
-			key, err := json.Marshal(ob)
+		for _, n := range parsed {
+			// The tagless outbound is the dedup key; the tagged one is what the
+			// plan stores. Building both is what lets the outbound stay opaque:
+			// there is no Tag field to assign after the fact.
+			key, err := json.Marshal(n.Outbound("", opts.ConnectTimeout))
 			if err != nil {
 				return nil, fmt.Errorf("marshalling outbound for subscription %q: %w", id, err)
 			}
-			hash := vless.StableHash(n)
-			base := fmt.Sprintf("%s-node-%s", id, hash)
+			base := fmt.Sprintf("%s-node-%s", id, n.StableHash())
 			// The suffix counter advances for skipped duplicates too, so dedup
 			// never renames a surviving node: without this, dropping a duplicate
 			// would shift the next colliding node from "-3" to "-2", silently
@@ -212,11 +227,11 @@ func BuildOutbounds(id string, uris []string, opts BuildOptions) (*OutboundPlan,
 			if count > 0 {
 				tag = fmt.Sprintf("%s-%d", base, count+1)
 			}
-			ob.Tag = tag
-			plan.NodeOutbounds = append(plan.NodeOutbounds, ob)
+			plan.NodeOutbounds = append(plan.NodeOutbounds, n.Outbound(tag, opts.ConnectTimeout))
 			plan.TagNames[tag] = n.Name()
 			nodeTags = append(nodeTags, tag)
 		}
+		plan.NodeTags = nodeTags
 		if duplicates > 0 {
 			logx.Detail("  Subscription %s: skipped %d duplicate nodes", id, duplicates)
 		}
