@@ -755,9 +755,31 @@ Notes:
 
 ### Task 12: [Final] Update documentation
 
-- [ ] update AGENTS.md if new patterns emerged during implementation
-- [ ] update the LuCI invariants list if any new one was discovered
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update AGENTS.md if new patterns emerged during implementation
+- [x] update the LuCI invariants list if any new one was discovered
+- [x] move this plan to `docs/plans/completed/`
+
+Notes:
+- Four patterns emerged during implementation that Task 10's documentation pass did not cover, all
+  added to `AGENTS.md`:
+  - **Node Protocol Layer / adding a protocol** — the two shapes both protocol packages follow and
+    why: unexported `Node` fields with an accessor each (a Go type cannot carry a field and a method
+    of the same name, and `proto.Node` demands `Server()`/`Port()`/`Name()`), and named adapter
+    functions in the `parsers` map (a one-line `return vless.Parse(uri)` turns a typed nil into a
+    non-nil `proto.Node` on the error path). Also: core scheme matching is case-sensitive, and step 4
+    of the recipe is the LuCI allow-list — a protocol added only to the core is rejected by the
+    frontend.
+  - **LuCI invariants** — `isValidNodeUri` matches on `u.protocol` rather than a literal prefix, and
+    tests userinfo as `u.username || u.password` because hysteria2 auth is the whole userinfo.
+  - **Testing Guidelines** — a stub for a standard global must extend the real one. The `URL` stub
+    bug fixed in Task 9 is recorded as the concrete case: a stub that makes a code path throw turns
+    a negative assertion vacuous.
+  - **LuCI package contents** — changed msgids need the regenerated `.lmo`, which the package build
+    produces; nothing is checked in.
+- No new pattern was found worth documenting from Tasks 11–12 themselves; the acceptance work only
+  confirmed invariants that were already written down.
+- `go test ./...`, `make lint` (0 issues) and `make luci-test` (27 JS tests, 29 rpcd checks) all green
+  on the documentation change.
 
 ## Post-Completion
 

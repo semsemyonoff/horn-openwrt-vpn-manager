@@ -69,7 +69,7 @@ Package contents:
 - `horn-vpn-manager-luci/root/usr/share/rpcd/acl.d/horn-vpn-manager.json` — ubus ACL
 - `horn-vpn-manager-luci/root/usr/share/luci/menu.d/horn-vpn-manager.json` — menu entry
 - `horn-vpn-manager-luci/po/{en,ru}/horn-vpn-manager.po` — translations
-- `horn-vpn-manager-luci/tools/po2lmo.py` — PO→LMO compiler for translations
+- `horn-vpn-manager-luci/tools/po2lmo.py` — PO→LMO compiler for translations; changing a msgid means a device needs the regenerated `.lmo`, which both the LuCI `Makefile` and `scripts/package-luci-{apk,ipk}.sh` produce at package time — no `.lmo` is checked in, so `make build-luci` is the whole step
 - `horn-vpn-manager-luci/tests/` — Node/`dash` harness for the view and the rpcd backend; not shipped in the package (`package-luci-apk.sh` copies only `root/`)
 
 Tab order: Subscriptions → Routing → Run → Sing-box template config → Additional domains → Sing-box logs → Test
@@ -103,6 +103,7 @@ LuCI invariants (each one was a real bug):
 - **`E()` string children go through `innerHTML`.** Any text that is concatenated or comes from outside the view — provider node names, backend error messages, filenames — must be set with `textContent` (`nodeNameSpan` / `textP`), never passed as an `E(...)` child.
 - Maps keyed by subscription id use `Object.create(null)`: the ID field is free text, so an id like `__proto__` or `constructor` would otherwise not become an own key and the subscription would silently vanish from the save.
 - Client-side validation must never be stricter than the core. A disabled subscription needs no `url`/`nodes`, so rejecting it blocks a save over something the core accepts; when in doubt let `check_with_core` deliver the error.
+- `isValidNodeUri` matches `NODE_URI_SCHEMES` against `u.protocol` (already lowercased by `URL()`), not a literal prefix, so `VLESS://` passes the client and is rejected by the core — the safe direction for the rule above. Userinfo presence is `u.username || u.password`: hysteria2 auth is the **whole** userinfo and may be `user:password`, which `URL()` splits across both fields, so `u.username` alone would reject `hysteria2://:pass@host` that the core accepts. Adding a protocol to the core means adding its scheme here too.
 - rpcd `jq` checks compare against `"${bad:-1}"`. An unguarded `[ "$bad" -gt 0 ]` errors out when `jq` aborts on a malformed payload and the script falls through — accepting it. Fail closed.
 - `check_with_core` writes its candidate to an `mktemp` path, not a `$$`-derived one: rpcd runs as root on a world-writable `/tmp`, so a predictable name lets a local process pre-plant a symlink and have root truncate an arbitrary file.
 - The rpcd backend keeps sh-level checks structural only (types, presence, XOR) and delegates schema validation to `vpn-manager check -c <tmp>` on the **merged** candidate (`check_with_core`), rather than reimplementing cross-reference logic in a regex-less `jq`. It accepts on the structural checks alone when the core is unreachable, so a partially installed system can still save.
@@ -181,7 +182,15 @@ Adding a protocol:
 
 1. new package under `internal/<protocol>` implementing `proto.Node`, owning its own outbound struct;
 2. one entry in the `parsers` map in `internal/nodes/nodes.go` (one per accepted scheme — `hysteria2` and `hy2` share a parser);
-3. its own `StableHash` prefix (`vless|…`, `hysteria2|…`), which makes cross-protocol tag collisions structurally impossible.
+3. its own `StableHash` prefix (`vless|…`, `hysteria2|…`), which makes cross-protocol tag collisions structurally impossible;
+4. the LuCI scheme allow-list (`NODE_URI_SCHEMES` in `config.js`), or the frontend rejects the URI the core accepts.
+
+Two shapes both protocol packages follow, for reasons that bite otherwise:
+
+- **`Node` fields are unexported, with an accessor each, and `Parse` is the only constructor.** `proto.Node` requires `Server()`, `Port()` and `Name()` methods, and a Go type cannot carry a field and a method under the same name.
+- **The `parsers` map entries are named adapter functions, not one-line closures.** `return vless.Parse(uri)` returns a typed nil `*vless.Node` on the error path, which becomes a **non-nil** `proto.Node` interface; each adapter returns an explicit `nil` instead. Pinned by `TestParse_PropagatesProtocolError`.
+
+Scheme matching in the core is case-sensitive, matching each parser's own `strings.HasPrefix` check: `VLESS://` is an unknown scheme, not a silently accepted one.
 
 Nothing else changes: `decode.go` filters lines via `nodes.IsKnownScheme`, `config.go` validates inline `nodes` via `nodes.Parse`, and error messages list `nodes.Schemes()`.
 
@@ -339,6 +348,7 @@ Preferred test layout:
 Non-Go checks:
 
 - LuCI JS is covered by `horn-vpn-manager-luci/tests/`. `load-view.js` evaluates the shipped `config.js` with `new Function`, the way LuCI itself does, against `stub-dom.js` — a dependency-free DOM/LuCI stub, no jsdom — so tests drive the **real** `_makeCard` / `_collectConfig` / `_validate`. Never assert on a reimplementation, and mutation-check every new test: revert the fix it covers and confirm the test fails, so it cannot pass vacuously.
+- A stub for a **standard** global must extend the real one, never replace it. `load-view.js` used to pass `URL` as a plain object carrying only `createObjectURL`/`revokeObjectURL`, so `new URL(s)` inside `isValidNodeUri` threw and every node URI read as invalid under test — the rejection test passed for the wrong reason and no acceptance test could pass. It is now `class URLStub extends URL` with the two blob statics attached. A stub that makes a code path throw turns a negative assertion into a vacuous one, which is exactly what mutation-checking catches.
 - `rpcd-checks.test.sh` sources the real rpcd script with an unmatched `$1` so the `case` dispatcher falls through, then drives `check_sub_sources` / `fail_json` / `check_with_core` directly. It stubs `vpn-manager` on `PATH` to cover the core-rejection path.
 - Run them with `make luci-test` (or `node --test horn-vpn-manager-luci/tests/*.test.js` — a bare directory argument does not work — and `dash horn-vpn-manager-luci/tests/rpcd-checks.test.sh`). `node --check` on `config.js` and `dash -n` on the rpcd script remain the minimum gates.
 - Gate the rpcd script with `dash -n`, not the host `sh`: macOS `sh` is bash 3.2 and mis-parses a pre-existing `case`-inside-`$()`. `dash` is the closest available shell to OpenWrt `ash`. `shellcheck -s sh` is useful but reports pre-existing SC2221/SC2222.
