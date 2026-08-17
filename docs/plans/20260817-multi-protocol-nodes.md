@@ -338,14 +338,26 @@ Notes:
 - Modify: `horn-vpn-manager/internal/subscription/outbound.go`
 - Create: `horn-vpn-manager/internal/proto/proto_test.go`
 
-- [ ] define the `Node` interface from Technical Details
-- [ ] move `OutboundTLS`, `UTLSConfig` and `RealityTLS` from `internal/subscription/outbound.go`
+- [x] define the `Node` interface from Technical Details
+- [x] move `OutboundTLS`, `UTLSConfig` and `RealityTLS` from `internal/subscription/outbound.go`
       into `internal/proto`, preserving field order verbatim (JSON key order follows struct field
       order and Task 11 demands byte-identical output)
-- [ ] leave `VLESSOutbound` and `OutboundTransport` in `subscription` for now — Task 3 moves them
-- [ ] update `subscription` to reference the moved types
-- [ ] write tests asserting the moved structs still marshal to the same JSON as before
-- [ ] run `go test ./...` including the Task 1 golden — must be byte-identical before task 3
+- [x] leave `VLESSOutbound` and `OutboundTransport` in `subscription` for now — Task 3 moves them
+- [x] update `subscription` to reference the moved types
+- [x] write tests asserting the moved structs still marshal to the same JSON as before
+- [x] run `go test ./...` including the Task 1 golden — must be byte-identical before task 3
+
+Notes:
+- `internal/proto` has no non-stdlib imports and imports nothing from this module, which is what
+  keeps `vless → proto` and (later) `hysteria2 → proto` acyclic.
+- `TestOutboundTLSMarshalJSON` pins exact bytes per TLS variant (plain, insecure+alpn, uTLS,
+  reality with and without `short_id`), plus zero-value marshalling of `UTLSConfig`/`RealityTLS` —
+  `enabled`/`insecure`/`public_key`/`fingerprint` are **not** `omitempty` and must keep rendering.
+- `TestNodeInterfaceSatisfied` drives a local stub so the interface shape is compile-checked before
+  any protocol implements it (Task 3/4).
+- Mutation-checked: adding `omitempty` to `OutboundTLS.Insecure` fails four subtests.
+- Nothing else in the Go tree referenced the moved types, so the only call sites updated were
+  `nodeToOutbound` and the `VLESSOutbound.TLS` field.
 
 ### Task 3: Make `vless` satisfy the contract and own its outbound
 

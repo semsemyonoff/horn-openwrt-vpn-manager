@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/logx"
+	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/proto"
 	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/vless"
 )
 
@@ -73,34 +74,11 @@ type VLESSOutbound struct {
 	UUID           string             `json:"uuid"`
 	Flow           string             `json:"flow,omitempty"`
 	PacketEncoding string             `json:"packet_encoding,omitempty"`
-	TLS            *OutboundTLS       `json:"tls,omitempty"`
+	TLS            *proto.OutboundTLS `json:"tls,omitempty"`
 	Transport      *OutboundTransport `json:"transport,omitempty"`
 	// ConnectTimeout is a sing-box dial field. A failing dial otherwise hangs
 	// for the OS default, delaying any fallback switch by the same amount.
 	ConnectTimeout string `json:"connect_timeout,omitempty"`
-}
-
-// OutboundTLS is the TLS block for a sing-box VLESS outbound.
-type OutboundTLS struct {
-	Enabled    bool        `json:"enabled"`
-	Insecure   bool        `json:"insecure"`
-	ServerName string      `json:"server_name,omitempty"`
-	ALPN       []string    `json:"alpn,omitempty"`
-	UTLS       *UTLSConfig `json:"utls,omitempty"`
-	Reality    *RealityTLS `json:"reality,omitempty"`
-}
-
-// UTLSConfig configures the uTLS fingerprint for TLS.
-type UTLSConfig struct {
-	Enabled     bool   `json:"enabled"`
-	Fingerprint string `json:"fingerprint"`
-}
-
-// RealityTLS configures REALITY TLS extension parameters.
-type RealityTLS struct {
-	Enabled   bool   `json:"enabled"`
-	PublicKey string `json:"public_key"`
-	ShortID   string `json:"short_id,omitempty"`
 }
 
 // OutboundTransport is the transport-layer config for a sing-box outbound.
@@ -388,20 +366,20 @@ func nodeToOutbound(n *vless.Node, tag, connectTimeout string) *VLESSOutbound {
 		if len(alpn) == 0 && n.TransportType == transportXHTTP {
 			alpn = []string{"h2"}
 		}
-		tls := &OutboundTLS{
+		tls := &proto.OutboundTLS{
 			Enabled:    true,
 			Insecure:   false,
 			ServerName: n.SNI,
 			ALPN:       alpn,
 		}
 		if n.Fingerprint != "" {
-			tls.UTLS = &UTLSConfig{
+			tls.UTLS = &proto.UTLSConfig{
 				Enabled:     true,
 				Fingerprint: n.Fingerprint,
 			}
 		}
 		if n.Security == securityReality && n.PublicKey != "" {
-			tls.Reality = &RealityTLS{
+			tls.Reality = &proto.RealityTLS{
 				Enabled:   true,
 				PublicKey: n.PublicKey,
 				ShortID:   n.ShortID,
