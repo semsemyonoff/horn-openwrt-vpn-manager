@@ -255,3 +255,55 @@ func TestBuildIPList_merges_and_deduplicates(t *testing.T) {
 		}
 	}
 }
+
+// TestRunner_Run_partial_subnet_failure_keeps_cache pins that one failing subnet
+// URL does not narrow the routed set: the cache is a single merged file, so
+// writing the survivors silently drops every entry of the failed list and the
+// firewall is reloaded with a shrunken set behind an error nobody has read yet.
+func TestRunner_Run_partial_subnet_failure_keeps_cache(t *testing.T) {
+	okSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, "10.0.0.0/8\n")
+	}))
+	defer okSrv.Close()
+
+	listsDir := t.TempDir()
+	previous := "10.0.0.0/8\n203.0.113.0/24\n"
+	writeFile(t, filepath.Join(listsDir, SubnetsCacheFile), []byte(previous))
+	manualFile := filepath.Join(listsDir, "manual-ip.lst")
+	writeFile(t, manualFile, []byte("172.16.0.0/12\n"))
+
+	cfg := &config.Config{
+		Fetch: config.Fetch{Retries: 1, TimeoutSeconds: 5, Parallelism: 2},
+		Routing: config.Routing{
+			Subnets: config.Subnets{
+				URLs:       []string{okSrv.URL, "http://127.0.0.1:1"},
+				ManualFile: manualFile,
+			},
+		},
+	}
+
+	applier := &fakeApplier{}
+	runner := &Runner{Cfg: cfg, Applier: applier, ListsDir: listsDir}
+
+	if err := runner.Run(context.Background()); err == nil {
+		t.Fatal("Run: expected an error for a failed subnet download")
+	}
+
+	data, err := os.ReadFile(filepath.Join(listsDir, SubnetsCacheFile))
+	if err != nil {
+		t.Fatalf("read subnets cache: %v", err)
+	}
+	if string(data) != previous {
+		t.Errorf("subnets cache = %q, want the previous content %q", data, previous)
+	}
+
+	// The list the firewall gets must still hold every previously routed entry.
+	ipData, err := os.ReadFile(filepath.Join(listsDir, VPNIPListFile))
+	if err != nil {
+		t.Fatalf("read vpn-ip-list: %v", err)
+	}
+	got := ParseLines(ipData)
+	if len(got) != 3 { // 10.0.0.0/8, 172.16.0.0/12, 203.0.113.0/24
+		t.Errorf("vpn-ip-list = %v, want the 3 entries of the previous cache plus the manual one", got)
+	}
+}

@@ -57,8 +57,8 @@ func runCheck(args []string) error {
 	logx.OK("Config loaded: %s", flags.configPath)
 
 	// Report fetch settings.
-	logx.Detail("Fetch: retries=%d timeout=%ds parallelism=%d",
-		cfg.Fetch.Retries, cfg.Fetch.TimeoutSeconds, cfg.Fetch.Parallelism)
+	logx.Detail("Fetch: retries=%d timeout=%ds parallelism=%d list_cache_ttl=%s",
+		cfg.Fetch.Retries, cfg.Fetch.TimeoutSeconds, cfg.Fetch.Parallelism, cfg.Fetch.ListCacheDuration())
 
 	// Report subscriptions.
 	if len(cfg.Subscriptions) > 0 {

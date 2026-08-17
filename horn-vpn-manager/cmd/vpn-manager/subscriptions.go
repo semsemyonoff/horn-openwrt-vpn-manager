@@ -63,9 +63,11 @@ func parseSubsFlags(args []string) (subsFlags, error) {
 
 // applyListsFlags wires the list-cache flags onto the runner.
 //
-//   - --cached-lists: use prefetched lists from SubsListsDir (cache-first);
-//     downloads only on cache miss; uses cache as fallback when download fails.
-//     Intended to consume lists pre-fetched by "routing run --with-subscriptions".
+//   - --cached-lists: prefer prefetched lists from SubsListsDir. A copy younger
+//     than fetch.list_cache_ttl is used as is; an older one is revalidated with
+//     a conditional request, so a changed list is picked up on the next run
+//     instead of waiting for the next "routing run --with-subscriptions".
+//     The cache is still the fallback when a request fails.
 //   - --download-lists: always download fresh lists, save them to SubsListsDir,
 //     and fall back to the saved copy if a download later fails.
 //   - (no flag): live refresh — always download, no cache interaction.
@@ -76,7 +78,8 @@ func applyListsFlags(runner *subscription.Runner, flags subsFlags, subsListsDir 
 		runner.DownloadLists = true
 	case flags.cachedLists:
 		runner.SubsListsDir = subsListsDir
-		// DownloadLists stays false → cache-first, download only on miss.
+		// DownloadLists stays false → cache-first, bounded by fetch.list_cache_ttl:
+		// a copy older than the TTL is revalidated rather than reused blindly.
 	}
 }
 
@@ -96,14 +99,25 @@ func subscriptionsRunCtx(ctx context.Context, args []string) error {
 		return err
 	}
 	logx.Setup(!flags.noColor, flags.verbosity, flags.debug)
+
+	if flags.debug {
+		return subscriptionsRunDebug(flags, false)
+	}
+
+	// The lock comes before both the log file and the config: SetLogFile
+	// truncates a log another run is still writing, and a config read before a
+	// wait of up to a minute can be a generation out of date by the time it is
+	// applied.
+	release, err := system.AcquireRunLock(ctx, filepath.Dir(flags.configPath))
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	if flags.logs {
 		if logErr := logx.SetLogFile(subsLogFile); logErr != nil {
 			return fmt.Errorf("open log file: %w", logErr)
 		}
-	}
-
-	if flags.debug {
-		return subscriptionsRunDebug(flags, false)
 	}
 
 	cfg, err := config.Load(flags.configPath)
@@ -129,23 +143,33 @@ func subscriptionsDryRun(args []string) error {
 		return err
 	}
 	logx.Setup(!flags.noColor, flags.verbosity, flags.debug)
+
+	if flags.debug {
+		return subscriptionsRunDebug(flags, true)
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	// A dry run does not restart sing-box, but it does write the generated
+	// config and read the same list cache, so it takes the lock too — and, like
+	// a real run, before it truncates the shared log or reads the config.
+	release, err := system.AcquireRunLock(ctx, filepath.Dir(flags.configPath))
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	if flags.logs {
 		if logErr := logx.SetLogFile(subsLogFile); logErr != nil {
 			return fmt.Errorf("open log file: %w", logErr)
 		}
 	}
 
-	if flags.debug {
-		return subscriptionsRunDebug(flags, true)
-	}
-
 	cfg, err := config.Load(flags.configPath)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	applier := subscription.NewDebugApplier()
 	runner := subscription.NewRunner(cfg, applier)

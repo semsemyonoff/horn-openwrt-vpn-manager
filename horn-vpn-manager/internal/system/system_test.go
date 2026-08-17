@@ -299,3 +299,202 @@ func TestApplyIPs_fallback_init(t *testing.T) {
 		t.Errorf("calls = %v, want firewall init reload", cmd.calls)
 	}
 }
+
+// TestApplySingbox_unchanged_skips_restart pins that a rendered config identical
+// to the live one, and already applied, does not tear down every established
+// connection.
+func TestApplySingbox_unchanged_skips_restart(t *testing.T) {
+	dir := t.TempDir()
+	stagingPath := filepath.Join(dir, "config.json.new")
+	finalPath := filepath.Join(dir, "config.json")
+	writeFile(t, stagingPath, []byte(`{"log":{"level":"warn"}}`))
+	writeFile(t, finalPath, []byte(`{"log":{"level":"warn"}}`))
+
+	cmd := &fakeRunner{
+		runFunc: func(_ string, _ ...string) ([]byte, error) {
+			return nil, nil // "running" succeeds → service is up
+		},
+	}
+
+	o := &OpenWrt{Cmd: cmd, StateDir: dir}
+	o.markApplied("sing-box", []byte(`{"log":{"level":"warn"}}`))
+	if err := o.ApplySingbox(stagingPath, finalPath); err != nil {
+		t.Fatalf("ApplySingbox: %v", err)
+	}
+
+	// The config is still validated against the installed binary — only the
+	// restart is skipped.
+	if len(cmd.calls) != 2 {
+		t.Fatalf("calls = %v, want sing-box check + the running check", cmd.calls)
+	}
+	if cmd.calls[0][0] != "sing-box" || cmd.calls[0][1] != "check" {
+		t.Errorf("first call = %v, want sing-box check", cmd.calls[0])
+	}
+	if cmd.calls[1][1] != "running" {
+		t.Errorf("second call = %v, want the running check", cmd.calls[1])
+	}
+	if _, err := os.Stat(stagingPath); !os.IsNotExist(err) {
+		t.Errorf("staging file survived the skipped apply: %v", err)
+	}
+}
+
+// TestApplySingbox_unchanged_but_stopped_restarts pins the other half: skipping
+// the restart must not leave a stopped sing-box down.
+func TestApplySingbox_unchanged_but_stopped_restarts(t *testing.T) {
+	dir := t.TempDir()
+	stagingPath := filepath.Join(dir, "config.json.new")
+	finalPath := filepath.Join(dir, "config.json")
+	writeFile(t, stagingPath, []byte(`{"log":{"level":"warn"}}`))
+	writeFile(t, finalPath, []byte(`{"log":{"level":"warn"}}`))
+
+	cmd := &fakeRunner{
+		runFunc: func(name string, args ...string) ([]byte, error) {
+			if name == "/etc/init.d/sing-box" && len(args) > 0 && args[0] == "running" {
+				return nil, fmt.Errorf("exit 1")
+			}
+			return nil, nil
+		},
+	}
+
+	o := &OpenWrt{Cmd: cmd, StateDir: dir}
+	o.markApplied("sing-box", []byte(`{"log":{"level":"warn"}}`))
+	if err := o.ApplySingbox(stagingPath, finalPath); err != nil {
+		t.Fatalf("ApplySingbox: %v", err)
+	}
+
+	var restarted bool
+	for _, c := range cmd.calls {
+		if c[0] == "/etc/init.d/sing-box" && c[1] == "restart" {
+			restarted = true
+		}
+	}
+	if !restarted {
+		t.Errorf("calls = %v, want a restart when the service is down", cmd.calls)
+	}
+}
+
+// TestApplyDomains_unchanged_skips_restart pins that an unchanged domain list
+// does not flush the DNS cache on every routing run.
+func TestApplyDomains_unchanged_skips_restart(t *testing.T) {
+	dir := t.TempDir()
+	cacheFile := filepath.Join(dir, "domains.lst")
+	dnsmasqDir := filepath.Join(dir, "dnsmasq.d")
+	if err := os.MkdirAll(dnsmasqDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	writeFile(t, cacheFile, []byte("ipset=/example.com/vpn\n"))
+	writeFile(t, filepath.Join(dnsmasqDir, "domains.lst"), []byte("ipset=/example.com/vpn\n"))
+
+	cmd := &fakeRunner{} // every command succeeds, so "running" reports up
+	o := &OpenWrt{Cmd: cmd, StateDir: dir}
+	o.markApplied("dnsmasq", []byte("ipset=/example.com/vpn\n"))
+	if err := o.ApplyDomains(cacheFile, dnsmasqDir); err != nil {
+		t.Fatalf("ApplyDomains: %v", err)
+	}
+
+	// Only the liveness probe may run: no syntax check, no restart.
+	if len(cmd.calls) != 1 || cmd.calls[0][1] != "running" {
+		t.Errorf("calls = %v, want only the dnsmasq running check", cmd.calls)
+	}
+}
+
+// TestApplySingbox_promoted_but_never_restarted pins the crash window: a run
+// killed between promoting the config and restarting sing-box leaves the new
+// file live and the old config in the running process. Comparing files alone
+// would then read as "already applied" on every later run and skip the restart
+// forever.
+func TestApplySingbox_promoted_but_never_restarted(t *testing.T) {
+	dir := t.TempDir()
+	stagingPath := filepath.Join(dir, "config.json.new")
+	finalPath := filepath.Join(dir, "config.json")
+	writeFile(t, stagingPath, []byte(`{"log":{"level":"warn"}}`))
+	writeFile(t, finalPath, []byte(`{"log":{"level":"warn"}}`))
+
+	// No marker: the file was promoted but the restart never happened.
+	cmd := &fakeRunner{}
+	o := &OpenWrt{Cmd: cmd, StateDir: dir}
+	if err := o.ApplySingbox(stagingPath, finalPath); err != nil {
+		t.Fatalf("ApplySingbox: %v", err)
+	}
+
+	var restarted bool
+	for _, c := range cmd.calls {
+		if c[0] == "/etc/init.d/sing-box" && c[1] == "restart" {
+			restarted = true
+		}
+	}
+	if !restarted {
+		t.Fatalf("calls = %v, want a restart for a config that was never applied", cmd.calls)
+	}
+
+	// The marker now vouches for it, so the next identical run may skip.
+	if !o.isApplied("sing-box", []byte(`{"log":{"level":"warn"}}`)) {
+		t.Error("applied marker was not recorded after a successful restart")
+	}
+}
+
+// TestApplySingbox_failed_restart_clears_marker pins that a failed restart does
+// not leave a marker claiming the staged revision is live: whatever sing-box
+// runs after the rollback, it is not that config.
+func TestApplySingbox_failed_restart_clears_marker(t *testing.T) {
+	dir := t.TempDir()
+	stagingPath := filepath.Join(dir, "config.json.new")
+	finalPath := filepath.Join(dir, "config.json")
+	writeFile(t, stagingPath, []byte(`{"log":{"level":"debug"}}`))
+	writeFile(t, finalPath, []byte(`{"log":{"level":"warn"}}`))
+
+	cmd := &fakeRunner{
+		runFunc: func(name string, args ...string) ([]byte, error) {
+			if name == "/etc/init.d/sing-box" && len(args) > 0 && args[0] == "restart" {
+				return []byte("failed to start"), fmt.Errorf("exit 1")
+			}
+			return nil, nil
+		},
+	}
+
+	o := &OpenWrt{Cmd: cmd, StateDir: dir}
+	o.markApplied("sing-box", []byte(`{"log":{"level":"warn"}}`))
+	if err := o.ApplySingbox(stagingPath, finalPath); err == nil {
+		t.Fatal("expected an error when the restart fails")
+	}
+
+	if o.isApplied("sing-box", []byte(`{"log":{"level":"debug"}}`)) {
+		t.Error("marker claims the staged config is live after a failed restart")
+	}
+	if o.isApplied("sing-box", []byte(`{"log":{"level":"warn"}}`)) {
+		t.Error("marker still claims the rolled-back config is live; the next run would skip its restart")
+	}
+}
+
+// TestApplySingbox_unchanged_still_validates pins that the skip sits after the
+// check: this is the only place a config meets the sing-box binary actually
+// installed, so swapping the extended build for the stock one must keep failing
+// the run even when the rendered config did not change.
+func TestApplySingbox_unchanged_still_validates(t *testing.T) {
+	dir := t.TempDir()
+	stagingPath := filepath.Join(dir, "config.json.new")
+	finalPath := filepath.Join(dir, "config.json")
+	writeFile(t, stagingPath, []byte(`{"outbounds":[{"type":"fallback"}]}`))
+	writeFile(t, finalPath, []byte(`{"outbounds":[{"type":"fallback"}]}`))
+
+	cmd := &fakeRunner{
+		runFunc: func(name string, _ ...string) ([]byte, error) {
+			if name == "sing-box" {
+				return []byte("unknown outbound type: fallback"), fmt.Errorf("exit 1")
+			}
+			return nil, nil
+		},
+	}
+
+	o := &OpenWrt{Cmd: cmd}
+	err := o.ApplySingbox(stagingPath, finalPath)
+	if err == nil {
+		t.Fatal("expected an error when the installed sing-box rejects the config")
+	}
+	if !strings.Contains(err.Error(), singboxFallbackHint) {
+		t.Errorf("error = %v, want the extended-build hint", err)
+	}
+	if _, statErr := os.Stat(finalPath); statErr != nil {
+		t.Errorf("live config was removed on a validation failure: %v", statErr)
+	}
+}

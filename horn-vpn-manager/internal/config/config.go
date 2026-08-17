@@ -20,6 +20,12 @@ const DefaultPath = "/etc/horn-vpn-manager/config.json"
 // config leaves it unset.
 const DefaultManualIPFile = "/etc/horn-vpn-manager/lists/manual-ip.lst"
 
+// DefaultListCacheTTL is how long a cached route list is served without asking
+// the server whether it changed. It only bounds staleness: past the TTL the
+// list is revalidated with a conditional request, which usually costs a 304 and
+// no body.
+const DefaultListCacheTTL = 6 * time.Hour
+
 type Config struct {
 	Fetch         Fetch                    `json:"fetch"`
 	Singbox       Singbox                  `json:"singbox"`
@@ -85,6 +91,27 @@ type Fetch struct {
 	Retries        int `json:"retries"`
 	TimeoutSeconds int `json:"timeout_seconds"`
 	Parallelism    int `json:"parallelism"`
+	// ListCacheTTL bounds how long "subscriptions run --cached-lists" serves a
+	// cached route list without asking the server whether it changed. Empty
+	// means the built-in default; "0" revalidates on every run. Unlike the
+	// duration fields that are written into sing-box config, zero is meaningful
+	// here, so only a negative value is rejected.
+	ListCacheTTL string `json:"list_cache_ttl"`
+}
+
+// ListCacheDuration returns the configured route-list cache TTL, falling back
+// to DefaultListCacheTTL when unset. Load has already rejected an unparseable
+// or negative value, so a parse failure here can only mean a hand-built Config
+// in a test; the default is the safe answer either way.
+func (f Fetch) ListCacheDuration() time.Duration {
+	if f.ListCacheTTL == "" {
+		return DefaultListCacheTTL
+	}
+	d, err := time.ParseDuration(f.ListCacheTTL)
+	if err != nil || d < 0 {
+		return DefaultListCacheTTL
+	}
+	return d
 }
 
 type Routing struct {
@@ -148,6 +175,11 @@ func (c *Config) validate(hasExplicitManualFile bool) error {
 	for _, id := range slices.Sorted(maps.Keys(c.Subscriptions)) {
 		if c.Subscriptions[id] == nil {
 			return fmt.Errorf("subscription %q is null; remove it or provide a valid config object", id)
+		}
+	}
+	if c.Fetch.ListCacheTTL != "" {
+		if d, err := time.ParseDuration(c.Fetch.ListCacheTTL); err != nil || d < 0 {
+			return fmt.Errorf("fetch has invalid list_cache_ttl %q: must be a non-negative Go duration (e.g. \"6h\", \"30m\", or \"0\" to revalidate every run)", c.Fetch.ListCacheTTL)
 		}
 	}
 	if c.Singbox.ConnectTimeout != "" {

@@ -5,6 +5,8 @@
 package system
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"os/exec"
@@ -31,13 +33,81 @@ func (ExecRunner) LookPath(name string) (string, error) {
 	return exec.LookPath(name)
 }
 
+// DefaultStateDir is where the applied-revision markers live on-device.
+const DefaultStateDir = "/etc/horn-vpn-manager"
+
 // OpenWrt implements routing.Applier using real system commands.
 type OpenWrt struct {
 	Cmd CommandRunner
+
+	// StateDir holds the applied-revision markers that let a run tell "this
+	// file is already live" from "this file was written but the service was
+	// never restarted with it". Empty disables the optimisation entirely: with
+	// no marker every apply restarts, which is what the code did before.
+	StateDir string
 }
 
 func NewOpenWrt() *OpenWrt {
-	return &OpenWrt{Cmd: ExecRunner{}}
+	return &OpenWrt{Cmd: ExecRunner{}, StateDir: DefaultStateDir}
+}
+
+// appliedMarkerPath is where the digest of the last revision service was
+// restarted with is stored.
+func (o *OpenWrt) appliedMarkerPath(service string) string {
+	if o.StateDir == "" {
+		return ""
+	}
+	return filepath.Join(o.StateDir, ".applied-"+service)
+}
+
+// isApplied reports whether service was last restarted with exactly this
+// content. Comparing the destination file instead is not enough: a run killed
+// between promoting the file and restarting the service leaves the new file
+// live and the old config in the running process, and every later run would
+// then see a match and skip the restart forever.
+func (o *OpenWrt) isApplied(service string, data []byte) bool {
+	path := o.appliedMarkerPath(service)
+	if path == "" {
+		return false
+	}
+	stored, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(stored)) == contentDigest(data)
+}
+
+// markApplied records that service is now running this content. A failure to
+// write only costs the next run a redundant restart, so it is a warning.
+func (o *OpenWrt) markApplied(service string, data []byte) {
+	path := o.appliedMarkerPath(service)
+	if path == "" {
+		return
+	}
+	if err := atomicWrite(path, []byte(contentDigest(data)+"\n")); err != nil {
+		logx.Warn("Failed to record applied %s revision: %v", service, err)
+	}
+}
+
+// clearApplied drops the marker, so the next apply restarts the service rather
+// than trusting a revision it can no longer vouch for.
+func (o *OpenWrt) clearApplied(service string) {
+	if path := o.appliedMarkerPath(service); path != "" {
+		_ = os.Remove(path)
+	}
+}
+
+// serviceRunning reports whether the init script says the service is up.
+// procd answers "running" with exit 0/1; an init script that does not implement
+// the action fails too, which reads as "not running" and keeps the previous
+// unconditional-restart behaviour.
+func (o *OpenWrt) serviceRunning(service string) bool {
+	_, err := o.Cmd.Run("/etc/init.d/"+service, "running")
+	return err == nil
+}
+
+func contentDigest(data []byte) string {
+	return fmt.Sprintf("%x", sha256.Sum256(data))
 }
 
 // DebugApplier logs system actions without executing them.
@@ -62,7 +132,31 @@ func (d *DebugApplier) ApplySingbox(stagingPath, finalPath string) error {
 
 // ApplyDomains validates the domain list with dnsmasq --test, copies it
 // to the dnsmasq drop-in directory, and restarts dnsmasq.
+//
+// A drop-in that is already live is left alone: restarting dnsmasq drops the
+// DNS cache and every in-flight query, and the routing pipeline runs on a
+// schedule where the list usually has not changed at all. "Already live" means
+// the same bytes on disk *and* a marker saying dnsmasq was restarted with them
+// *and* dnsmasq actually running.
 func (o *OpenWrt) ApplyDomains(cacheFile, dnsmasqDir string) error {
+	data, err := os.ReadFile(cacheFile)
+	if err != nil {
+		return fmt.Errorf("read domain cache: %w", err)
+	}
+
+	dest := filepath.Join(dnsmasqDir, "domains.lst")
+	if same, sameErr := sameFileContents(cacheFile, dest); sameErr == nil && same {
+		switch {
+		case !o.isApplied("dnsmasq", data):
+			logx.Info("Domain list unchanged but never applied, restarting dnsmasq...")
+		case !o.serviceRunning("dnsmasq"):
+			logx.Info("Domain list unchanged but dnsmasq is not running")
+		default:
+			logx.Info("Domain list unchanged, skipping dnsmasq restart")
+			return nil
+		}
+	}
+
 	// Validate syntax
 	out, err := o.Cmd.Run("dnsmasq", "--conf-file="+cacheFile, "--test")
 	if err != nil {
@@ -74,11 +168,6 @@ func (o *OpenWrt) ApplyDomains(cacheFile, dnsmasqDir string) error {
 	if mkdirErr := os.MkdirAll(dnsmasqDir, 0o755); mkdirErr != nil {
 		return fmt.Errorf("create dnsmasq dir: %w", mkdirErr)
 	}
-	data, err := os.ReadFile(cacheFile)
-	if err != nil {
-		return fmt.Errorf("read domain cache: %w", err)
-	}
-	dest := filepath.Join(dnsmasqDir, "domains.lst")
 	if err := atomicWrite(dest, data); err != nil {
 		return fmt.Errorf("write dnsmasq config: %w", err)
 	}
@@ -88,6 +177,7 @@ func (o *OpenWrt) ApplyDomains(cacheFile, dnsmasqDir string) error {
 	if _, err := o.Cmd.Run("/etc/init.d/dnsmasq", "restart"); err != nil {
 		return fmt.Errorf("restart dnsmasq: %w", err)
 	}
+	o.markApplied("dnsmasq", data)
 	logx.OK("dnsmasq restarted")
 	return nil
 }
@@ -114,6 +204,9 @@ func isUnknownFallbackType(msg string) bool {
 // On restart failure, the previous config is restored from a backup so the
 // router is not left in an inconsistent state.
 //
+// A config byte-identical to the live one skips the rename and the restart, but
+// not the check — see below.
+//
 // This check only runs on a real apply: --dry-run and --debug never reach here,
 // so it does not replace verifying a fallback-using config on the device.
 func (o *OpenWrt) ApplySingbox(stagingPath, finalPath string) error {
@@ -130,6 +223,38 @@ func (o *OpenWrt) ApplySingbox(stagingPath, finalPath string) error {
 		return fmt.Errorf("sing-box check failed: %s: %w", msg, err)
 	}
 	logx.OK("sing-box config validation passed")
+
+	// Restarting sing-box tears down every established connection. The
+	// subscription pipeline runs on a schedule and usually renders exactly what
+	// is already live, so an unconditional restart costs the user a connection
+	// drop for no config change at all.
+	//
+	// The skip deliberately sits *after* the check: this is the only place a
+	// config is validated against the sing-box binary actually installed, so
+	// swapping the extended build for the stock one has to keep surfacing
+	// "unknown outbound type" on the next run even when nothing else changed.
+	//
+	// Identical bytes on disk are not enough on their own. A run killed between
+	// the rename below and the restart leaves the new file live and the old
+	// config in the running process; without the applied marker every later run
+	// would see a match and skip the restart forever.
+	staged, readErr := os.ReadFile(stagingPath)
+	if readErr != nil {
+		_ = os.Remove(stagingPath)
+		return fmt.Errorf("read staged sing-box config: %w", readErr)
+	}
+	if same, sameErr := sameFileContents(stagingPath, finalPath); sameErr == nil && same {
+		switch {
+		case !o.isApplied("sing-box", staged):
+			logx.Info("sing-box config unchanged but never applied, restarting...")
+		case !o.serviceRunning("sing-box"):
+			logx.Info("sing-box config unchanged but the service is not running")
+		default:
+			logx.OK("sing-box config unchanged, skipping restart")
+			_ = os.Remove(stagingPath)
+			return nil
+		}
+	}
 
 	// Back up the existing config so we can restore it if restart fails.
 	backupPath := finalPath + ".bak"
@@ -149,6 +274,9 @@ func (o *OpenWrt) ApplySingbox(stagingPath, finalPath string) error {
 
 	logx.Info("Restarting sing-box...")
 	if out, err := o.Cmd.Run("/etc/init.d/sing-box", "restart"); err != nil {
+		// Whatever sing-box ends up running now, it is not the staged config —
+		// drop the marker so the next run applies rather than skips.
+		o.clearApplied("sing-box")
 		if hasBackup {
 			logx.Info("sing-box restart failed; restoring previous config...")
 			if restoreErr := os.Rename(backupPath, finalPath); restoreErr != nil {
@@ -169,8 +297,24 @@ func (o *OpenWrt) ApplySingbox(stagingPath, finalPath string) error {
 	if hasBackup {
 		_ = os.Remove(backupPath)
 	}
+	o.markApplied("sing-box", staged)
 	logx.OK("sing-box restarted")
 	return nil
+}
+
+// sameFileContents reports whether both paths exist and hold identical bytes.
+// A missing file is not an error the caller has to distinguish: it simply means
+// "not the same", so the caller proceeds with the write.
+func sameFileContents(a, b string) (bool, error) {
+	da, err := os.ReadFile(a)
+	if err != nil {
+		return false, err
+	}
+	db, err := os.ReadFile(b)
+	if err != nil {
+		return false, err
+	}
+	return bytes.Equal(da, db), nil
 }
 
 // copyFile copies src to dst, creating or truncating dst.

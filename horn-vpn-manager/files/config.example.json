@@ -8,7 +8,8 @@
   "fetch": {
     "retries": 3,
     "timeout_seconds": 15,
-    "parallelism": 2
+    "parallelism": 2,
+    "list_cache_ttl": "6h"
   },
   "routing": {
     "domains": {

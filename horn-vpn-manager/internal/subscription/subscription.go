@@ -32,7 +32,9 @@ const DefaultConfigDir = "/etc/horn-vpn-manager"
 type Applier interface {
 	// ApplySingbox validates the config at stagingPath, atomically moves it to
 	// finalPath, and restarts sing-box. On validation failure stagingPath is
-	// removed and finalPath is left untouched.
+	// removed and finalPath is left untouched. An implementation may skip the
+	// move and the restart when stagingPath already matches finalPath, but never
+	// the validation.
 	ApplySingbox(stagingPath, finalPath string) error
 }
 
@@ -63,6 +65,21 @@ type Runner struct {
 	// DownloadLists forces re-download of all route lists even when cached
 	// copies exist in SubsListsDir. Downloaded data is still saved to cache.
 	DownloadLists bool
+
+	// listRun memoises one resolution per route list for the current Run call.
+	listRun *ListRunCache
+}
+
+// listCache assembles the cache policy for this run. The TTL comes from the
+// config rather than the flags: --cached-lists says "prefer the cache", not
+// "never check whether it is still current".
+func (r *Runner) listCache() ListCacheOptions {
+	return ListCacheOptions{
+		Dir:           r.SubsListsDir,
+		ForceDownload: r.DownloadLists,
+		TTL:           r.Cfg.Fetch.ListCacheDuration(),
+		Run:           r.listRun,
+	}
 }
 
 // NewRunner returns a Runner using the provided config and applier.
@@ -195,6 +212,9 @@ func (r *Runner) Run(ctx context.Context) error { //nolint:gocognit,gocyclo // o
 	}
 
 	start := time.Now()
+	// Scoped to this call: two subscriptions sharing a route list URL resolve it
+	// once, so one generated config can never carry two revisions of it.
+	r.listRun = NewListRunCache()
 
 	if r.DryRun {
 		logx.Header("subscriptions dry-run")
@@ -679,7 +699,7 @@ func (r *Runner) processSub(ctx context.Context, id string, sub *config.Subscrip
 	}
 
 	if sub.Route != nil {
-		mergedRoute := FetchRouteEntries(ctx, id, sub.Route, opts, r.SubsListsDir, r.DownloadLists)
+		mergedRoute := FetchRouteEntries(ctx, id, sub.Route, opts, r.listCache())
 		rules := BuildRouteRules(mergedRoute, plan.FinalTag)
 		plan.RouteRules = rules
 		if len(rules) > 0 {

@@ -96,20 +96,31 @@ func (r *Runner) Run(ctx context.Context) error {
 		results := fetch.DownloadAll(ctx, urls, opts)
 
 		var allLines []string
-		anySucceeded := false
+		failed := 0
 		for i, res := range results {
 			if res.Err != nil {
 				logx.Err("Failed to download subnet list: %s", res.URL)
 				downloadFailed = true
+				failed++
 				continue
 			}
-			anySucceeded = true
 			lines := ParseLines(res.Data)
 			logx.Detail("  [%d/%d] %s entries from %s", i+1, len(urls), logx.Bold(strconv.Itoa(len(lines))), lastPathSegment(res.URL))
 			allLines = append(allLines, lines...)
 		}
 
-		if anySucceeded {
+		switch {
+		case failed == len(urls):
+			logx.Warn("All subnet downloads failed; keeping existing cache")
+		case failed > 0:
+			// The cache is a single merged file, so writing the survivors would
+			// silently drop every entry of the failed lists and narrow the
+			// routed set on the next firewall reload. Keeping the previous
+			// cache is the only option that does not change routing behind an
+			// error the operator has yet to read.
+			logx.Err("%d of %d subnet list(s) failed; keeping the previous subnet cache rather than applying a partial list",
+				failed, len(urls))
+		default:
 			deduped := Dedup(allLines)
 			data := []byte(strings.Join(deduped, "\n") + "\n")
 			if err := atomicWrite(r.subnetsCachePath(), data); err != nil {
@@ -117,8 +128,6 @@ func (r *Runner) Run(ctx context.Context) error {
 			}
 			logx.Info("Subnet cache: %s unique entries -> %s", logx.Bold(strconv.Itoa(len(deduped))), r.subnetsCachePath())
 			subnetsUpdated = true
-		} else {
-			logx.Warn("All subnet downloads failed; keeping existing cache")
 		}
 	} else {
 		logx.Info("No subnet URLs configured, skipping")

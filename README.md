@@ -82,7 +82,8 @@ Init script `/etc/init.d/horn-vpn-manager` ждёт доступ в интерн
   "fetch": {
     "retries": 3,
     "timeout_seconds": 15,
-    "parallelism": 2
+    "parallelism": 2,
+    "list_cache_ttl": "6h"
   },
   "routing": {
     "domains": {
@@ -153,6 +154,12 @@ Init script `/etc/init.d/horn-vpn-manager` ждёт доступ в интерн
 - `retries` — число повторов при ошибке скачивания (default: 3)
 - `timeout_seconds` — timeout HTTP-запроса (default: 15)
 - `parallelism` — максимум параллельных скачиваний (default: 2)
+- `list_cache_ttl` — сколько кэшированный route-список (`route.domain_urls` / `route.ip_urls`)
+  отдаётся из кэша без проверки на сервере при `subscriptions run --cached-lists`
+  (`time.ParseDuration`, default: `6h`). Старше TTL — список **перепроверяется** условным запросом
+  (`If-None-Match` / `If-Modified-Since`): 304 оставляет сохранённые байты и не качает тело, 200
+  обновляет кэш. `"0"` — перепроверять на каждом запуске. Кэш остаётся fallback'ом, если запрос
+  не прошёл
 
 #### `routing`
 
@@ -333,7 +340,19 @@ vpn-manager run [-c config]
 - `--debug` — debug режим: конфиг/шаблон из директории бинарника, вывод в `./out`, без системных действий
 - `--with-subscriptions` — для `routing run`: после routing скачать также списки для subscription route rules
 - `--download-lists` — для `subscriptions run`: всегда скачивать свежие списки и кэшировать
-- `--cached-lists` — для `subscriptions run`: использовать кэш (скачивать только при отсутвии кеша)
+- `--cached-lists` — для `subscriptions run`: предпочитать кэш. Копия моложе
+  [`fetch.list_cache_ttl`](#fetch) отдаётся как есть, более старая — перепроверяется условным
+  запросом, так что изменившийся список подхватывается сразу, а не на следующем прогоне
+
+### Одновременные запуски
+
+Каждая команда, которая пишет состояние (`routing run`, `routing restore`, `subscriptions run`,
+`subscriptions dry-run`), берёт эксклюзивный flock на `<config dir>/.run.lock`. `routing` и
+`subscriptions` делят кэш route-списков и обе трогают системные сервисы: если они пересекутся,
+подписки соберут конфиг из копии списка, которую routing прямо сейчас заменяет, и применённый
+конфиг окажется на ревизию позади — без единой строчки в логах. Если лок занят, команда ждёт до
+минуты и затем завершается с ошибкой (`another vpn-manager run is in progress`), а не портит
+состояние параллельно. `vpn-manager check` лок не берёт.
 
 ## Логи
 
@@ -470,6 +489,11 @@ vpn-manager run -v
 # Routing lists раз в сутки
 15 4 * * * /usr/bin/vpn-manager routing run --no-color --logs
 ```
+
+Не ставьте `routing run --with-subscriptions` и `subscriptions run` на одну и ту же минуту: они
+делят кэш route-списков, и второй запуск упрётся в [лок](#одновременные-запуски). Разведите их по
+времени (как в примере выше) либо запускайте `vpn-manager run`, который выполняет обе фазы
+последовательно в одном процессе.
 
 ## LuCI
 

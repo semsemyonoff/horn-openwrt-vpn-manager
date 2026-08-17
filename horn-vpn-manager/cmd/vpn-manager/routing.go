@@ -79,14 +79,24 @@ func routingRunCtx(ctx context.Context, args []string) error {
 		return err
 	}
 	logx.Setup(!flags.noColor, flags.verbosity, flags.debug)
+
+	if flags.debug {
+		return routingRunDebug(flags)
+	}
+
+	// Lock first: SetLogFile truncates a log another run is still writing, and a
+	// config read before a wait of up to a minute can be a generation stale by
+	// the time it is applied.
+	release, err := system.AcquireRunLock(ctx, filepath.Dir(flags.configPath))
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	if flags.logs {
 		if logErr := logx.SetLogFile(routingLogFile); logErr != nil {
 			return fmt.Errorf("open log file: %w", logErr)
 		}
-	}
-
-	if flags.debug {
-		return routingRunDebug(flags)
 	}
 
 	cfg, err := config.Load(flags.configPath)
@@ -184,14 +194,24 @@ func routingRestore(args []string) error {
 		return err
 	}
 	logx.Setup(!flags.noColor, flags.verbosity, flags.debug)
+
+	if flags.debug {
+		return routingRestoreDebug(flags)
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	release, err := system.AcquireRunLock(ctx, filepath.Dir(flags.configPath))
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	if flags.logs {
 		if logErr := logx.SetLogFile(routingLogFile); logErr != nil {
 			return fmt.Errorf("open log file: %w", logErr)
 		}
-	}
-
-	if flags.debug {
-		return routingRestoreDebug(flags)
 	}
 
 	cfg, err := config.Load(flags.configPath)

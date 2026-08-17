@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/nodes"
 )
@@ -930,5 +931,52 @@ func TestLoad_shipped_example(t *testing.T) {
 		if !slices.Contains(schemes, want) {
 			t.Errorf("example has no inline %s node; inline node types = %v", want, schemes)
 		}
+	}
+}
+
+func TestLoad_fetch_list_cache_ttl(t *testing.T) {
+	cases := []struct {
+		name    string
+		value   string
+		want    time.Duration
+		wantErr bool
+	}{
+		{name: "valid duration", value: `"list_cache_ttl": "30m",`, want: 30 * time.Minute},
+		{name: "absent", value: "", want: DefaultListCacheTTL},
+		{name: "explicitly empty", value: `"list_cache_ttl": "",`, want: DefaultListCacheTTL},
+		// Unlike the durations written into sing-box config, zero is meaningful
+		// here: it revalidates every cached list on every run.
+		{name: "zero", value: `"list_cache_ttl": "0",`, want: 0},
+		{name: "invalid duration", value: `"list_cache_ttl": "6 hours",`, wantErr: true},
+		{name: "negative", value: `"list_cache_ttl": "-1h",`, wantErr: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			writeFile(t, path, `{
+				"fetch": {`+tc.value+`"retries": 3},
+				"subscriptions": {
+					"s1": {"name": "S1", "url": "https://example.com/s1", "default": true}
+				}
+			}`)
+
+			cfg, err := Load(path)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected error for invalid list_cache_ttl")
+				}
+				if !strings.Contains(err.Error(), "list_cache_ttl") {
+					t.Errorf("error should name the offending field: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := cfg.Fetch.ListCacheDuration(); got != tc.want {
+				t.Errorf("ListCacheDuration() = %s, want %s", got, tc.want)
+			}
+		})
 	}
 }

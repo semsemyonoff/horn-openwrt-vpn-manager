@@ -114,6 +114,7 @@ LuCI invariants (each one was a real bug):
 - **A handler that writes both the template and `config.json` must leave neither half applied on failure.** `config.json` is what points sing-box at the template, so a template swapped in before a config write that then fails silently changes what the router runs while the reply says error. `set_template` and `set_full_config` snapshot the template (`snapshot_file`) before replacing it and roll it back (`restore_file`, which removes a file that did not exist before) on either write failure; `reset_template` instead writes the config **before** `rm -f`, since the reverse order leaves the config pointing at a file that is already gone. **No `.bak.*` copy may survive either exit.** The rollback moves the snapshot back over the target rather than copying, and the success path drops it with `discard_snapshot` after the config write lands — `snapshot_file` uses `cp -p`, so a snapshot taken from a legacy `0644` template keeps that mode and would outlive the very save that hardened the original. `rpcd-checks.test.sh` asserts the config dir is free of `*.bak.*` on both the rollback and the `"result":"ok"` path.
 - The rpcd backend keeps sh-level checks structural only (types, presence, XOR) and delegates schema validation to `vpn-manager check -c <tmp>` on the **merged** candidate (`check_with_core`), rather than reimplementing cross-reference logic in a regex-less `jq`. It accepts on the structural checks alone when the core is unreachable, so a partially installed system can still save.
 - Error replies go through `fail_json`, which JSON-escapes the message — core errors quote subscription ids.
+- **`run_script` / `run_routing` clear `.needs-update-*` only when the core exited 0, and append its stderr to the log.** Clearing the flag unconditionally makes the sync badge claim the router is up to date with a config it never applied — now a live failure mode, since a run refused by the run lock exits non-zero. The core's final `error: …` line is printed to stderr only, so `2>/dev/null` left the Run tab with a log that simply stops. `rpcd-checks.test.sh` drives both outcomes against a stub core.
 
 ## Config Model
 
@@ -122,7 +123,7 @@ The core config is a single JSON file at `/etc/horn-vpn-manager/config.json`.
 Top-level structure:
 
 - `singbox` — settings directly related to `sing-box` (log level, test URL, template path, `connect_timeout`)
-- `fetch` — global download/runtime settings (retries, timeout, bounded parallelism)
+- `fetch` — global download/runtime settings (retries, timeout, bounded parallelism, `list_cache_ttl`)
 - `routing` — global routing sources (dnsmasq domains URL, subnet URLs, manual IP file)
 - `subscriptions` — keyed subscription definitions; keys are stable IDs and must remain object keys, not array items
 
@@ -148,6 +149,19 @@ Fallback chains (`fallback`):
 - `singbox.connect_timeout` (a `time.ParseDuration` string) is emitted as a dial field on every node outbound; empty omits the field entirely. Duration fields (`connect_timeout`, `interval`, `fallback.blacklist_timeout`) must be **positive**: `time.ParseDuration` accepts `"0"` and a leading `-`, and a non-positive value would be written through to sing-box, so validation checks the sign separately
 - generated `urltest` and `selector` groups always emit `interrupt_exist_connections: true`, so operators should raise per-subscription `tolerance` (~300 ms; the default is 100) to keep `urltest` from cutting live connections on benign latency jitter
 - the generated `fallback` group carries exactly `type`, `tag`, `outbounds`, `blacklist_timeout` — `FallbackOutboundOptions` in the extended build and nothing else. sing-box decodes outbound options with unknown fields disallowed, so adding `interrupt_exist_connections` (which `selector` and `urltest` *do* accept) makes `sing-box check` reject the entire config. Do not harmonise the three group types
+
+Route list cache (`route.domain_urls` / `route.ip_urls`):
+
+- **A cached list is never served without a bounded staleness.** `--cached-lists` used to mean "if the file is there, use it", and the only writer that ever refreshed it was `routing run --with-subscriptions`. A list narrowed on the server therefore kept routing domains to the wrong outbound on every subscriptions run until the next routing run — and because subscription rules are emitted **before** the template's static rules (`mergeRoute`), a stale broad `domain_suffix` claims domains a later static rule was written to route elsewhere. The cache now carries an age (`ListMeta.FetchedAt`): younger than `fetch.list_cache_ttl` it is served as is, older it is revalidated with `If-None-Match` / `If-Modified-Since`, so a 304 costs no body and a 200 lands on the same run that noticed the change. GitHub issue #2.
+- **Every list URL logs its entry count and its real source on one line** (`network`, `cache, age 2h13m`, `cache, revalidated (304)`, `cache, age … — refresh failed`), at info level, or at warning level when it contributed no entries. The old code printed `downloading N domain list URL(s)` before it even looked at the cache, so a run that downloaded nothing was indistinguishable in the log from one that did — which is exactly why the stale config in issue #2 could not be diagnosed from the log at all. Never reintroduce a source-agnostic "downloading" line.
+- `ReadCachedList` treats a **zero-byte file as a miss**, not as a list of zero entries: served as a list it silently drops every route rule built from that URL, and a subscription's domains then fall through to `route.final`.
+- Every cached list has a `<kind>-<hash>.meta.json` sidecar (URL, kind, validators, `fetched_at`). `index.json` is written only by the prefetch command, so without the sidecar a file written by `subscriptions run` is indistinguishable from an orphan. A cache entry with no sidecar is legacy and falls back to the list file's mtime for its age.
+- **`PruneListCache` is keyed on the configured URLs, never on what a run managed to download.** A URL that failed today must keep its copy — that copy is the fallback keeping its route rules alive. Without pruning, a URL that is removed and later re-added is served from an arbitrarily old orphan without a single request.
+- **A `304` is only accepted as the answer to validators the request actually carried.** `fetch.Download` hands its body straight to a cache writer, so a server or intermediary answering 304 to an unconditional request would otherwise produce a successful *empty* body: `routing.Run` writes it over the domain cache and reloads dnsmasq, emptying the routed set. An unconditional 304 is treated as any other unexpected status. Pinned by `TestDownload_unconditional_304_is_an_error`.
+- **Validators are only sent when the sidecar provably describes the body on disk.** The body and the sidecar are two files and cannot be renamed as one unit, so a crash between them pairs a new list with old validators; sending those lets the server answer 304 for a body it never served and pins the wrong routing data indefinitely. `ListMeta.Digest` makes the pair checkable and `ValidatorsFor` drops them on a mismatch, forcing a full refresh. A legacy sidecar with no digest is trusted.
+- **A route list is resolved once per run** (`ListRunCache`, claimed before any request is planned). Phase 2 resolves subscriptions concurrently, so a URL two of them share was fetched twice; if the list changed mid-run one fetch could answer 304 with the old revision while the other returned the new one, and a single generated config would carry both. Owners publish every list they claimed *before* waiting on any list somebody else owns — the reverse order deadlocks two subscriptions that share two URLs.
+- All fetches send `Cache-Control: no-cache`: an intermediary answering from its own cache produces the same stale-list symptom with nothing to see in either the log or the config. This is also the only part of the fix that reaches the flagless "live refresh" mode, which touches no cache at all.
+- **Writes to one cache entry are serialised on the entry's filename** (`lockCacheEntry`). Phase 2 processes subscriptions concurrently and the filename derives from the URL alone, so two subscriptions listing the same route list URL write the same two files: without the lock they collide on the shared `.tmp` path (the loser's rename fails with `ENOENT`) and can leave one response's body next to the other's validators — the self-inconsistent entry revalidation assumes cannot exist. Pinned by `TestSaveCachedList_ConcurrentSameURL`.
 
 Node identity:
 
@@ -253,7 +267,7 @@ Additional subscriptions flags:
 
 - `-t / --template` — path to sing-box template
 - `--download-lists` — always download fresh per-subscription route lists and cache them
-- `--cached-lists` — use pre-fetched lists from cache (download only on miss)
+- `--cached-lists` — prefer the pre-fetched cache; a copy older than `fetch.list_cache_ttl` is revalidated, not blindly reused
 
 Design constraints:
 
@@ -263,12 +277,22 @@ Design constraints:
 - both command families must be safe to place on different cron schedules
 - logging and exit codes must make separate cron usage operationally clear
 
+Concurrency and applied state:
+
+- **The lock is taken before the log file and before the config is read.** `logx.SetLogFile` truncates the log another run is still writing — the Run tab then shows a live run's log vanishing — and a config loaded before a wait of up to a minute can be a generation out of date by the time it is applied. Order is: parse flags → `logx.Setup` → lock → `SetLogFile` → `config.Load`.
+- **Every command that writes state takes an exclusive flock on `<config dir>/.run.lock`** (`system.AcquireRunLock`): `routing run`, `routing restore`, `subscriptions run`, `subscriptions dry-run`. `check` does not — rpcd calls it on every save and must not fail because cron is running. Routing and subscriptions share the route-list cache and both touch system services, so an overlap lets subscriptions build the config from the copy routing is replacing; the result is an applied config one revision behind with nothing in either log. The lock waits up to a minute and then fails with `ErrLocked` rather than proceeding. `runBoth` is safe because each phase acquires and releases in turn — do not hoist the lock around both, an flock on a second fd in the same process blocks just the same.
+- **"Already applied" means an applied-revision marker, not equal file contents.** A run killed between promoting a file and restarting the service leaves the new file live and the old config in the running process; comparing files alone then reads as "already applied" on every later run and skips the restart *forever*. `OpenWrt` writes `<StateDir>/.applied-<service>` (a digest) only after a restart succeeds, drops it when a restart fails, and requires the service to be running before skipping. An empty `StateDir` disables the optimisation, which is the old unconditional-restart behaviour. Pinned by `TestApplySingbox_promoted_but_never_restarted` and `TestApplySingbox_failed_restart_clears_marker`.
+- **A pipeline compares what it is about to apply with what is live, and skips the service restart when they match.** `ApplySingbox` restarting on an identical config tears down every established connection on a schedule; `ApplyDomains` restarting dnsmasq flushes the DNS cache the same way. `ApplySingbox` still restarts when `/etc/init.d/sing-box running` fails, so skipping never leaves a stopped service down — an init script without a `running` action reads as "not running" and keeps the old unconditional behaviour. **The skip sits after `sing-box check`, never before it:** that check is the only place a config meets the sing-box binary actually installed, so swapping the extended build for the stock one has to keep surfacing `unknown outbound type` even on a run where the rendered config did not change. Pinned by `TestApplySingbox_unchanged_still_validates`.
+- **A partial download must not narrow what is applied.** `routing.Run` writes the subnet cache only when **every** URL succeeded: the cache is a single merged file, so writing the survivors silently drops the failed lists' entries and the next firewall reload routes less than before, behind an error the operator has not read yet. All-failed and partial-failed both keep the previous cache; only the log line differs.
+
 ## On-Device Layout
 
 - CLI: `/usr/bin/vpn-manager`
 - Config dir: `/etc/horn-vpn-manager/`
 - Main config: `/etc/horn-vpn-manager/config.json`
-- List/cache dir: `/etc/horn-vpn-manager/lists/`
+- List/cache dir: `/etc/horn-vpn-manager/lists/` (subscription route lists under `lists/subscriptions/`, each as `<kind>-<hash>.lst` plus a `.meta.json` sidecar)
+- Run lock: `/etc/horn-vpn-manager/.run.lock`
+- Applied-revision markers: `/etc/horn-vpn-manager/.applied-sing-box`, `.applied-dnsmasq`
 - Generated `sing-box` config: `/etc/sing-box/config.json`
 - Default template: `/usr/share/horn-vpn-manager/sing-box.template.json`
 - Config example: `/usr/share/horn-vpn-manager/config.example.json`
@@ -345,6 +369,9 @@ Expected test coverage areas:
 - restore/apply planning
 - independent execution of subscriptions and routing commands
 - command behavior under separate cron-style invocation patterns
+- route list cache freshness: a fresh copy served with no request, a stale one revalidated, a changed one picked up on the same run, a 304 refreshing the stored age, and a failed refresh falling back to the cache
+- change detection: an unchanged sing-box config skipping the restart, a stopped service still restarting, an unchanged dnsmasq drop-in skipping the reload
+- the run lock: a second caller rejected, a released lock reusable, a waiting caller cut short by its context
 
 Preferred test layout:
 
