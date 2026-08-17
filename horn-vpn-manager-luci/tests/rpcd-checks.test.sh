@@ -511,6 +511,63 @@ if [ -f "${conf}/.needs-update-subs" ]; then
 fi
 rm -rf "$conf"
 
+# ── the unsync flag survives a failed run ──────────────────────────────────────
+#
+# run_script backgrounds the core and used to clear .needs-update-subs no matter
+# how it exited, so a run that failed — a bad config, or a refusal because
+# another run holds the lock — made the sync badge claim the router was up to
+# date with a config it never applied. The stderr of that run has to reach the
+# log too, or the Run tab shows a log that simply stops.
+echo "── a failed run keeps the unsync flag ──"
+
+# wait_for_run <conf dir>: run_script writes the child pid to /tmp/...; poll it.
+wait_for_run() {
+    i=0
+    while [ "$i" -lt 100 ]; do
+        pid=$(cat /tmp/horn-vpn-manager.pid 2>/dev/null)
+        [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 0
+        i=$((i + 1))
+        sleep 0.1
+    done
+    return 1
+}
+
+for outcome in fail ok; do
+    checks=$((checks + 1))
+    conf=$(mktemp -d)
+    : > "${conf}/.needs-update-subs"
+    if [ "$outcome" = fail ]; then
+        printf '#!/bin/sh\necho "error: another vpn-manager run is in progress" >&2\nexit 1\n' \
+            > "${DISPATCH_BIN}/vpn-manager"
+    else
+        printf '#!/bin/sh\nexit 0\n' > "${DISPATCH_BIN}/vpn-manager"
+    fi
+    chmod +x "${DISPATCH_BIN}/vpn-manager"
+    : > /tmp/horn-vpn-manager-subscriptions.log
+
+    printf '{}\n' | HORN_VPN_MANAGER_CONF_DIR="$conf" PATH="${DISPATCH_BIN}:${PATH}" \
+        "$DISPATCH_SH" "$RPCD" call run_script >/dev/null 2>&1
+    wait_for_run
+
+    if [ "$outcome" = fail ]; then
+        if [ ! -f "${conf}/.needs-update-subs" ]; then
+            echo "FAIL: run_script cleared the unsync flag after a failed run"
+            fails=$((fails + 1))
+        fi
+        checks=$((checks + 1))
+        if ! grep -q "another vpn-manager run is in progress" /tmp/horn-vpn-manager-subscriptions.log; then
+            echo "FAIL: run_script discarded the core's stderr instead of logging it"
+            fails=$((fails + 1))
+        fi
+    else
+        if [ -f "${conf}/.needs-update-subs" ]; then
+            echo "FAIL: run_script kept the unsync flag after a successful run"
+            fails=$((fails + 1))
+        fi
+    fi
+    rm -rf "$conf"
+done
+
 rm -rf "$DISPATCH_BIN"
 
 echo

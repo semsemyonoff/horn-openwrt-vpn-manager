@@ -436,11 +436,20 @@ case "$1" in
                     3) args="$args -vvv" ;;
                 esac
 
+                # stderr is appended to the log the binary itself writes, not
+                # discarded: the final "error: ..." line — a failed run, or a
+                # refusal because another run holds the lock — is only ever
+                # printed there, and dropping it leaves the Run tab showing a
+                # log that just stops.
+                #
+                # The unsync flag is cleared only on success. Clearing it after a
+                # failed run tells the sync badge the router is up to date with a
+                # config it never applied.
                 # shellcheck disable=SC2086
                 if [ "$dry_run" = "true" ]; then
-                    (vpn-manager $args 2>/dev/null) &
+                    (vpn-manager $args 2>>"$LOG_FILE") &
                 else
-                    (vpn-manager $args 2>/dev/null; rm -f "$UNSYNC_SUBS_FLAG") &
+                    (vpn-manager $args 2>>"$LOG_FILE" && rm -f "$UNSYNC_SUBS_FLAG") &
                 fi
                 echo $! > "$PID_FILE"
                 printf '{"result":"started"}'
@@ -485,7 +494,9 @@ case "$1" in
                 esac
 
                 # shellcheck disable=SC2086
-                (vpn-manager $args 2>/dev/null; rm -f "$UNSYNC_ROUTING_FLAG") &
+                # See run_script: stderr goes to the log, and the unsync flag is
+                # cleared only when the run actually succeeded.
+                (vpn-manager $args 2>>"$ROUTING_LOG" && rm -f "$UNSYNC_ROUTING_FLAG") &
                 echo $! > "$ROUTING_PID"
                 printf '{"result":"started"}'
                 ;;
