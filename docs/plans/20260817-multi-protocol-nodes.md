@@ -461,12 +461,32 @@ Notes:
 - Create: `horn-vpn-manager/internal/nodes/nodes.go`
 - Create: `horn-vpn-manager/internal/nodes/nodes_test.go`
 
-- [ ] implement the map, `Parse`, `Schemes` (sorted) and `IsKnownScheme` from Technical Details
-- [ ] define `ErrUnknownScheme` whose message lists `Schemes()`, so config errors tell the user what
+- [x] implement the map, `Parse`, `Schemes` (sorted) and `IsKnownScheme` from Technical Details
+- [x] define `ErrUnknownScheme` whose message lists `Schemes()`, so config errors tell the user what
       is accepted
-- [ ] write tests: dispatch to each scheme, `hy2` alias reaching the same parser, unknown scheme
+- [x] write tests: dispatch to each scheme, `hy2` alias reaching the same parser, unknown scheme
       error text, `Schemes()` ordering, `IsKnownScheme` on a line with no scheme at all
-- [ ] run `go test ./...` — must pass before task 6
+- [x] run `go test ./...` — must pass before task 6
+
+Notes:
+- The map entries are named functions (`parseVLESS`, `parseHysteria2`) rather than inline closures
+  returning `vless.Parse(uri)` directly: a typed nil `*vless.Node` returned straight through would
+  produce a **non-nil** `proto.Node` interface on the error path. Each adapter returns an explicit
+  `nil`. Mutation-checked — collapsing `parseVLESS` back to a one-liner fails
+  `TestParse_PropagatesProtocolError`.
+- `ErrUnknownScheme` is a package-level `var` built from `Schemes()`; Go resolves `parsers` first by
+  dependency order, so no `init()` is needed. `Parse` wraps it with the offending scheme and
+  **never quotes the URI** — node URIs carry credentials (`TestParse_UnknownSchemeDoesNotLeakURI`).
+- Scheme matching is case-sensitive, matching the protocol parsers' own `strings.HasPrefix` checks;
+  `VLESS://…` is an unknown scheme rather than a silently accepted one. Pinned in both
+  `TestParse_UnknownScheme` and `TestIsKnownScheme`.
+- `Schemes()` returns a fresh sorted slice each call; the test mutates the result and re-reads to
+  pin that.
+- `TestParse_HY2AliasMatchesHysteria2` asserts the alias produces an identical `StableHash`, so
+  respelling `hysteria2://` as `hy2://` in a subscription cannot move a node tag.
+- Nothing else was rewired in this task — `outbound.go`, `decode.go` and `config.go` still call
+  `vless.Parse` directly until Tasks 6–8.
+- `go test ./...`, `gofmt -l` and `make lint` (0 issues) all clean.
 
 ### Task 6: Rewire `BuildOutbounds` onto the contract
 
