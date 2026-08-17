@@ -6,7 +6,8 @@
 
 - `horn-vpn-manager` — Go-бинарник `vpn-manager` для обновления подписок, генерации `sing-box` конфига и управления domain/IP lists
 - `horn-vpn-manager-luci` — LuCI UI поверх rpcd backend
-- `Makefile`, `Dockerfile`, `docker/entrypoint.sh` — локальная сборка `.apk` через OpenWrt SNAPSHOT SDK в контейнере
+- `Makefile` + `scripts/` — локальная сборка `.apk` / `.ipk`: Go кросс-компиляция и упаковка без OpenWrt SDK
+- `Dockerfile`, `docker/entrypoint.sh` — образ OpenWrt SNAPSHOT SDK; нужен только для `make shell`
 
 ## Что делает core-пакет
 
@@ -22,18 +23,24 @@
 7. Для подписок с `fallback` создаёт группу `<id>-fallback` с цепочкой резервных подписок
 8. Собирает route rules по `route.domains`, `route.ip_cidrs` и загруженным спискам
 9. Генерирует `sing-box` config из шаблона
-10. Проверяет конфиг через `sing-box check`, сохраняет backup и перезапускает `sing-box`
+10. Проверяет конфиг через `sing-box check`; если результат совпадает с уже применённым и сервис
+    запущен — перезапуск пропускается, иначе сохраняет backup и перезапускает `sing-box`
+    (при неудачном рестарте откатывает предыдущий конфиг и поднимает сервис на нём)
 
 `vpn-manager routing run`:
 
 1. Скачивает dnsmasq domain list и subnet lists из `config.json`
-2. Кэширует их в `/etc/horn-vpn-manager/lists/`
+2. Кэширует их в `/etc/horn-vpn-manager/lists/`; subnet-кэш перезаписывается только если скачались
+   **все** URL — частичная выкачка не сужает уже применённый список
 3. Собирает итоговый IP list с учётом `manual-ip.lst`
-4. Обновляет dnsmasq/firewall
+4. Обновляет dnsmasq/firewall (dnsmasq не перезапускается, если drop-in не изменился)
 
 `vpn-manager routing restore` восстанавливает domain/IP lists из кэша без скачивания (для boot при отсутствии сети).
 
-Init script `/etc/init.d/horn-vpn-manager` ждёт доступ в интернет, затем запускает `routing run` и `subscriptions run`. Если сети нет, он восстанавливает domain/IP lists из кэша через `routing restore`.
+Init script `/etc/init.d/horn-vpn-manager` ждёт доступ в интернет до 60 с, затем запускает
+`routing run --with-subscriptions` и `subscriptions run --cached-lists`. Если сети нет, он
+восстанавливает domain/IP lists из кэша через `routing restore`. При отсутствии `config.json` (свежая
+установка) скрипт молча завершается.
 
 ## Пути на роутере
 
@@ -41,8 +48,11 @@ Init script `/etc/init.d/horn-vpn-manager` ждёт доступ в интерн
 |---|---|
 | `/usr/bin/vpn-manager` | единый CLI |
 | `/etc/horn-vpn-manager/config.json` | основной конфиг |
+| `/etc/horn-vpn-manager/subs-tags.json` | карта подписка → теги outbound (читает LuCI) |
 | `/etc/horn-vpn-manager/lists/` | кэш domain/subnet lists |
 | `/etc/horn-vpn-manager/lists/manual-ip.lst` | ручной список IP/CIDR |
+| `/etc/horn-vpn-manager/lists/subscriptions/` | кэш route-списков подписок (`<kind>-<hash>.lst` + `.meta.json`) |
+| `/etc/horn-vpn-manager/.run.lock` | лок одновременных запусков |
 | `/usr/share/horn-vpn-manager/sing-box.template.json` | шаблон sing-box по умолчанию |
 | `/usr/share/horn-vpn-manager/config.example.json` | пример конфига |
 | `/etc/sing-box/config.json` | сгенерированный sing-box config |
@@ -53,8 +63,16 @@ Init script `/etc/init.d/horn-vpn-manager` ждёт доступ в интерн
 
 Для core-пакета нужны:
 
-- `sing-box` или `sing-box-extended`
+- `sing-box` или `sing-box-extended` вместе с рабочим `/etc/init.d/sing-box`
 - `dnsmasq-full`
+- `curl` — им init script проверяет наличие интернета при загрузке
+
+LuCI-пакету дополнительно нужен `jq` (rpcd backend читает и пишет `config.json` через него).
+
+`vpn-manager` спрашивает у init-скрипта `/etc/init.d/sing-box running`, чтобы не перезапускать сервис
+при неизменившемся конфиге. Скрипт без действия `running` отвечает ошибкой, это читается как «сервис
+не запущен», и перезапуск происходит всегда — то есть поведение просто откатывается к
+безусловному, ничего не ломается.
 
 Для использования `xhttp` нужно использовать [sing-box-extended](https://github.com/shtorm-7/sing-box-extended) вместо обычного.
 
@@ -312,37 +330,47 @@ cp /usr/share/horn-vpn-manager/sing-box.template.json /etc/horn-vpn-manager/sing
 ## CLI
 
 ```sh
-# Общая справка
+# Справка (общая и по каждой команде)
 vpn-manager help
+vpn-manager subscriptions --help
 
 # Подписки
-vpn-manager subscriptions run [-c config] [-v] [--no-color]
-vpn-manager subscriptions dry-run [-c config] [-v] [--no-color]
+vpn-manager subscriptions run [-c config] [-t template] [-v] [--no-color] [--logs] [--debug]
+                             [--cached-lists | --download-lists]
+vpn-manager subscriptions dry-run [те же флаги]
 
 # Routing
-vpn-manager routing run [-c config] [-v] [--no-color] [--with-subscriptions]
-vpn-manager routing restore [-c config] [--no-color]
+vpn-manager routing run [-c config] [-v] [--no-color] [--logs] [--debug] [--with-subscriptions]
+vpn-manager routing restore [-c config] [-v] [--no-color] [--logs] [--debug]
 
 # Валидация конфига
-vpn-manager check [-c config]
+vpn-manager check [-c config] [-v] [--no-color]
 
 # Bootstrap (routing + subscriptions)
-vpn-manager run [-c config]
+vpn-manager run [-c config] [-t template] [-v] [--no-color] [--logs] [--debug]
+
+# Версия
+vpn-manager version
 ```
 
-Флаги:
+Общие флаги:
 
 - `-c / --config` — путь к конфигу (default: `/etc/horn-vpn-manager/config.json`)
-- `-t / --template` — путь к шаблону sing-box (только для subscriptions)
 - `-v / -vv / -vvv` — уровень детализации логов
 - `--no-color` — отключить цвет (для cron)
-- `--logs` — писать вывод в лог-файл параллельно со stderr (см. ниже)
+- `--logs` — писать вывод в лог-файл параллельно со stderr (см. [Логи](#логи))
 - `--debug` — debug режим: конфиг/шаблон из директории бинарника, вывод в `./out`, без системных действий
+
+Флаги отдельных команд:
+
+- `-t / --template` — путь к шаблону sing-box (`subscriptions`, `run`)
 - `--with-subscriptions` — для `routing run`: после routing скачать также списки для subscription route rules
-- `--download-lists` — для `subscriptions run`: всегда скачивать свежие списки и кэшировать
-- `--cached-lists` — для `subscriptions run`: предпочитать кэш. Копия моложе
+- `--download-lists` — для `subscriptions`: всегда скачивать свежие списки и кэшировать
+- `--cached-lists` — для `subscriptions`: предпочитать кэш. Копия моложе
   [`fetch.list_cache_ttl`](#fetch) отдаётся как есть, более старая — перепроверяется условным
   запросом, так что изменившийся список подхватывается сразу, а не на следующем прогоне
+
+`vpn-manager check` из общих флагов принимает только `-c`, `-v` и `--no-color`.
 
 ### Одновременные запуски
 
@@ -371,46 +399,7 @@ LuCI всегда передаёт `--logs` при запуске команд �
 
 ## Установка на роутер
 
-### Автоматическая установка
-
-Скрипт проверит и установит все зависимости (`sing-box`, `dnsmasq-full`), скачает `horn-vpn-manager` и опционально LuCI плагин:
-
-```sh
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/semsemyonoff/horn-openwrt-vpn-manager/main/install.sh)"
-```
-
-Или через `wget`:
-
-```sh
-sh -c "$(wget -qO- https://raw.githubusercontent.com/semsemyonoff/horn-openwrt-vpn-manager/main/install.sh)"
-```
-
-Предварительный просмотр (без изменений):
-
-```sh
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/semsemyonoff/horn-openwrt-vpn-manager/main/install.sh)" -- --dry-run
-```
-
-Неинтерактивная установка с параметрами:
-
-```sh
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/semsemyonoff/horn-openwrt-vpn-manager/main/install.sh)" -- --with-sing-box-extend --with-dnsmasq --with-luci
-```
-
-Доступные флаги:
-
-| Флаг | Описание |
-|---|---|
-| `--dry-run` | Показать что будет сделано, без изменений |
-| `--with-sing-box` | Установить sing-box из репозитория OpenWrt |
-| `--with-sing-box-extend` | Установить sing-box-extended с GitHub |
-| `--with-dnsmasq` | Установить dnsmasq-full (заменит dnsmasq) |
-| `--with-luci` | Установить LuCI плагин |
-| `--no-luci` | Не устанавливать LuCI плагин |
-
-### Ручная установка
-
-#### 1. Установить зависимости
+### 1. Установить зависимости
 
 Установите `dnsmasq-full` (если установлен обычный `dnsmasq`, сначала удалите его):
 
@@ -425,11 +414,15 @@ apk add dnsmasq-full
 apk add sing-box
 ```
 
-Или установите [sing-box-extended](https://github.com/shtorm-7/sing-box-extended) вручную, скачав бинарник для вашей архитектуры из [релизов](https://github.com/shtorm-7/sing-box-extended/releases/latest) и поместив его в `/usr/bin/sing-box`.
+Пакет из репозитория приносит с собой `/etc/init.d/sing-box`, который нужен `vpn-manager` для
+перезапуска и проверки состояния сервиса.
 
-Если init script sing-box отсутствует (`/etc/init.d/sing-box`), создайте его — см. `install.sh` для содержимого.
+Если нужен `xhttp` или `fallback`, поверх поставьте
+[sing-box-extended](https://github.com/shtorm-7/sing-box-extended): скачайте бинарник для вашей
+архитектуры из [релизов](https://github.com/shtorm-7/sing-box-extended/releases/latest) и положите его
+в `/usr/bin/sing-box` вместо штатного. Init script при этом остаётся от пакета из репозитория.
 
-#### 2. Скачать и установить пакеты
+### 2. Скачать и установить пакеты
 
 Скачайте `.apk` файлы для вашей архитектуры из [релизов](https://github.com/semsemyonoff/horn-openwrt-vpn-manager/releases/latest).
 
@@ -449,7 +442,7 @@ apk add --allow-untrusted /tmp/horn-vpn-manager-*.apk
 apk add --allow-untrusted /tmp/horn-vpn-manager-luci-*.apk
 ```
 
-#### 3. Настроить конфиг
+### 3. Настроить конфиг
 
 ```sh
 cp /usr/share/horn-vpn-manager/config.example.json /etc/horn-vpn-manager/config.json
@@ -463,7 +456,7 @@ cp /usr/share/horn-vpn-manager/config.example.json /etc/horn-vpn-manager/config.
 cp /usr/share/horn-vpn-manager/sing-box.template.json /etc/horn-vpn-manager/sing-box.template.json
 ```
 
-#### 4. Проверить и запустить
+### 4. Проверить и запустить
 
 ```sh
 vpn-manager check
@@ -505,11 +498,11 @@ vpn-manager run -v
 
 1. **Subscriptions** — редактирование подписок (`include`, `exclude`, `route.*` и т.д.)
 2. **Routing** — глобальные routing sources (`domains.url`, `subnets.urls`)
-3. **Sing-box template config** — редактирование шаблона sing-box (JSON merging, без плейсхолдеров)
-4. **Additional domains** — ручные домены и IP/CIDR списки
-5. **Sing-box logs** — просмотр логов sing-box
-6. **Test** — delay tests и проверка прокси
-7. **Run** — запуск подписок и routing с выбором флагов (`--cached-lists`, `--download-lists`, `--with-subscriptions`), dry-run режим, live log
+3. **Run** — запуск подписок и routing с выбором флагов (`--cached-lists`, `--download-lists`, `--with-subscriptions`), dry-run режим, live log
+4. **Sing-box template config** — редактирование шаблона sing-box (JSON merging, без плейсхолдеров)
+5. **Additional domains** — ручные домены и IP/CIDR списки
+6. **Sing-box logs** — просмотр логов sing-box
+7. **Test** — delay tests и проверка прокси
 
 Через LuCI можно:
 
@@ -532,9 +525,12 @@ vpn-manager run -v
 make build          # собрать .apk для текущей платформы
 make build-all      # собрать .apk для всех платформ
 make build-core-all # собрать только core для всех платформ
+make build-ipk-all  # то же в .ipk для OpenWrt < 25 с opkg
 ```
 
-Готовые артефакты появятся в `bin/`.
+Готовые артефакты появятся в `bin/`. Docker для сборки пакетов не нужен: core кросс-компилируется
+локальным Go, а упаковкой занимаются скрипты в `scripts/`. Целевая платформа выводится из
+`TARGET` (`make build-core TARGET=ath79/generic`), список платформ для `*-all` — в `ALL_PLATFORMS`.
 
 Для установки на роутер вручную:
 
@@ -547,15 +543,11 @@ ssh root@192.168.1.1 "apk add --allow-untrusted /tmp/horn-vpn-manager-*.apk"
 
 ```sh
 make help
-make lint
+make lint       # gofmt -l + golangci-lint run
+make go-test    # go test ./... -count=1
 make luci-test
-make shell
+make shell      # интерактивный shell внутри контейнера с OpenWrt SDK (единственная Docker-цель)
 ```
-
-`make lint` выполняет:
-
-- `gofmt` — проверка форматирования Go кода
-- `golangci-lint run` — статический анализ Go кода
 
 `make luci-test` выполняет тесты LuCI-вьюхи (`node --test`) и rpcd-бэкенда (`dash`) плюс
 синтаксические гейты `node --check` / `dash -n`; нужны `node` и `dash`.
