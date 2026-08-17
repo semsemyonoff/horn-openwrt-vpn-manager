@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/nodes"
 )
 
 // gzipBytes compresses data with gzip for use in tests.
@@ -297,6 +299,163 @@ func TestDecodePayload_gzip_base64_no_padding(t *testing.T) {
 	if len(uris) != 1 {
 		t.Fatalf("got %d URIs, want 1", len(uris))
 	}
+}
+
+const (
+	hy2Line      = "hysteria2://pass@hy.example.com:8443?sni=hy.example.com#HY+Node"
+	hy2ShortLine = "hy2://pass2@hy2.example.com#HY2+Short"
+)
+
+func TestDecodePayload_raw_mixed_schemes(t *testing.T) {
+	data := []byte("vless://uuid1@host1.example.com:443?encryption=none#Node+1\n" +
+		hy2Line + "\n" +
+		hy2ShortLine + "\n")
+
+	uris, err := DecodePayload(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{"vless://uuid1@host1.example.com:443?encryption=none#Node+1", hy2Line, hy2ShortLine}
+	if len(uris) != len(want) {
+		t.Fatalf("got %d URIs, want %d: %v", len(uris), len(want), uris)
+	}
+	for i := range want {
+		if uris[i] != want[i] {
+			t.Errorf("uri[%d] = %q, want %q", i, uris[i], want[i])
+		}
+	}
+}
+
+func TestDecodePayload_raw_hysteria2_only(t *testing.T) {
+	data := []byte(hy2Line + "\n")
+
+	uris, err := DecodePayload(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(uris) != 1 || uris[0] != hy2Line {
+		t.Fatalf("got %v, want [%s]", uris, hy2Line)
+	}
+}
+
+func TestDecodePayload_base64_hysteria2(t *testing.T) {
+	raw := hy2Line + "\n" + hy2ShortLine + "\n"
+	encoded := base64.StdEncoding.EncodeToString([]byte(raw))
+
+	uris, err := DecodePayload([]byte(encoded))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(uris) != 2 {
+		t.Fatalf("got %d URIs, want 2: %v", len(uris), uris)
+	}
+	if uris[0] != hy2Line || uris[1] != hy2ShortLine {
+		t.Errorf("got %v, want [%s %s]", uris, hy2Line, hy2ShortLine)
+	}
+}
+
+func TestDecodePayload_gzip_mixed_schemes(t *testing.T) {
+	raw := "vless://uuid1@host1.example.com:443?encryption=none#Node+1\n" + hy2Line + "\n"
+	compressed := gzipBytes(t, []byte(raw))
+
+	uris, err := DecodePayload(compressed)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(uris) != 2 {
+		t.Fatalf("got %d URIs, want 2: %v", len(uris), uris)
+	}
+}
+
+// A scheme with no parser registered is not an error: subscription payloads
+// routinely carry lines for protocols this tool does not implement, and failing
+// the whole subscription over one of them would be worse than skipping it.
+func TestDecodePayload_unregistered_scheme_skipped(t *testing.T) {
+	data := []byte("trojan://secret@t.example.com:443#Trojan\n" +
+		"vless://uuid1@host1.example.com:443?encryption=none#Node+1\n" +
+		"ss://YWVzOnBhc3M@s.example.com:8388#SS\n")
+
+	uris, err := DecodePayload(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(uris) != 1 {
+		t.Fatalf("got %d URIs, want 1 (unregistered schemes are skipped): %v", len(uris), uris)
+	}
+	if uris[0] != "vless://uuid1@host1.example.com:443?encryption=none#Node+1" {
+		t.Errorf("uri[0] = %q", uris[0])
+	}
+}
+
+func TestDecodePayload_unregistered_scheme_only(t *testing.T) {
+	data := []byte("trojan://secret@t.example.com:443#Trojan\n")
+
+	_, err := DecodePayload(data)
+	if err == nil {
+		t.Fatal("expected an error for a payload with no supported node lines")
+	}
+	// The failure has to name what would have worked instead of asserting VLESS.
+	for _, scheme := range nodes.Schemes() {
+		if !strings.Contains(err.Error(), scheme) {
+			t.Errorf("error %q does not list supported scheme %q", err, scheme)
+		}
+	}
+}
+
+// A payload that used to yield exactly one node and now yields several silently
+// moves the subscription's final tag from <id>-single to <id>-manual, which
+// invalidates the saved selector choice and the clash.db entry.
+func TestDecodePayload_topology_shift_warning(t *testing.T) {
+	const warning = "single-node before and is multi-node now"
+
+	t.Run("warns on single vless plus a new scheme", func(t *testing.T) {
+		buf := captureLog(t)
+		data := []byte("vless://uuid1@host1.example.com:443?encryption=none#Node+1\n" + hy2Line + "\n")
+		if _, err := DecodePayload(data); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		log := buf.String()
+		if !strings.Contains(log, warning) {
+			t.Fatalf("expected a topology-shift warning, log:\n%s", log)
+		}
+		if !strings.Contains(log, "hysteria2") {
+			t.Errorf("warning does not name the newly accepted scheme, log:\n%s", log)
+		}
+	})
+
+	t.Run("silent when the payload was already multi-node", func(t *testing.T) {
+		buf := captureLog(t)
+		data := []byte("vless://uuid1@host1.example.com:443?encryption=none#Node+1\n" +
+			"vless://uuid2@host2.example.com:443?encryption=none#Node+2\n" + hy2Line + "\n")
+		if _, err := DecodePayload(data); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if strings.Contains(buf.String(), warning) {
+			t.Errorf("unexpected topology-shift warning for an already multi-node payload, log:\n%s", buf.String())
+		}
+	})
+
+	t.Run("silent when the payload stays single-node", func(t *testing.T) {
+		buf := captureLog(t)
+		if _, err := DecodePayload([]byte(hy2Line + "\n")); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if strings.Contains(buf.String(), warning) {
+			t.Errorf("unexpected topology-shift warning for a single-node payload, log:\n%s", buf.String())
+		}
+	})
+
+	// No vless line means the payload failed to decode entirely before, so there
+	// is no saved selector choice to invalidate.
+	t.Run("silent when no vless node is present", func(t *testing.T) {
+		buf := captureLog(t)
+		if _, err := DecodePayload([]byte(hy2Line + "\n" + hy2ShortLine + "\n")); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if strings.Contains(buf.String(), warning) {
+			t.Errorf("unexpected topology-shift warning for a vless-free payload, log:\n%s", buf.String())
+		}
+	})
 }
 
 func TestNormalizeLineEndings(t *testing.T) {

@@ -7,10 +7,13 @@ import (
 	"compress/gzip"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/logx"
+	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/nodes"
 )
 
 // Format identifies the detected payload encoding.
@@ -18,7 +21,7 @@ type Format int
 
 const (
 	FormatUnknown       Format = iota
-	FormatRaw                  // plain vless:// lines
+	FormatRaw                  // plain node URI lines, one per line
 	FormatGzip                 // gzip-compressed raw payload
 	FormatBase64               // standard base64-encoded payload
 	FormatBase64URL            // URL-safe base64-encoded payload
@@ -48,10 +51,21 @@ func (f Format) String() string {
 	}
 }
 
-// DecodePayload detects and decodes a subscription payload, returning VLESS URIs.
+// DecodePayload detects and decodes a subscription payload, returning node URIs
+// of every scheme the nodes dispatcher supports.
 // Detection order: raw → gzip → base64 (with gzip probe) → base64url (with gzip probe).
 // Returns an error if the payload cannot be decoded into any known format.
 func DecodePayload(data []byte) ([]string, error) {
+	uris, err := decodePayload(data)
+	if err != nil {
+		return nil, err
+	}
+	warnTopologyShift(uris)
+	return uris, nil
+}
+
+// decodePayload runs the format probes in order and returns the extracted URIs.
+func decodePayload(data []byte) ([]string, error) {
 	if len(data) == 0 {
 		return nil, errors.New("empty subscription payload")
 	}
@@ -76,20 +90,21 @@ func DecodePayload(data []byte) ([]string, error) {
 		return uris, nil
 	}
 
-	return nil, errors.New("unrecognized subscription payload: no vless:// lines found and no supported encoding detected")
+	return nil, fmt.Errorf("unrecognized subscription payload: no node lines found (supported schemes: %s) and no supported encoding detected",
+		strings.Join(nodes.Schemes(), ", "))
 }
 
-// tryRaw attempts to extract vless:// URIs from raw (unencoded) payload data.
+// tryRaw attempts to extract node URIs from raw (unencoded) payload data.
 // Returns the URIs and FormatRaw if at least one URI is found.
 func tryRaw(data []byte) ([]string, Format) {
-	uris := extractVLESSLines(normalizeLineEndings(data))
+	uris := extractNodeLines(normalizeLineEndings(data))
 	if len(uris) > 0 {
 		return uris, FormatRaw
 	}
 	return nil, FormatUnknown
 }
 
-// tryGzip attempts to decompress a gzip payload and extract vless:// URIs.
+// tryGzip attempts to decompress a gzip payload and extract node URIs.
 // Returns FormatGzip on success.
 func tryGzip(data []byte) ([]string, Format) {
 	if !isGzip(data) {
@@ -99,14 +114,14 @@ func tryGzip(data []byte) ([]string, Format) {
 	if err != nil {
 		return nil, FormatUnknown
 	}
-	uris := extractVLESSLines(normalizeLineEndings(decompressed))
+	uris := extractNodeLines(normalizeLineEndings(decompressed))
 	if len(uris) > 0 {
 		return uris, FormatGzip
 	}
 	return nil, FormatUnknown
 }
 
-// tryBase64 attempts to decode a standard base64 payload and extract vless:// URIs.
+// tryBase64 attempts to decode a standard base64 payload and extract node URIs.
 // Tries both padded and unpadded variants. If the decoded bytes are gzip-compressed,
 // decompression is attempted first, returning FormatGzipBase64 on success.
 func tryBase64(data []byte) ([]string, Format) {
@@ -116,19 +131,19 @@ func tryBase64(data []byte) ([]string, Format) {
 	}
 	if isGzip(decoded) {
 		if decompressed, err := decompressGzip(decoded); err == nil {
-			if uris := extractVLESSLines(normalizeLineEndings(decompressed)); len(uris) > 0 {
+			if uris := extractNodeLines(normalizeLineEndings(decompressed)); len(uris) > 0 {
 				return uris, FormatGzipBase64
 			}
 		}
 	}
-	uris := extractVLESSLines(normalizeLineEndings(decoded))
+	uris := extractNodeLines(normalizeLineEndings(decoded))
 	if len(uris) > 0 {
 		return uris, FormatBase64
 	}
 	return nil, FormatUnknown
 }
 
-// tryBase64URL attempts to decode a URL-safe base64 payload and extract vless:// URIs.
+// tryBase64URL attempts to decode a URL-safe base64 payload and extract node URIs.
 // Tries both padded and unpadded variants. If the decoded bytes are gzip-compressed,
 // decompression is attempted first, returning FormatGzipBase64URL on success.
 func tryBase64URL(data []byte) ([]string, Format) {
@@ -138,12 +153,12 @@ func tryBase64URL(data []byte) ([]string, Format) {
 	}
 	if isGzip(decoded) {
 		if decompressed, err := decompressGzip(decoded); err == nil {
-			if uris := extractVLESSLines(normalizeLineEndings(decompressed)); len(uris) > 0 {
+			if uris := extractNodeLines(normalizeLineEndings(decompressed)); len(uris) > 0 {
 				return uris, FormatGzipBase64URL
 			}
 		}
 	}
-	uris := extractVLESSLines(normalizeLineEndings(decoded))
+	uris := extractNodeLines(normalizeLineEndings(decoded))
 	if len(uris) > 0 {
 		return uris, FormatBase64URL
 	}
@@ -181,20 +196,63 @@ func normalizeLineEndings(data []byte) []byte {
 	return bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
 }
 
-// extractVLESSLines scans data line by line and returns all vless:// lines.
-func extractVLESSLines(data []byte) []string {
+// extractNodeLines scans data line by line and returns every line whose scheme
+// the nodes dispatcher can parse. A line of an unregistered scheme is skipped
+// silently, exactly like any other non-node line in a subscription payload.
+func extractNodeLines(data []byte) []string {
 	var uris []string
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if strings.HasPrefix(line, "vless://") {
+		if nodes.IsKnownScheme(line) {
 			uris = append(uris, line)
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		logx.Warn("vless line scan truncated (line too long): %v", err)
+		logx.Warn("node line scan truncated (line too long): %v", err)
 		return uris
 	}
 	return uris
+}
+
+// legacyScheme is the only scheme this tool accepted before multi-protocol
+// support. It is the baseline for warnTopologyShift and nothing else.
+const legacyScheme = "vless://"
+
+// warnTopologyShift warns when accepting schemes beyond vless:// turns a payload
+// that used to yield exactly one node into a multi-node one.
+//
+// The consequence is not cosmetic: a single-node subscription's final outbound
+// tag is "<id>-single", while a multi-node one gets "<id>-node-<hash>" outbounds
+// behind an "<id>-auto" urltest and an "<id>-manual" selector that becomes the
+// final tag. The subscription's saved selector choice and its
+// experimental.cache_file (clash.db) entry therefore stop resolving, and a node
+// has to be re-picked once in LuCI. This is a one-time event per subscription.
+//
+// The zero-to-many case is deliberately not warned about: a payload carrying no
+// vless:// line failed to decode at all before, so there is no saved state to
+// invalidate.
+func warnTopologyShift(uris []string) {
+	if len(uris) < 2 {
+		return
+	}
+	legacy := 0
+	var gained []string
+	for _, uri := range uris {
+		if strings.HasPrefix(uri, legacyScheme) {
+			legacy++
+			continue
+		}
+		if scheme, _, ok := strings.Cut(uri, "://"); ok && !slices.Contains(gained, scheme) {
+			gained = append(gained, scheme)
+		}
+	}
+	if legacy != 1 {
+		return
+	}
+	logx.Warn("subscription payload yields %d node(s): 1 vless:// node plus %d node(s) of newly supported scheme(s) (%s). "+
+		"This subscription was single-node before and is multi-node now, so its final outbound tag moves from <id>-single to <id>-manual; "+
+		"its saved selector choice and clash.db entry no longer resolve and a node has to be re-picked once in LuCI",
+		len(uris), len(uris)-1, strings.Join(gained, ", "))
 }

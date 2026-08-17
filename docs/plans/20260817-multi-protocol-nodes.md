@@ -541,22 +541,40 @@ Notes:
 - Modify: `horn-vpn-manager/internal/subscription/decode_test.go`
 - Modify: `horn-vpn-manager/internal/subscription/jsondecode.go`
 
-- [ ] rename `extractVLESSLines` to `extractNodeLines` and match via `nodes.IsKnownScheme`
-- [ ] update the "no supported encoding" error (`:79`) to list the supported schemes, and the
+- [x] rename `extractVLESSLines` to `extractNodeLines` and match via `nodes.IsKnownScheme`
+- [x] update the "no supported encoding" error (`:79`) to list the supported schemes, and the
       truncation warning (`:196`) plus the `FormatRaw` and `try*` doc comments (`:21,82,92,109,131`)
-- [ ] keep the base64 / base64url / gzip detection paths unchanged — they gate on extracted line
+- [x] keep the base64 / base64url / gzip detection paths unchanged — they gate on extracted line
       count, which now covers more schemes
-- [ ] **log a warning when a subscription's node count changes because newly-accepted schemes were
+- [x] **log a warning when a subscription's node count changes because newly-accepted schemes were
       picked up**: a payload that used to yield one node yields `<id>-single`, and two or more
       yields `<id>-node-<hash>` plus `<id>-auto`/`<id>-manual` with `FinalTag` moving to
       `<id>-manual` — which silently invalidates that subscription's saved selector choice and
       `clash.db` entry
-- [ ] correct `jsondecode.go` comments to state it converts V2Ray/Xray **VLESS** outbounds only, and
+- [x] correct `jsondecode.go` comments to state it converts V2Ray/Xray **VLESS** outbounds only, and
       why (decision 5 in Solution Overview)
-- [ ] write tests: raw payload with mixed schemes, base64 payload with hysteria2 lines, payload with
+- [x] write tests: raw payload with mixed schemes, base64 payload with hysteria2 lines, payload with
       an unregistered scheme (silently skipped, not an error), and the single→multi topology shift
       emitting the warning
-- [ ] run `go test ./...` — must pass before task 8
+- [x] run `go test ./...` — must pass before task 8
+
+Notes:
+- `DecodePayload` now wraps an unexported `decodePayload` holding the original probe chain, and calls
+  `warnTopologyShift` on the successful result. Keeping the probes separate matters: `extractNodeLines`
+  runs once per format probe, so warning from inside it would fire for probes that go on to fail.
+- The warning carries **no subscription id**: `DecodePayload` never had one, and threading it through
+  would touch `subscription.go` and every decode test. The existing `tryJSON` warnings in
+  `jsondecode.go` are id-less for the same reason, so this matches the surrounding code. The message
+  states the counts and the gained schemes instead.
+- Warning condition is exactly `len(uris) >= 2 && vlessCount == 1`. The 0→n case is deliberately
+  silent — such a payload failed to decode at all before, so there is no saved selector choice or
+  `clash.db` entry to invalidate. Pinned by three "silent when …" subtests.
+- An unregistered scheme (`trojan://`, `ss://`) is skipped silently, not an error; a payload made
+  entirely of unregistered schemes still fails, and that error lists `nodes.Schemes()`
+  (`TestDecodePayload_unregistered_scheme_only` asserts every scheme appears).
+- Mutation-checked: reverting `nodes.IsKnownScheme` to the `vless://` prefix check fails 5 tests;
+  dropping the `warnTopologyShift` call fails the warning subtest.
+- `go test ./...`, `gofmt -l` and `make lint` (0 issues) all clean.
 
 ### Task 8: Validate inline `nodes` through the dispatcher
 

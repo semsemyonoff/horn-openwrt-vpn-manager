@@ -115,6 +115,9 @@ func looksLikeJSON(data []byte) bool {
 // When the payload looks like JSON but cannot be decoded into VLESS URIs, a
 // diagnostic is emitted at warn level so operators can tell that JSON detection
 // fired but the shape was not understood.
+//
+// Unlike the line-based formats, this path is VLESS-only by design — see the
+// note on parseV2RayJSON.
 func tryJSON(data []byte) ([]string, Format) {
 	if !looksLikeJSON(data) {
 		return nil, FormatUnknown
@@ -133,6 +136,12 @@ func tryJSON(data []byte) ([]string, Format) {
 
 // parseV2RayJSON unmarshals data as either []v2rayEntry or v2rayEntry and returns
 // the extracted vless:// URIs.
+//
+// Only VLESS outbounds are converted, and deliberately so: this is a
+// V2Ray/Xray config format, no provider has been observed shipping hysteria2
+// through it, and a conversion nobody can verify against a real payload would be
+// guesswork. Multi-protocol support lives in the line-based formats, where the
+// URI is the provider's own.
 func parseV2RayJSON(data []byte) ([]string, error) {
 	trimmed := trimJSONPrefix(data)
 	if len(trimmed) == 0 {
