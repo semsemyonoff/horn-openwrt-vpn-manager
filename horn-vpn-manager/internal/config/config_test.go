@@ -877,6 +877,27 @@ func TestLoad_invalid_json(t *testing.T) {
 	}
 }
 
+// TestLoad_null_subscription pins the rejection at load time, not at
+// ValidateSubscriptions time: a nil *Subscription reaches IsEnabled from
+// "vpn-manager check"'s report loop and from the routing list prefetch, both of
+// which run before (or entirely without) ValidateSubscriptions, and panics.
+func TestLoad_null_subscription(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	writeFile(t, path, `{
+	  "routing": {"domains": {"url": "https://example.com/domains.lst"}},
+	  "subscriptions": {"broken": null}
+	}`)
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for null subscription entry")
+	}
+	if !strings.Contains(err.Error(), `subscription "broken" is null`) {
+		t.Errorf("error = %v, want it to name the null subscription", err)
+	}
+}
+
 // TestLoad_shipped_example mirrors what "vpn-manager check" does to the example
 // config shipped in the package, so a schema change or a stale example URI is
 // caught here rather than by an operator copying the file on a router.

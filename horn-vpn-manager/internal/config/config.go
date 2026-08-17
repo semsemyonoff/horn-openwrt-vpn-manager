@@ -140,6 +140,16 @@ func (c *Config) validate(hasExplicitManualFile bool) error {
 	if !hasRouting && !hasSubs {
 		return errors.New("config must have at least routing (domains.url, subnets.urls, or subnets.manual_file) or subscriptions configured")
 	}
+	// A JSON null entry decodes to a nil *Subscription. Every consumer of the
+	// map calls methods on the pointer (IsEnabled in check, in the pipeline and
+	// in the routing list prefetch), so it has to be rejected at load time —
+	// ValidateSubscriptions guards it too, but the routing commands never call
+	// that and a report loop can touch a subscription before it runs.
+	for _, id := range slices.Sorted(maps.Keys(c.Subscriptions)) {
+		if c.Subscriptions[id] == nil {
+			return fmt.Errorf("subscription %q is null; remove it or provide a valid config object", id)
+		}
+	}
 	if c.Singbox.ConnectTimeout != "" {
 		// time.ParseDuration accepts "0" and a leading "-", so the sign has to
 		// be checked separately: a non-positive value is written onto every node
