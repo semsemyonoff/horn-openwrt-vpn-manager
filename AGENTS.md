@@ -47,7 +47,10 @@ Internal package split:
 - `internal/config` — single config schema, loading, validation
 - `internal/fetch` — HTTP fetch, retries, gzip/base64 detection, bounded parallelism
 - `internal/subscription` — subscription orchestration and tag planning
-- `internal/vless` — VLESS parsing and stable node identity
+- `internal/proto` — the `Node` contract every protocol implements, plus the TLS structs shared between protocol packages
+- `internal/nodes` — scheme → parser dispatcher; the only non-test importer of the protocol packages
+- `internal/vless` — VLESS parsing, stable node identity and the VLESS outbound
+- `internal/hysteria2` — hysteria2 parsing, stable node identity and the hysteria2 outbound
 - `internal/routing` — domain/IP/subnet aggregation and route rule assembly
 - `internal/singbox` — typed `sing-box` config generation
 - `internal/system` — atomic writes, service reloads, firewall and dnsmasq integration
@@ -121,7 +124,7 @@ Per-subscription fields: `name`, `url`, `nodes`, `default`, `enabled` (optional,
 Node source (`url` XOR `nodes`):
 
 - `url` and `nodes` are mutually exclusive; an enabled subscription must have exactly one of them (an empty `url` string counts as absent)
-- `nodes` is a list of inline `vless://` URIs for a self-hosted node, validated with `vless.Parse` at config load, and fetched over no HTTP at all
+- `nodes` is a list of inline node URIs for a self-hosted node — any scheme the dispatcher knows (`hy2://`, `hysteria2://`, `vless://`) — validated with `nodes.Parse` at config load, and fetched over no HTTP at all
 - everything else (`include`/`exclude`, `route`, `default`, `fallback`) behaves identically for both sources
 
 Fallback chains (`fallback`):
@@ -141,8 +144,8 @@ Fallback chains (`fallback`):
 
 Node identity:
 
-- `vless.StableHash` is a **tag** function, not an identity function: it hashes 13 of the `Node`'s 26 fields and omits `ALPN`, `Mode` and `HeaderType`, each of which changes the rendered outbound. Equal hash therefore does not mean identical node.
-- Deduplication in `BuildOutbounds` is keyed on the marshalled outbound (`nodeToOutbound(n, "")`), not on the hash. The `seenTags` `-N` suffix stays, because two genuinely distinct nodes can still collide on a tag.
+- `StableHash` is a **tag** function, not an identity function: the VLESS implementation hashes 13 of the node's 26 fields and omits `ALPN`, `Mode` and `HeaderType`, each of which changes the rendered outbound. Equal hash therefore does not mean identical node.
+- Deduplication in `BuildOutbounds` is keyed on the marshalled tagless outbound (`n.Outbound("", connectTimeout)`), not on the hash. The `seenTags` `-N` suffix stays, because two genuinely distinct nodes can still collide on a tag; the counter advances for skipped duplicates too, so dropping a duplicate never renames a surviving node.
 - Do not widen what `StableHash` covers: it would rewrite every tag and invalidate `subs-tags.json`, saved selector choices and `experimental.cache_file` state.
 
 Conventions:
@@ -152,6 +155,58 @@ Conventions:
 - Per-subscription routing lives under a nested `route` object
 - When generating `sing-box` config, use the official `sing-box` documentation as the source of truth: `https://sing-box.sagernet.org/configuration/`
 - **Documented exception:** the `fallback` outbound type does not exist upstream — it is provided only by [`sing-box-extended`](https://github.com/shtorm-7/sing-box-extended), like `xhttp`. A config using `fallback` is rejected by a stock build with `unknown outbound type`, which `ApplySingbox` surfaces with a hint naming the extended-build requirement. `horn-vpn-manager/Makefile` deliberately declares **no** sing-box `DEPENDS`: the stock and extended packages conflict and the extended one is usually installed by hand, so a hard dependency would break installation; the requirement is enforced at runtime by `sing-box check` instead.
+
+## Node Protocol Layer
+
+Node protocols are pluggable. `internal/proto` owns the contract, each protocol package implements it for its own URI scheme, and `internal/nodes` maps a scheme to its parser. `BuildOutbounds`, `decode.go` and `config.go` speak only `proto.Node` and `nodes.Parse` — none of them names a protocol.
+
+The contract (`internal/proto`):
+
+```go
+type Node interface {
+    Type() string                            // sing-box outbound type
+    Server() string
+    Port() int
+    Name() string                            // display name from the URI fragment
+    StableHash() string                      // 8 hex chars; input format frozen per protocol
+    Outbound(tag, connectTimeout string) any // typed sing-box outbound struct
+}
+```
+
+- `proto` also owns `OutboundTLS`, `UTLSConfig` and `RealityTLS`. They live there, not in `internal/subscription`, because that is what keeps the import graph acyclic: protocol packages import `proto`, and `subscription` imports the protocol packages.
+- `Outbound` returns a protocol-specific typed struct as `any`, so each protocol keeps its own JSON tags and field order. An empty `tag` yields the tagless form `BuildOutbounds` uses as the dedup key; an empty `connectTimeout` omits the field.
+- Tags are carried by `OutboundPlan.NodeTags` (parallel to `NodeOutbounds`), never read back off an outbound — the plan stores `any`, which has no `Tag` field.
+
+Adding a protocol:
+
+1. new package under `internal/<protocol>` implementing `proto.Node`, owning its own outbound struct;
+2. one entry in the `parsers` map in `internal/nodes/nodes.go` (one per accepted scheme — `hysteria2` and `hy2` share a parser);
+3. its own `StableHash` prefix (`vless|…`, `hysteria2|…`), which makes cross-protocol tag collisions structurally impossible.
+
+Nothing else changes: `decode.go` filters lines via `nodes.IsKnownScheme`, `config.go` validates inline `nodes` via `nodes.Parse`, and error messages list `nodes.Schemes()`.
+
+Registration is an explicit map, not `init()` side-effects: `internal/nodes` holds the only non-test imports of the protocol packages, so an import-side-effect registry would be empty at runtime the moment a blank import went missing — the build would still succeed and every subscription would silently fail to parse. A map literal also gives deterministic scheme ordering for error messages for free.
+
+Invariants:
+
+- **The VLESS hash string is frozen.** `vless.StableHash` must keep its exact `vless|server|port|uuid|security|sni|pbk|sid|flow|fp|type|path|host|serviceName` layout. Adding a type field to the hash input, or reordering it, repoints every saved selector choice on every deployed router. `internal/vless` and `internal/hysteria2` each pin their hash with a `TestStableHash_Golden` whose md5 values were computed **outside Go** (`printf … | md5sum`), with the exact hash input recorded per case.
+- **`internal/subscription/testdata/golden_vless_config.json` is the regression gate for tag stability.** `TestRenderedConfig_MatchesGolden` renders fixed VLESS subscriptions through `singbox.RenderConfig` and compares bytes. There is deliberately no `-update` flag: a diff means node tags moved, invalidating `subs-tags.json`, saved selector choices and `experimental.cache_file` on every deployed router. Never regenerate it to make a diff go away.
+- **Groups are protocol-agnostic by construction.** `urltest`, `selector` and `fallback` reference members by tag only, so a subscription mixing protocols shares one `urltest`/`selector` pair and a `fallback` chain can cross protocols without any change to group generation.
+- **JSON subscription decoding stays VLESS-only.** `jsondecode.go` converts V2Ray/Xray outbounds, a format that carries VLESS; there is no evidence of providers shipping hysteria2 that way, and speculative conversion is unverifiable.
+- Node URIs carry credentials. `nodes.Parse` never quotes the offending URI in an error. (`internal/config` still echoes it in `subscription %q has an invalid node %q` — pre-existing and inconsistent, worth its own change.)
+
+hysteria2 specifics:
+
+- schemes `hysteria2://` and `hy2://` are both official; the **port is optional and defaults to 443**, and auth is the **whole userinfo component**, which may itself contain a colon (`url.User.String()`, percent-decoded — `Username()` alone truncates it)
+- `alpn`, `upmbps` and `downmbps` are client extensions, not URI-spec fields; leaving both bandwidth values unset selects BBR instead of Brutal
+- `tls` is required on the outbound and always emitted; `ignore_client_bandwidth` and `masquerade` are inbound-only and must not be
+- sing-box implements only `salamander` obfuscation, so any other `obfs` value (including the spec's `gecko`) is rejected at parse — as is `salamander` with an empty password, which would otherwise fail `sing-box check` on the whole generated config instead of skipping one node
+- port hopping (`mport` / `server_ports` / `hop_interval`), `pinSHA256` and `ech` are out of scope
+
+The endpoint boundary (AmneziaWG / WireGuard):
+
+- WireGuard-family protocols render into sing-box `endpoints`, not `outbounds`, and have no URI form, so they cannot satisfy `proto.Node` — whose whole purpose is producing an outbound from a URI. Do not stretch the contract to fit them.
+- They would need their own `config.json` key (not inline `nodes`) and their own section in `singbox.RenderConfig`, which already preserves unknown top-level keys including `endpoints` verbatim — so nothing in this layer blocks adding them. Whether an endpoint may appear in a `fallback` chain is an open question for that work.
 
 ## CLI Model
 
@@ -262,9 +317,11 @@ For LuCI JS, preserve the existing plain LuCI style unless the LuCI rewrite phas
 Expected test coverage areas:
 
 - config loading and validation
-- VLESS parsing
-- stable node hash generation
-- payload decoding: raw, base64, base64url, gzip
+- node URI parsing, per protocol package: minimal URI, fully-populated URI, and each rejection
+- scheme dispatch in `internal/nodes`, including the `hy2` alias and the unknown-scheme error text
+- stable node hash generation, pinned per protocol against md5 values computed outside Go
+- rendered sing-box output against `golden_vless_config.json` (tag-stability gate)
+- payload decoding: raw, base64, base64url, gzip, and mixed-protocol payloads
 - domain/IP/subnet validation and deduplication
 - route rule generation
 - `sing-box` config generation

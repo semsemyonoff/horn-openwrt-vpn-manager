@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -826,5 +827,40 @@ func TestLoad_invalid_json(t *testing.T) {
 	_, err := Load(path)
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+// TestLoad_shipped_example mirrors what "vpn-manager check" does to the example
+// config shipped in the package, so a schema change or a stale example URI is
+// caught here rather than by an operator copying the file on a router.
+func TestLoad_shipped_example(t *testing.T) {
+	path := filepath.Join("..", "..", "files", "config.example.json")
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("loading shipped example: %v", err)
+	}
+	if err := cfg.ValidateSubscriptions(); err != nil {
+		t.Fatalf("validating shipped example subscriptions: %v", err)
+	}
+
+	// The example is also the only place documenting an inline node of a
+	// protocol other than VLESS.
+	var inline []string
+	for _, sub := range cfg.Subscriptions {
+		inline = append(inline, sub.Nodes...)
+	}
+	schemes := make([]string, 0, len(inline))
+	for _, uri := range inline {
+		node, err := nodes.Parse(uri)
+		if err != nil {
+			t.Fatalf("parsing inline node from example: %v", err)
+		}
+		schemes = append(schemes, node.Type())
+	}
+	for _, want := range []string{"vless", "hysteria2"} {
+		if !slices.Contains(schemes, want) {
+			t.Errorf("example has no inline %s node; inline node types = %v", want, schemes)
+		}
 	}
 }

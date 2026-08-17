@@ -35,6 +35,15 @@
         "blacklist_timeout": "1m"
       }
     },
+    "api": {
+      "name": "Self-hosted hysteria2 (QUIC/UDP) — inline node, port optional and defaults to 443, auth is the whole userinfo",
+      "nodes": [
+        "hysteria2://AUTH_PASSWORD@203.0.113.20?sni=example.com&obfs=salamander&obfs-password=OBFS_PASSWORD#API+over+hysteria2"
+      ],
+      "route": {
+        "domains": ["api.example.com"]
+      }
+    },
     "provider": {
       "name": "Provider",
       "url": "https://example.com/sub",

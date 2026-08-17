@@ -663,18 +663,40 @@ Notes:
 - Modify: `AGENTS.md`
 - Modify: `horn-vpn-manager/files/config.example.json`
 
-- [ ] refresh the stale lines at `AGENTS.md:50,124,144,265` (package list, inline-`nodes`
+- [x] refresh the stale lines at `AGENTS.md:50,124,144,265` (package list, inline-`nodes`
       description, StableHash note, testing-coverage list) — they all name VLESS as the only protocol
-- [ ] document the `internal/proto` contract, the `internal/nodes` dispatcher, and how to add a
+- [x] document the `internal/proto` contract, the `internal/nodes` dispatcher, and how to add a
       protocol: new package, one map entry, own hash prefix
-- [ ] document the frozen-VLESS-hash invariant and the golden file that guards it
-- [ ] note that group outbounds are tag-based and therefore protocol-agnostic by construction
-- [ ] record the AmneziaWG/WireGuard boundary: it renders into sing-box `endpoints`, has no URI
+- [x] document the frozen-VLESS-hash invariant and the golden file that guards it
+- [x] note that group outbounds are tag-based and therefore protocol-agnostic by construction
+- [x] record the AmneziaWG/WireGuard boundary: it renders into sing-box `endpoints`, has no URI
       form, cannot satisfy `proto.Node`, and would need its own config key and its own section in
       `RenderConfig` — which already preserves `endpoints` verbatim, so nothing here blocks it
-- [ ] add a commented hysteria2 inline-node example to `config.example.json`
-- [ ] verify the example parses with `vpn-manager check`
-- [ ] run `go test ./...` and `make lint` — must pass before task 11
+- [x] add a commented hysteria2 inline-node example to `config.example.json`
+- [x] verify the example parses with `vpn-manager check`
+- [x] run `go test ./...` and `make lint` — must pass before task 11
+
+Notes:
+- The new AGENTS.md material is one section, **`## Node Protocol Layer`**, placed between Config Model
+  and CLI Model: the contract, the add-a-protocol recipe, why the dispatcher is a map rather than
+  `init()`, the invariants (frozen VLESS hash, the golden, tag-based groups, VLESS-only JSON decode,
+  URIs-carry-credentials), a hysteria2-specifics block, and the endpoint boundary. The four stale
+  lines were edited in place; the testing-coverage list gained the dispatcher and golden entries.
+- ⚠️ **`config.example.json` carries no literal comments** — the core loads it with `encoding/json`,
+  which rejects them, and `vpn-manager check` on the shipped file is a checkbox in this very task. The
+  annotation is the new subscription's `name` field ("Self-hosted hysteria2 (QUIC/UDP) — inline node,
+  port optional and defaults to 443, auth is the whole userinfo"), which is where a reader looks and
+  which survives a copy to a router.
+- The example node omits the port deliberately, exercising the spec default, and uses
+  `obfs=salamander` + `obfs-password`; the fragment uses `+` for spaces since a raw space is not a
+  legal URI character.
+- ➕ New `TestLoad_shipped_example` (`internal/config`) runs `Load` + `ValidateSubscriptions` on the
+  shipped example the way `vpn-manager check` does, and asserts the inline node list still covers both
+  `vless` and `hysteria2` — so the documentation example cannot rot silently. Mutation-checked:
+  deleting the `api` subscription fails it.
+- `vpn-manager check -c horn-vpn-manager/files/config.example.json` exits 0 (4 subscriptions, sing-box
+  absent on the host, which it reports as expected).
+- `go test ./...`, `gofmt -l` and `make lint` (0 issues) all clean.
 
 ### Task 11: Verify acceptance criteria
 
