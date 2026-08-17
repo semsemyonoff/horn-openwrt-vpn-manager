@@ -175,6 +175,7 @@ func TestParse_ErrorsDoNotLeakCredentials(t *testing.T) {
 		"hysteria2 control byte in host": "hysteria2://" + secret + "@exa\x7fmple.com:443",
 		"hysteria2 invalid port":         "hysteria2://" + secret + "@example.com:notaport",
 		"hy2 invalid port":               "hy2://" + secret + "@example.com:notaport",
+		"hysteria2 dangling obfs-pass":   "hysteria2://" + secret + "@example.com:443?obfs-password=x",
 		"unknown scheme":                 "trojan://" + secret + "@example.com:443",
 	}
 	for name, uri := range uris {

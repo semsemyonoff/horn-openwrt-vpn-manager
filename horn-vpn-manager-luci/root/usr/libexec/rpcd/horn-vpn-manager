@@ -23,6 +23,54 @@ fail_json() {
     printf '{"error":%s}' "$(printf '%s' "$1" | jq -Rs '.')"
 }
 
+# Atomically write stdin to $1, keeping the file readable by root only.
+#
+# config.json and the sing-box template both carry node credentials — provider
+# subscription URLs, inline node URIs (a hysteria2 URI *is* its password) and,
+# for a hand-written template, an outbound password. `mv` replaces the
+# destination together with its mode, so creating the temp file under rpcd's
+# inherited umask (0022 by default) would both publish the secrets as 0644 and
+# reset a previously restrictive mode on every save. The umask applies at
+# creation, so there is no window where the file exists world-readable.
+write_private() {
+    local dest="$1"
+    (umask 077; cat > "${dest}.tmp") && mv "${dest}.tmp" "$dest"
+}
+
+# The template and config.json are written by the same handler but are two
+# separate files, so a config write that fails after the template was already
+# replaced leaves the router running a template its config never agreed to.
+# snapshot_file copies $1 aside and prints the copy's path (empty when the file
+# did not exist yet); restore_file puts it back, or removes a file that was
+# newly created. Returns 1 only when the snapshot itself could not be taken —
+# an unwritable dir, which is exactly when the write would fail anyway.
+snapshot_file() {
+    local snap
+    [ -f "$1" ] || return 0
+    snap=$(umask 077; mktemp "${1}.bak.XXXXXX") || return 1
+    cp -p "$1" "$snap" || { rm -f "$snap"; return 1; }
+    printf '%s' "$snap"
+}
+
+# restore_file <snapshot path, possibly empty> <target>
+restore_file() {
+    if [ -n "$1" ]; then
+        mv -f "$1" "$2"
+    else
+        rm -f "$2"
+    fi
+}
+
+# discard_snapshot drops the copy once both writes have landed. The snapshot is
+# a byte-for-byte copy of a credential-carrying file and `cp -p` gives it the
+# source's mode, so a snapshot taken from a template an operator has not yet
+# re-hardened stays readable at 0644 next to the file that was just fixed.
+# Returns 0 unconditionally so it cannot flip a success path into an error.
+discard_snapshot() {
+    [ -n "$1" ] && rm -f "$1"
+    return 0
+}
+
 # Structural check of subscription sources: a subscription draws its nodes from
 # a remote url or an inline nodes list, never both, and an enabled one needs
 # exactly one. Kept to shapes and presence only — URI syntax and cross-subscription
@@ -223,7 +271,10 @@ case "$1" in
                     exit 0
                 fi
                 mkdir -p "$CONF_DIR"
-                printf '%s\n' "$merged" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+                if ! printf '%s\n' "$merged" | write_private "$CONFIG_FILE"; then
+                    printf '{"error":"Failed to write config file"}'
+                    exit 0
+                fi
                 touch "$UNSYNC_SUBS_FLAG"
                 printf '{"result":"ok"}'
                 ;;
@@ -329,18 +380,29 @@ case "$1" in
                     exit 0
                 fi
 
-                # Write template first (only after all validation passed)
+                # Write template first (only after all validation passed), but
+                # keep a snapshot: the config write below can still fail, and the
+                # config is what points at the template — a swapped template with
+                # the old config left in place silently changes what sing-box runs.
                 mkdir -p "$CONF_DIR"
+                tmpl_snap=""
                 if [ -n "$tmpl_contents" ]; then
-                    if ! { printf '%s' "$tmpl_contents" > "${CUSTOM_TEMPLATE}.tmp" && mv "${CUSTOM_TEMPLATE}.tmp" "$CUSTOM_TEMPLATE"; }; then
+                    if ! tmpl_snap=$(snapshot_file "$CUSTOM_TEMPLATE"); then
+                        printf '{"error":"Failed to write template file"}'
+                        exit 0
+                    fi
+                    if ! printf '%s' "$tmpl_contents" | write_private "$CUSTOM_TEMPLATE"; then
+                        restore_file "$tmpl_snap" "$CUSTOM_TEMPLATE"
                         printf '{"error":"Failed to write template file"}'
                         exit 0
                     fi
                 fi
-                if ! { printf '%s\n' "$merged" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"; }; then
+                if ! printf '%s\n' "$merged" | write_private "$CONFIG_FILE"; then
+                    [ -n "$tmpl_contents" ] && restore_file "$tmpl_snap" "$CUSTOM_TEMPLATE"
                     printf '{"error":"Failed to write config file"}'
                     exit 0
                 fi
+                discard_snapshot "$tmpl_snap"
                 touch "$UNSYNC_SUBS_FLAG"
                 touch "$UNSYNC_ROUTING_FLAG"
                 printf '{"result":"ok"}'
@@ -614,36 +676,57 @@ TAGEOF
                     exit 0
                 fi
                 mkdir -p "$CONF_DIR"
-                if ! { printf '%s' "$tmpl" > "${CUSTOM_TEMPLATE}.tmp" && mv "${CUSTOM_TEMPLATE}.tmp" "$CUSTOM_TEMPLATE"; }; then
-                    printf '{"error":"Failed to write template file"}'
-                    exit 0
-                fi
-                # Update config.json → singbox.template to point to custom template
+                # Build the config update before touching the template: jq prints
+                # nothing when config.json on disk is malformed, and writing that
+                # empty output through would blank the config.
                 if [ -f "$CONFIG_FILE" ]; then
                     existing_cfg=$(cat "$CONFIG_FILE")
                 else
                     existing_cfg='{"singbox":{},"fetch":{},"routing":{},"subscriptions":{}}'
                 fi
                 updated=$(printf '%s' "$existing_cfg" | jq --arg p "$CUSTOM_TEMPLATE" '.singbox.template = $p')
-                if ! { printf '%s\n' "$updated" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"; }; then
+                if [ -z "$updated" ]; then
+                    printf '{"error":"Failed to update config"}'
+                    exit 0
+                fi
+                # The template goes first but is rolled back if the config write
+                # fails: config.json is what points at the template, so a template
+                # replaced without it silently changes what sing-box runs.
+                if ! tmpl_snap=$(snapshot_file "$CUSTOM_TEMPLATE"); then
+                    printf '{"error":"Failed to write template file"}'
+                    exit 0
+                fi
+                if ! printf '%s' "$tmpl" | write_private "$CUSTOM_TEMPLATE"; then
+                    restore_file "$tmpl_snap" "$CUSTOM_TEMPLATE"
+                    printf '{"error":"Failed to write template file"}'
+                    exit 0
+                fi
+                if ! printf '%s\n' "$updated" | write_private "$CONFIG_FILE"; then
+                    restore_file "$tmpl_snap" "$CUSTOM_TEMPLATE"
                     printf '{"error":"Failed to write config file"}'
                     exit 0
                 fi
+                discard_snapshot "$tmpl_snap"
                 touch "$UNSYNC_SUBS_FLAG"
                 printf '{"result":"ok"}'
                 ;;
 
             reset_template)
-                # Remove custom template file and clear config.json → singbox.template field
-                rm -f "$CUSTOM_TEMPLATE"
+                # Clear config.json → singbox.template first, then drop the custom
+                # template file: the reverse order leaves the config pointing at a
+                # file that is already gone whenever the config write fails.
                 if [ -f "$CONFIG_FILE" ]; then
                     updated=$(jq '.singbox.template = ""' "$CONFIG_FILE")
                     if [ -z "$updated" ]; then
                         printf '{"error":"Failed to update config"}'
                         exit 0
                     fi
-                    printf '%s\n' "$updated" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+                    if ! printf '%s\n' "$updated" | write_private "$CONFIG_FILE"; then
+                        printf '{"error":"Failed to write config file"}'
+                        exit 0
+                    fi
                 fi
+                rm -f "$CUSTOM_TEMPLATE"
                 touch "$UNSYNC_SUBS_FLAG"
                 # Return the default template content for display
                 if [ -f "$DEFAULT_TEMPLATE_FILE" ]; then
@@ -680,8 +763,15 @@ TAGEOF
                     --argjson r "$new_routing" \
                     '$ex + {routing: (($ex.routing // {}) + $r + {subnets: (($ex.routing.subnets // {}) + ($r.subnets // {}))})}' \
                 )
+                if [ -z "$merged" ]; then
+                    printf '{"error":"Failed to merge config"}'
+                    exit 0
+                fi
                 mkdir -p "$CONF_DIR"
-                printf '%s\n' "$merged" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+                if ! printf '%s\n' "$merged" | write_private "$CONFIG_FILE"; then
+                    printf '{"error":"Failed to write config file"}'
+                    exit 0
+                fi
                 touch "$UNSYNC_ROUTING_FLAG"
                 printf '{"result":"ok"}'
                 ;;

@@ -199,6 +199,17 @@ expect_call() {
     else
         got=rejected
     fi
+    # config.json holds provider URLs and inline node URIs, so a save must not
+    # publish it to every local user. `ls`, not `stat`, whose flags differ
+    # between GNU and BSD.
+    if [ "$got" = written ]; then
+        checks=$((checks + 1))
+        mode=$(ls -l "${conf}/config.json" | cut -c1-10)
+        if [ "$mode" != "-rw-------" ]; then
+            echo "FAIL: $label: config.json mode is $mode, want -rw-------"
+            fails=$((fails + 1))
+        fi
+    fi
     if [ "$got" != "$want" ]; then
         echo "FAIL: $label: want $want, got $got (reply: $reply)"
         fails=$((fails + 1))
@@ -235,6 +246,270 @@ for method in set_config set_full_config; do
         "{\"config\":{\"subscriptions\":${BOTH_SOURCES}}}" 'exit 0' \
         'either a url or inline nodes'
 done
+
+echo "── credential file modes ──"
+
+# expect_mode <label> <path relative to CONF_DIR>
+expect_mode() {
+    label="$1"; rel="$2"
+    checks=$((checks + 1))
+    mode=$(ls -l "${conf}/${rel}" 2>/dev/null | cut -c1-10)
+    if [ "$mode" != "-rw-------" ]; then
+        echo "FAIL: $label: ${rel} mode is ${mode:-missing}, want -rw-------"
+        fails=$((fails + 1))
+    fi
+}
+
+# The template can hold a hand-written outbound with its password, and `mv`
+# replaces the destination together with its mode — so a save over a file that
+# was already 0600 must not hand it back as 0644 either.
+printf '#!/bin/sh\nexit 0\n' > "${DISPATCH_BIN}/vpn-manager"
+chmod +x "${DISPATCH_BIN}/vpn-manager"
+
+conf=$(mktemp -d)
+printf '{}\n' > "${conf}/config.json"
+chmod 644 "${conf}/config.json"
+printf '%s\n' "{\"config\":{\"subscriptions\":${VALID_SUB}},\"template_contents\":\"{\\\"log\\\":{}}\"}" | \
+    HORN_VPN_MANAGER_CONF_DIR="$conf" PATH="${DISPATCH_BIN}:${PATH}" \
+    "$DISPATCH_SH" "$RPCD" call set_full_config >/dev/null 2>&1
+expect_mode "set_full_config replaces a 0644 config privately" config.json
+expect_mode "set_full_config writes the template privately" sing-box.template.json
+rm -rf "$conf"
+
+conf=$(mktemp -d)
+printf '{"singbox":{}}\n' > "${conf}/config.json"
+printf '%s\n' '{"template":"{\"log\":{}}"}' | \
+    HORN_VPN_MANAGER_CONF_DIR="$conf" PATH="${DISPATCH_BIN}:${PATH}" \
+    "$DISPATCH_SH" "$RPCD" call set_template >/dev/null 2>&1
+expect_mode "set_template writes the template privately" sing-box.template.json
+expect_mode "set_template rewrites the config privately" config.json
+rm -rf "$conf"
+
+conf=$(mktemp -d)
+printf '{"singbox":{"template":"/etc/horn-vpn-manager/sing-box.template.json"}}\n' > "${conf}/config.json"
+chmod 644 "${conf}/config.json"
+HORN_VPN_MANAGER_CONF_DIR="$conf" PATH="${DISPATCH_BIN}:${PATH}" \
+    "$DISPATCH_SH" "$RPCD" call reset_template >/dev/null 2>&1
+expect_mode "reset_template rewrites the config privately" config.json
+rm -rf "$conf"
+
+conf=$(mktemp -d)
+printf '{"routing":{}}\n' > "${conf}/config.json"
+printf '%s\n' '{"config":{"dnsmasq_url":"https://a.invalid/d"}}' | \
+    HORN_VPN_MANAGER_CONF_DIR="$conf" PATH="${DISPATCH_BIN}:${PATH}" \
+    "$DISPATCH_SH" "$RPCD" call set_domains_config >/dev/null 2>&1
+expect_mode "set_domains_config writes the config privately" config.json
+rm -rf "$conf"
+
+echo "── failed writes are reported ──"
+
+# A write that fails — read-only filesystem, full disk, a leftover directory in
+# the temp path — must not leave the handler touching the update flags and
+# replying "ok": LuCI would show a saved config the router never received.
+#
+# The failure is injected by pre-creating the `.tmp` path write_private redirects
+# into as a *directory*, so `cat >` fails and `mv` never runs. Works as root too,
+# unlike revoking write permission on the directory.
+#
+# expect_write_failure <label> <method> <payload> <blocked file relative to CONF_DIR>
+expect_write_failure() {
+    label="$1"; method="$2"; payload="$3"; blocked="$4"
+    checks=$((checks + 1))
+
+    conf=$(mktemp -d)
+    printf '{"singbox":{},"routing":{}}\n' > "${conf}/config.json"
+    before=$(cat "${conf}/config.json")
+    mkdir -p "${conf}/${blocked}.tmp"
+
+    reply=$(printf '%s\n' "$payload" | \
+        HORN_VPN_MANAGER_CONF_DIR="$conf" PATH="${DISPATCH_BIN}:${PATH}" \
+        "$DISPATCH_SH" "$RPCD" call "$method" 2>/dev/null)
+
+    case "$reply" in
+        *'"error"'*) ;;
+        *)
+            echo "FAIL: $label: want an error reply, got [$reply]"
+            fails=$((fails + 1))
+            ;;
+    esac
+
+    checks=$((checks + 1))
+    if [ "$(cat "${conf}/${blocked}" 2>/dev/null)" != "$before" ]; then
+        echo "FAIL: $label: ${blocked} changed despite the failed write"
+        fails=$((fails + 1))
+    fi
+
+    checks=$((checks + 1))
+    if [ -f "${conf}/.needs-update-subs" ] || [ -f "${conf}/.needs-update-routing" ]; then
+        echo "FAIL: $label: an update flag was set despite the failed write"
+        fails=$((fails + 1))
+    fi
+
+    rm -rf "$conf"
+}
+
+printf '#!/bin/sh\nexit 0\n' > "${DISPATCH_BIN}/vpn-manager"
+chmod +x "${DISPATCH_BIN}/vpn-manager"
+
+expect_write_failure "set_config reports a failed config write" set_config \
+    "{\"config\":{\"subscriptions\":${VALID_SUB}}}" config.json
+expect_write_failure "set_full_config reports a failed config write" set_full_config \
+    "{\"config\":{\"subscriptions\":${VALID_SUB}}}" config.json
+expect_write_failure "set_template reports a failed config write" set_template \
+    '{"template":"{\"log\":{}}"}' config.json
+expect_write_failure "reset_template reports a failed config write" reset_template \
+    '' config.json
+expect_write_failure "set_domains_config reports a failed config write" set_domains_config \
+    '{"config":{"dnsmasq_url":"https://a.invalid/d"}}' config.json
+
+echo "── a failed config write leaves the template alone ──"
+
+# The template and config.json are two writes in one handler, and config.json is
+# what points sing-box at the template. A config write that fails after the
+# template was already replaced (or deleted) replies with an error while the
+# router is already running a template nothing agreed to.
+#
+# expect_template_after <label> <method> <payload> <existing template, empty = none> <want contents, @absent = no file>
+expect_template_after() {
+    label="$1"; method="$2"; payload="$3"; setup="$4"; want="$5"
+    checks=$((checks + 1))
+
+    conf=$(mktemp -d)
+    printf '{"singbox":{"template":"%s/sing-box.template.json"},"routing":{}}\n' "$conf" > "${conf}/config.json"
+    [ -n "$setup" ] && printf '%s' "$setup" > "${conf}/sing-box.template.json"
+    mkdir -p "${conf}/config.json.tmp"
+
+    reply=$(printf '%s\n' "$payload" | \
+        HORN_VPN_MANAGER_CONF_DIR="$conf" PATH="${DISPATCH_BIN}:${PATH}" \
+        "$DISPATCH_SH" "$RPCD" call "$method" 2>/dev/null)
+
+    case "$reply" in
+        *'"error"'*) ;;
+        *)
+            echo "FAIL: $label: want an error reply, got [$reply]"
+            fails=$((fails + 1))
+            ;;
+    esac
+
+    checks=$((checks + 1))
+    if [ "$want" = "@absent" ]; then
+        if [ -f "${conf}/sing-box.template.json" ]; then
+            echo "FAIL: $label: template was created despite the failed config write"
+            fails=$((fails + 1))
+        fi
+    else
+        got=$(cat "${conf}/sing-box.template.json" 2>/dev/null)
+        if [ "$got" != "$want" ]; then
+            echo "FAIL: $label: template is [${got:-missing}], want [$want]"
+            fails=$((fails + 1))
+        fi
+    fi
+
+    # The rollback moves the snapshot back over the target, so nothing may be
+    # left lying next to it — those copies carry the same credentials.
+    checks=$((checks + 1))
+    if ls "${conf}"/*.bak.* >/dev/null 2>&1; then
+        echo "FAIL: $label: a snapshot file was left behind"
+        fails=$((fails + 1))
+    fi
+
+    rm -rf "$conf"
+}
+
+expect_template_after "set_template rolls the template back" set_template \
+    '{"template":"{\"log\":{}}"}' '{"old":true}' '{"old":true}'
+expect_template_after "set_template removes a template it created" set_template \
+    '{"template":"{\"log\":{}}"}' '' '@absent'
+expect_template_after "set_full_config rolls the template back" set_full_config \
+    "{\"config\":{\"subscriptions\":${VALID_SUB}},\"template_contents\":\"{\\\"log\\\":{}}\"}" \
+    '{"old":true}' '{"old":true}'
+expect_template_after "set_full_config removes a template it created" set_full_config \
+    "{\"config\":{\"subscriptions\":${VALID_SUB}},\"template_contents\":\"{\\\"log\\\":{}}\"}" \
+    '' '@absent'
+expect_template_after "reset_template keeps the template" reset_template \
+    '' '{"old":true}' '{"old":true}'
+
+echo "── a successful save leaves no snapshot behind ──"
+
+# The rollback snapshot only exists for the window between the two writes. On the
+# success path it must go: it is a byte copy of the template, and `cp -p` gives it
+# the source's mode, so a snapshot of a legacy 0644 template outlives the very
+# save that hardened the original.
+#
+# expect_no_snapshot <label> <method> <payload>
+expect_no_snapshot() {
+    label="$1"; method="$2"; payload="$3"
+    checks=$((checks + 1))
+
+    conf=$(mktemp -d)
+    printf '{"singbox":{"template":"%s/sing-box.template.json"},"routing":{}}\n' "$conf" > "${conf}/config.json"
+    printf '%s' '{"old":true}' > "${conf}/sing-box.template.json"
+    chmod 644 "${conf}/sing-box.template.json"
+
+    reply=$(printf '%s\n' "$payload" | \
+        HORN_VPN_MANAGER_CONF_DIR="$conf" PATH="${DISPATCH_BIN}:${PATH}" \
+        "$DISPATCH_SH" "$RPCD" call "$method" 2>/dev/null)
+
+    case "$reply" in
+        *'"result":"ok"'*) ;;
+        *)
+            echo "FAIL: $label: want an ok reply, got [$reply]"
+            fails=$((fails + 1))
+            ;;
+    esac
+
+    checks=$((checks + 1))
+    if ls "${conf}"/*.bak.* >/dev/null 2>&1; then
+        echo "FAIL: $label: a snapshot file was left behind: $(ls "${conf}"/*.bak.*)"
+        fails=$((fails + 1))
+    fi
+
+    rm -rf "$conf"
+}
+
+expect_no_snapshot "set_template cleans up its snapshot" set_template \
+    '{"template":"{\"log\":{}}"}'
+expect_no_snapshot "set_full_config cleans up its snapshot" set_full_config \
+    "{\"config\":{\"subscriptions\":${VALID_SUB}},\"template_contents\":\"{\\\"log\\\":{}}\"}"
+
+echo "── malformed config.json on disk ──"
+
+# jq prints nothing when it cannot parse the file it was handed, and writing that
+# empty output through replaces config.json with a blank document while still
+# replying ok.
+conf=$(mktemp -d)
+printf 'not json\n' > "${conf}/config.json"
+reply=$(printf '%s\n' '{"template":"{\"log\":{}}"}' | \
+    HORN_VPN_MANAGER_CONF_DIR="$conf" PATH="${DISPATCH_BIN}:${PATH}" \
+    "$DISPATCH_SH" "$RPCD" call set_template 2>/dev/null)
+
+checks=$((checks + 1))
+case "$reply" in
+    *'"error"'*) ;;
+    *)
+        echo "FAIL: set_template over a malformed config.json: want an error reply, got [$reply]"
+        fails=$((fails + 1))
+        ;;
+esac
+
+checks=$((checks + 1))
+if [ "$(cat "${conf}/config.json")" != "not json" ]; then
+    echo "FAIL: set_template over a malformed config.json: the config was overwritten"
+    fails=$((fails + 1))
+fi
+
+checks=$((checks + 1))
+if [ -f "${conf}/sing-box.template.json" ]; then
+    echo "FAIL: set_template over a malformed config.json: the template was written anyway"
+    fails=$((fails + 1))
+fi
+
+checks=$((checks + 1))
+if [ -f "${conf}/.needs-update-subs" ]; then
+    echo "FAIL: set_template over a malformed config.json: an update flag was set"
+    fails=$((fails + 1))
+fi
+rm -rf "$conf"
 
 rm -rf "$DISPATCH_BIN"
 

@@ -164,6 +164,14 @@ func Parse(rawURI string) (*Node, error) {
 		if obfsPassword == "" {
 			return nil, errors.New("missing obfs-password in hysteria2 URI")
 		}
+	} else if obfsPassword != "" {
+		// The mirror case, and the dangerous direction: NewOutbound emits the
+		// obfs block only when obfsType is set, so a URI carrying just the
+		// password would render an unobfuscated outbound. Whoever wrote the
+		// password meant to obfuscate the connection — either the handshake
+		// fails against an obfuscated server or the traffic goes out as plain
+		// QUIC, which is exactly what obfuscation is deployed against.
+		return nil, errors.New("obfs-password without obfs in hysteria2 URI")
 	}
 
 	var alpn []string

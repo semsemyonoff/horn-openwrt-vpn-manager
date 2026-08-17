@@ -209,6 +209,14 @@ func TestParse_Rejections(t *testing.T) {
 			uri:     "hy2://secret@example.com?obfs=salamander",
 			wantErr: "missing obfs-password",
 		},
+		{
+			// The mirror case: the outbound emits the obfs block only when
+			// obfs is set, so accepting this would render an unobfuscated
+			// outbound for a URI whose author asked for obfuscation.
+			name:    "obfs-password without obfs",
+			uri:     "hy2://secret@example.com?obfs-password=x",
+			wantErr: "obfs-password without obfs",
+		},
 	}
 
 	for _, tc := range cases {
