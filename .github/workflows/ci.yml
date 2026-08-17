@@ -68,5 +68,8 @@ jobs:
       - name: Build .apk and .ipk for one platform
         run: make build build-ipk
 
+      - name: Packages must install as root
+        run: ./scripts/check-package-ownership.sh bin
+
       - name: List artifacts
         run: ls -lh bin/

@@ -40,6 +40,9 @@ jobs:
       - name: Build packages for all platforms
         run: make build-all build-ipk-all
 
+      - name: Packages must install as root
+        run: ./scripts/check-package-ownership.sh bin
+
       - name: Checksums
         working-directory: bin
         run: sha256sum -- *.apk *.ipk > SHA256SUMS

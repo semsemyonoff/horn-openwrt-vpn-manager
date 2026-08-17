@@ -28,7 +28,8 @@ Two OpenWrt packages plus local build tooling.
 
 - `Makefile` — main entry point: Go cross-compile + local packaging into `.apk` / `.ipk`, lint and test targets. Package builds need **no** OpenWrt SDK, but they do need a running Docker daemon: the packaging scripts run `apk mkpkg` and GNU `ar`/`tar` inside `alpine:latest`
 - `Dockerfile` + `docker/entrypoint.sh` — OpenWrt SNAPSHOT SDK image, used only by `make shell` for an interactive SDK session
-- `scripts/` — packaging helpers (`package-apk.sh`, `package-ipk.sh`, `package-luci-apk.sh`, `package-luci-ipk.sh`) and `check-release-version.sh`
+- `scripts/` — packaging helpers (`package-apk.sh`, `package-ipk.sh`, `package-luci-apk.sh`, `package-luci-ipk.sh`), `check-release-version.sh` and `check-package-ownership.sh`
+- **A package must install as `root:root`.** The payload is staged in a bind-mounted temp dir, so every packaging script re-stages it inside the container before archiving — otherwise the uid of whoever ran the build ends up in the package and OpenWrt installs `/usr/bin/vpn-manager` as `nobody:nogroup`. `check-package-ownership.sh` runs in CI and in the release build. The `sh -c` blocks in those scripts are single-quoted: an apostrophe in a comment ends the string and the rest of the block runs on the host
 - `.github/workflows/` — `ci.yml` (lint, tests, one-platform packaging) and `release.yml` (tag → all platforms → draft release)
 - `cliff.toml` — git-cliff config; groups conventional commit subjects into the release notes
 - `docs/release-notes/<tag>.md` — optional hand-written intro placed above the generated changelog

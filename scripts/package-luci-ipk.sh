@@ -69,8 +69,14 @@ docker run --rm \
   sh -c '
     set -eu
     apk add --no-cache binutils >/dev/null
-    (cd /pkg/data    && tar -czf /pkg/data.tar.gz .)
-    (cd /pkg/control && tar -czf /pkg/control.tar.gz .)
+    # See package-ipk.sh: re-stage under root ownership so the .ipk does not
+    # carry the uid of the building account onto the router.
+    # (No apostrophes here — this block is a single-quoted shell string.)
+    cp -a /pkg/data /tmp/data
+    cp -a /pkg/control /tmp/control
+    chown -R 0:0 /tmp/data /tmp/control
+    (cd /tmp/data    && tar -czf /pkg/data.tar.gz .)
+    (cd /tmp/control && tar -czf /pkg/control.tar.gz .)
     ar rc /pkg/'"$IPK_NAME"' debian-binary control.tar.gz data.tar.gz
   '
 

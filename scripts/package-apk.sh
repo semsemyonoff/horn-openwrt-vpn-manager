@@ -50,19 +50,33 @@ else
   APK_FILE="${PKG_NAME}-${PKG_VERSION}-r${PKG_RELEASE}.apk"
 fi
 
+# The staged tree is a bind mount and carries the uid of the building account,
+# which apk mkpkg records verbatim — the router then gets /usr/bin/vpn-manager
+# owned by a uid that means nothing there (it renders as nobody). Re-stage inside
+# the container, where root owns the copy; chowning the mount itself would leave
+# a root-owned temp dir that the cleanup trap on the host could not remove.
 docker run --rm \
   -v "$WORK:/pkg" \
+  -e "PKG_NAME=${PKG_NAME}" \
+  -e "PKG_FULLVERSION=${PKG_VERSION}-r${PKG_RELEASE}" \
+  -e "PKG_ARCH=${PKG_ARCH}" \
+  -e "APK_FILE=${APK_FILE}" \
   alpine:latest \
-  apk mkpkg \
-    --info "name:${PKG_NAME}" \
-    --info "version:${PKG_VERSION}-r${PKG_RELEASE}" \
-    --info "arch:${PKG_ARCH}" \
-    --info "description:VPN subscription manager for sing-box on OpenWrt" \
-    --info "license:GPL-2.0" \
-    --info "origin:${PKG_NAME}" \
-    --info "maintainer:horn" \
-    --files "/pkg/data" \
-    --output "/pkg/${APK_FILE}"
+  sh -c '
+    set -eu
+    cp -a /pkg/data /tmp/data
+    chown -R 0:0 /tmp/data
+    apk mkpkg \
+      --info "name:$PKG_NAME" \
+      --info "version:$PKG_FULLVERSION" \
+      --info "arch:$PKG_ARCH" \
+      --info "description:VPN subscription manager for sing-box on OpenWrt" \
+      --info "license:GPL-2.0" \
+      --info "origin:$PKG_NAME" \
+      --info "maintainer:horn" \
+      --files /tmp/data \
+      --output "/pkg/$APK_FILE"
+  '
 
 cp "$WORK/$APK_FILE" "$OUTPUT_DIR/"
 

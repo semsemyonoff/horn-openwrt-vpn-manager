@@ -48,20 +48,30 @@ chmod 755 "$POSTINST"
 # ── package via apk mkpkg ──────────────────────────────────
 APK_FILE="${PKG_NAME}-${PKG_VERSION}-r${PKG_RELEASE}.apk"
 
+# See package-apk.sh: the bind-mounted tree carries the building user's uid, so
+# the payload is re-staged inside the container where root owns it.
 docker run --rm \
   -v "$WORK:/pkg" \
+  -e "PKG_NAME=${PKG_NAME}" \
+  -e "PKG_FULLVERSION=${PKG_VERSION}-r${PKG_RELEASE}" \
+  -e "APK_FILE=${APK_FILE}" \
   alpine:latest \
-  apk mkpkg \
-    --info "name:${PKG_NAME}" \
-    --info "version:${PKG_VERSION}-r${PKG_RELEASE}" \
-    --info "arch:noarch" \
-    --info "description:LuCI interface for horn-vpn-manager" \
-    --info "license:GPL-2.0" \
-    --info "origin:${PKG_NAME}" \
-    --info "maintainer:horn" \
-    --files "/pkg/data" \
-    --script "post-install:/pkg/post-install.sh" \
-    --output "/pkg/${APK_FILE}"
+  sh -c '
+    set -eu
+    cp -a /pkg/data /tmp/data
+    chown -R 0:0 /tmp/data
+    apk mkpkg \
+      --info "name:$PKG_NAME" \
+      --info "version:$PKG_FULLVERSION" \
+      --info "arch:noarch" \
+      --info "description:LuCI interface for horn-vpn-manager" \
+      --info "license:GPL-2.0" \
+      --info "origin:$PKG_NAME" \
+      --info "maintainer:horn" \
+      --files /tmp/data \
+      --script "post-install:/pkg/post-install.sh" \
+      --output "/pkg/$APK_FILE"
+  '
 
 cp "$WORK/$APK_FILE" "$OUTPUT_DIR/"
 

@@ -81,8 +81,16 @@ docker run --rm \
   sh -c '
     set -eu
     apk add --no-cache binutils >/dev/null
-    (cd /pkg/data    && tar -czf /pkg/data.tar.gz .)
-    (cd /pkg/control && tar -czf /pkg/control.tar.gz .)
+    # Both trees come from a bind mount owned by the building account; tar would
+    # record that uid and opkg would unpack a nobody-owned /usr/bin/vpn-manager.
+    # Re-stage where root owns everything instead of chowning the mount, which
+    # the cleanup trap on the host could no longer remove.
+    # (No apostrophes here — this block is a single-quoted shell string.)
+    cp -a /pkg/data /tmp/data
+    cp -a /pkg/control /tmp/control
+    chown -R 0:0 /tmp/data /tmp/control
+    (cd /tmp/data    && tar -czf /pkg/data.tar.gz .)
+    (cd /tmp/control && tar -czf /pkg/control.tar.gz .)
     ar rc /pkg/'"$IPK_NAME"' debian-binary control.tar.gz data.tar.gz
   '
 
