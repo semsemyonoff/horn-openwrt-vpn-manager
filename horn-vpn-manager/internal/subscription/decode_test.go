@@ -367,6 +367,41 @@ func TestDecodePayload_gzip_mixed_schemes(t *testing.T) {
 	}
 }
 
+// A gzip payload must be decompressed, never scanned as raw text. The raw probe
+// looks for lines a node parser accepts, and compressed bytes routinely contain
+// a readable node URI — which is exactly what deflate leaves behind for a short
+// payload, and what made the plain gzip tests above fail whenever the toolchain
+// changed how it packs literals. Stored (level 0) blocks put the whole plaintext
+// in the payload verbatim, so this pins the ordering without depending on how
+// any particular flate implementation compresses.
+func TestDecodePayload_gzip_is_not_scanned_as_raw(t *testing.T) {
+	raw := "vless://uuid1@host1.example.com:443?encryption=none#Node+1\n" +
+		"vless://uuid2@host2.example.com:443?encryption=none#Node+2\n"
+
+	var buf bytes.Buffer
+	w, err := gzip.NewWriterLevel(&buf, gzip.NoCompression)
+	if err != nil {
+		t.Fatalf("gzip writer: %v", err)
+	}
+	if _, err = w.Write([]byte(raw)); err != nil {
+		t.Fatalf("gzip write: %v", err)
+	}
+	if err = w.Close(); err != nil {
+		t.Fatalf("gzip close: %v", err)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("vless://uuid2@")) {
+		t.Fatal("test is vacuous: the stored payload does not carry a readable URI")
+	}
+
+	uris, err := DecodePayload(buf.Bytes())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(uris) != 2 {
+		t.Fatalf("got %d URIs, want 2: %v", len(uris), uris)
+	}
+}
+
 // A scheme with no parser registered is not an error: subscription payloads
 // routinely carry lines for protocols this tool does not implement, and failing
 // the whole subscription over one of them would be worse than skipping it.

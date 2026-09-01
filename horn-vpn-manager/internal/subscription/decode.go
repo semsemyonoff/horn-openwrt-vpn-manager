@@ -53,7 +53,7 @@ func (f Format) String() string {
 
 // DecodePayload detects and decodes a subscription payload, returning node URIs
 // of every scheme the nodes dispatcher supports.
-// Detection order: raw → gzip → base64 (with gzip probe) → base64url (with gzip probe).
+// Detection order: gzip → raw → json → base64 (with gzip probe) → base64url (with gzip probe).
 // Returns an error if the payload cannot be decoded into any known format.
 func DecodePayload(data []byte) ([]string, error) {
 	return decodePayload(data)
@@ -65,11 +65,18 @@ func decodePayload(data []byte) ([]string, error) {
 		return nil, errors.New("empty subscription payload")
 	}
 
-	if uris, format := tryRaw(data); format == FormatRaw {
+	// Gzip is probed before raw, and the order is not interchangeable. The raw
+	// probe is a heuristic — it scans for lines a node parser accepts — and
+	// deflate leaves plenty of the plaintext literal in a short payload, so a
+	// compressed subscription regularly carries a readable node URI in its
+	// compressed bytes. Probing raw first matched on that one line and returned
+	// a subscription silently short of every node whose line happened to be
+	// compressed away. The gzip magic number is not a heuristic.
+	if uris, format := tryGzip(data); format == FormatGzip {
 		return uris, nil
 	}
 
-	if uris, format := tryGzip(data); format == FormatGzip {
+	if uris, format := tryRaw(data); format == FormatRaw {
 		return uris, nil
 	}
 
