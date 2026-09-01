@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/base64"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -399,6 +400,28 @@ func TestDecodePayload_gzip_is_not_scanned_as_raw(t *testing.T) {
 	}
 	if len(uris) != 2 {
 		t.Fatalf("got %d URIs, want 2: %v", len(uris), uris)
+	}
+}
+
+// A gzip payload that cannot be inflated must fail, not fall through to the raw
+// probe. A truncated HTTP body is the realistic way this happens, and the raw
+// probe would then match the plaintext literals deflate left in the compressed
+// bytes and hand back a fraction of the subscription — which the run would go on
+// to apply, dropping every node whose line really was compressed.
+func TestDecodePayload_truncated_gzip_is_an_error(t *testing.T) {
+	var raw strings.Builder
+	for i := range 20 {
+		fmt.Fprintf(&raw, "vless://uuid%d@host%d.example.com:443?encryption=none#Node+%d\n", i, i, i)
+	}
+	compressed := gzipBytes(t, []byte(raw.String()))
+
+	truncated := compressed[:len(compressed)-40]
+	uris, err := DecodePayload(truncated)
+	if err == nil {
+		t.Fatalf("expected an error for a truncated gzip payload, got %d URIs: %v", len(uris), uris)
+	}
+	if len(uris) != 0 {
+		t.Errorf("a failed decode must return no URIs, got %d", len(uris))
 	}
 }
 

@@ -65,14 +65,26 @@ func decodePayload(data []byte) ([]string, error) {
 		return nil, errors.New("empty subscription payload")
 	}
 
-	// Gzip is probed before raw, and the order is not interchangeable. The raw
-	// probe is a heuristic — it scans for lines a node parser accepts — and
-	// deflate leaves plenty of the plaintext literal in a short payload, so a
-	// compressed subscription regularly carries a readable node URI in its
-	// compressed bytes. Probing raw first matched on that one line and returned
-	// a subscription silently short of every node whose line happened to be
-	// compressed away. The gzip magic number is not a heuristic.
-	if uris, format := tryGzip(data); format == FormatGzip {
+	// A payload carrying the gzip magic number is gzip, and no other probe gets
+	// to interpret it — not on a failed inflation, not on a payload that holds
+	// no node lines. The raw probe below is a heuristic: it scans for lines a
+	// node parser accepts, and deflate leaves enough of the plaintext literal in
+	// a short payload that compressed bytes routinely contain a readable node
+	// URI. Anything that falls through to it returns a subscription silently
+	// short of every node whose line really was compressed — from a truncated
+	// HTTP body, the most likely way inflation fails, that is most of them.
+	// Failing is the safe outcome here: a partial subscription gets applied to
+	// the router, an error does not.
+	if isGzip(data) {
+		decompressed, err := decompressGzip(data)
+		if err != nil {
+			return nil, fmt.Errorf("decompressing gzip subscription payload: %w", err)
+		}
+		uris := extractNodeLines(normalizeLineEndings(decompressed))
+		if len(uris) == 0 {
+			return nil, fmt.Errorf("gzip subscription payload has no node lines (supported schemes: %s)",
+				strings.Join(nodes.Schemes(), ", "))
+		}
 		return uris, nil
 	}
 
@@ -102,23 +114,6 @@ func tryRaw(data []byte) ([]string, Format) {
 	uris := extractNodeLines(normalizeLineEndings(data))
 	if len(uris) > 0 {
 		return uris, FormatRaw
-	}
-	return nil, FormatUnknown
-}
-
-// tryGzip attempts to decompress a gzip payload and extract node URIs.
-// Returns FormatGzip on success.
-func tryGzip(data []byte) ([]string, Format) {
-	if !isGzip(data) {
-		return nil, FormatUnknown
-	}
-	decompressed, err := decompressGzip(data)
-	if err != nil {
-		return nil, FormatUnknown
-	}
-	uris := extractNodeLines(normalizeLineEndings(decompressed))
-	if len(uris) > 0 {
-		return uris, FormatGzip
 	}
 	return nil, FormatUnknown
 }
