@@ -371,14 +371,30 @@ func (r *Runner) Run(ctx context.Context) error { //nolint:gocognit,gocyclo // o
 		// urlCache is read-only from here: goroutines may reuse the default
 		// subscription's decoded URIs when the URL matches.
 		results := make([]subResult, len(jobs))
-		var wg sync.WaitGroup
-		for i, job := range jobs {
-			wg.Add(1)
-			go func(i int, id string, sub *config.Subscription) {
-				defer wg.Done()
-				results[i] = r.processSub(ctx, id, sub, testURL, urlCache)
-			}(i, job.id, job.sub)
+
+		// Bounded by the same knob as the fetcher: each worker runs a
+		// processSub that itself downloads with Parallelism, so peak HTTP
+		// concurrency is Parallelism² (4 at the default of 2) instead of
+		// one decode goroutine per subscription on a memory-tight router.
+		parallelism := r.Cfg.Fetch.Parallelism
+		if parallelism <= 0 {
+			parallelism = 1
 		}
+		work := make(chan int, len(jobs))
+		for i := range jobs {
+			work <- i
+		}
+		close(work)
+
+		var wg sync.WaitGroup
+		for range parallelism {
+			wg.Go(func() {
+				for i := range work {
+					results[i] = r.processSub(ctx, jobs[i].id, jobs[i].sub, testURL, urlCache)
+				}
+			})
+		}
+
 		wg.Wait()
 
 		// Merge results in the original sorted order.

@@ -3,6 +3,7 @@ package subscription
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/semsemyonoff/horn-openwrt-vpn-manager/internal/config"
 )
@@ -532,6 +534,88 @@ func TestIntegration_Run_mixed_protocol_subscription(t *testing.T) {
 	}
 	if final := routeFinal(t, generated); final != "main-manual" {
 		t.Errorf("route.final = %q, want main-manual", final)
+	}
+}
+
+// TestIntegration_Run_bounded_subscription_parallelism pins that phase 2 never
+// runs more subscriptions at once than fetch.parallelism. Each processSub does
+// its own bounded fetching, so an unbounded fan-out multiplies out to one
+// decode goroutine and up to parallelism requests per subscription — on a
+// router that is the memory spike, not the download, that hurts.
+//
+// The handler holds each request briefly so overlap is observable: with the
+// bound the peak can never exceed parallelism, without it every subscription
+// is in flight at once.
+func TestIntegration_Run_bounded_subscription_parallelism(t *testing.T) {
+	const parallelism = 2
+
+	var mu sync.Mutex
+	var inFlight, peak int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		inFlight++
+		if inFlight > peak {
+			peak = inFlight
+		}
+		mu.Unlock()
+
+		time.Sleep(50 * time.Millisecond)
+
+		mu.Lock()
+		inFlight--
+		mu.Unlock()
+
+		id := strings.TrimPrefix(r.URL.Path, "/")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintf(w, "vless://uuid-%s@%s.example.com:443?encryption=none#Node+%s\n", id, id, id)
+	}))
+	defer srv.Close()
+
+	// Inline default: phase 1 must not contribute a request, so every observed
+	// request comes from the phase 2 pool.
+	cfg := &config.Config{
+		Fetch: config.Fetch{Retries: 1, TimeoutSeconds: 5, Parallelism: parallelism},
+		Subscriptions: map[string]*config.Subscription{
+			"default": {
+				Name:    "Default",
+				Default: true,
+				Nodes:   []string{"vless://uuid-self@vps.example.com:443?encryption=none#Self+Hosted"},
+			},
+		},
+	}
+	for i := range 6 {
+		id := fmt.Sprintf("sub%d", i)
+		cfg.Subscriptions[id] = &config.Subscription{Name: id, URL: srv.URL + "/" + id}
+	}
+
+	runner := NewRunner(cfg, &fakeApplier{})
+	runner.OutDir = t.TempDir()
+	runner.DryRun = true
+
+	if err := runner.Run(context.Background()); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	mu.Lock()
+	got := peak
+	mu.Unlock()
+	if got > parallelism {
+		t.Errorf("peak concurrent subscription requests = %d, want at most %d", got, parallelism)
+	}
+	// The other direction: a pool that never actually runs two subscriptions at
+	// once would satisfy the bound above without measuring anything. Each
+	// request is held for 50 ms, so two workers cannot avoid overlapping.
+	if got != parallelism {
+		t.Errorf("peak concurrent subscription requests = %d, want exactly %d", got, parallelism)
+	}
+
+	// All six are still processed.
+	tags := collectOutboundTags(readConfig(t, filepath.Join(runner.OutDir, "config.json")))
+	for i := range 6 {
+		tag := fmt.Sprintf("sub%d-single", i)
+		if !tags[tag] {
+			t.Errorf("expected outbound %q, got tags: %v", tag, tags)
+		}
 	}
 }
 
