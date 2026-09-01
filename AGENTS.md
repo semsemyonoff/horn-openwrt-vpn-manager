@@ -90,6 +90,13 @@ Per-subscription fields: `name`, `url`, `nodes`, `default`, `enabled` (optional,
 `include`, `exclude`, `interval`, `tolerance`, `retries` (optional, overrides global),
 `fallback` (optional chain), `route` (optional nested routing).
 
+**A pool is measured per node address, so `include`/`exclude` should not leave many nodes sharing
+one.** A provider routinely puts several nodes on a single address, and everything that probes a
+pool — the LuCI delay test, sing-box's own `urltest` on every `interval` — pays for that
+concentration: the LuCI backend has to serialise probes to the same address in waves, and
+`urltest` has no such bound at all. Roughly two nodes per address keeps a pool measurable; a
+subscription spread over distinct addresses is probed in one pass however many nodes it has.
+
 ### Node source (`url` XOR `nodes`)
 
 `url` and `nodes` are mutually exclusive; an enabled subscription must have exactly one of them (an
