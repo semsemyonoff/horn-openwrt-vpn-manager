@@ -326,7 +326,14 @@ function makeProxyWidget(
             var delayEl =
                 delay !== null
                     ? makeLatencySpan(delay)
-                    : E("span", { class: "vpnsub-no-latency" }, "\u2715");
+                    : E(
+                          "span",
+                          {
+                              class: "vpnsub-no-latency",
+                              title: _("Not measured"),
+                          },
+                          "\u2715",
+                      );
             var row = E(
                 "div",
                 {
@@ -363,6 +370,10 @@ function makeProxyWidget(
             class: "cbi-button vpnsub-test-latency-btn",
             click: function () {
                 testBtn.disabled = true;
+                // The backend spaces probes out over nodes that share an
+                // address, so a concentrated pool takes seconds rather than
+                // returning at once. Say so instead of looking hung.
+                testBtn.textContent = _("Testing…");
                 var testUrl =
                     (document.getElementById("vpnsub-test-url-setting") || {})
                         .value || "";
@@ -375,11 +386,18 @@ function makeProxyWidget(
                                 var d = res.delays[tag];
                                 if (!proxies[tag])
                                     proxies[tag] = { history: [] };
-                                if (!proxies[tag].history)
-                                    proxies[tag].history = [];
-                                proxies[tag].history = [
-                                    { delay: d && d > 0 ? d : 0 },
-                                ];
+                                // The backend reports a probe that did not
+                                // answer as null, not 0: sing-box replies the
+                                // same way for a dead node and for a path that
+                                // was busy, so the only honest reading is "not
+                                // measured". The row falls back to the ✕ rather
+                                // than keeping the previous number, which would
+                                // present a stale reading as the result of the
+                                // run the user just asked for.
+                                proxies[tag].history =
+                                    typeof d === "number" && d > 0
+                                        ? [{ delay: d }]
+                                        : [];
                             });
                             sortedNodes = nodeTags
                                 .slice()
@@ -394,9 +412,11 @@ function makeProxyWidget(
                             renderNodeList();
                         }
                         testBtn.disabled = false;
+                        testBtn.textContent = _("Test latencies");
                     },
                     function () {
                         testBtn.disabled = false;
+                        testBtn.textContent = _("Test latencies");
                     },
                 );
             },

@@ -5,6 +5,9 @@
 # temporary tree. rpcd never sets it, so on a device this is the fixed path.
 CONF_DIR="${HORN_VPN_MANAGER_CONF_DIR:-/etc/horn-vpn-manager}"
 CONFIG_FILE="${CONF_DIR}/config.json"
+# Overridable for the same reason, and only for that reason: the delay scheduler
+# reads the node addresses out of the generated sing-box config.
+SB_CONFIG="${HORN_SINGBOX_CONFIG:-/etc/sing-box/config.json}"
 CUSTOM_TEMPLATE="${CONF_DIR}/sing-box.template.json"
 DEFAULT_TEMPLATE_FILE="/usr/share/horn-vpn-manager/sing-box.template.json"
 TAGS_FILE="${CONF_DIR}/subs-tags.json"
@@ -159,6 +162,79 @@ check_with_core() {
     [ -n "$msg" ] || msg="config rejected by vpn-manager check"
     printf '%s' "$msg"
     return 1
+}
+
+# ── Delay probes ──────────────────────────────────────────────────────────────
+#
+# The bound that matters is per node address, not global. A provider does not
+# hand out one address per node: on the deployment that produced GitHub issue #5
+# a single subscription had 50 nodes behind 6 addresses, and the DPI on that path
+# freezes an address for about two minutes after roughly three concurrent TLS
+# handshakes to the same IP+SNI. Probing every tag at once therefore measured the
+# outage it had just created and reported the whole subscription as dead while it
+# was carrying traffic at line rate.
+#
+# So probes are scheduled in waves: at most DELAY_PER_SERVER tags sharing an
+# address run at a time, nodes on different addresses still run in parallel, and
+# DELAY_MAX_PARALLEL caps the fan-out so a wide pool cannot swamp a router-class
+# CPU. A pool spread over many addresses costs no extra wall clock; only a pool
+# concentrated on few addresses is slowed down, which is the pool that cannot be
+# measured any faster.
+#
+# The ceiling on the whole call is rpcd's own: `option timeout` in /etc/config/rpcd
+# defaults to 30 seconds, so the fan-out cap is set by what a pool of unreachable
+# nodes costs — DELAY_MAX_PARALLEL probes of DELAY_CURL_TIMEOUT each, per wave.
+# A pool on distinct addresses is one wave and stays well inside that; a pool
+# concentrated on a few addresses can exceed it, and no bound this side of the
+# RPC can fix that.
+#
+# DELAY_MAX_PARALLEL was measured, not guessed: on a live 38-node pool spread
+# over 38 addresses, 12 / 4 / 2 returned 32 / 28 / 32 measured nodes in 10 / 25 / 29
+# seconds. Lowering it buys no accuracy — the nodes that drop out fail a solo
+# probe too — and costs three times the wall clock against a 30 second ceiling.
+# DELAY_PROBE_TIMEOUT is a usefulness threshold as much as a speed knob: a node
+# that needs more than three seconds to answer is not one this router should
+# route through.
+DELAY_PER_SERVER=2
+DELAY_MAX_PARALLEL=12
+DELAY_WAVE_PAUSE=1
+DELAY_CURL_TIMEOUT=5
+DELAY_PROBE_TIMEOUT=3000
+
+# probe_delay <tag> <url-encoded test url> <result dir>
+#
+# Writes "<tag>\t<delay|->" to a per-tag file. A probe that did not come back
+# with a positive number writes "-", never 0: sing-box answers a delay request
+# the same way for a genuinely dead node and for a path that was busy, so the
+# reply has to carry "unmeasured" as its own value instead of a reading of zero
+# milliseconds that no measurement produced. "-" becomes JSON null.
+#
+# The scheduler below already drops tags outside the allowed charset; the check
+# is repeated here because this function is what interpolates the tag into both
+# a URL path and a file name.
+probe_delay() {
+    local tag="$1"
+    local enc_url="$2"
+    local dir="$3"
+    local resp
+    local delay
+
+    case "$tag" in
+        ''|*[!A-Za-z0-9._-]*) return 0 ;;
+    esac
+
+    resp=$(curl -s --max-time "$DELAY_CURL_TIMEOUT" \
+        "http://127.0.0.1:9090/proxies/${tag}/delay?url=${enc_url}&timeout=${DELAY_PROBE_TIMEOUT}" \
+        2>/dev/null)
+    delay=$(printf '%s\n' "$resp" | \
+        jq -r 'if (.delay | type) == "number" and .delay > 0 then (.delay | floor) else "-" end' \
+        2>/dev/null)
+    case "$delay" in
+        ''|*[!0-9]*) delay='-' ;;
+    esac
+    # Prefixed so a tag beginning with a dot still produces a file the collection
+    # glob can see.
+    printf '%s\t%s\n' "$tag" "$delay" > "${dir}/r.${tag}"
 }
 
 case "$1" in
@@ -537,7 +613,7 @@ case "$1" in
 
                 # 2. Determine outbound from sing-box config routing rules
                 outbound=""
-                sb_config="/etc/sing-box/config.json"
+                sb_config="$SB_CONFIG"
                 if [ -f "$sb_config" ]; then
                     outbound=$(jq -r --arg d "$domain" '
                         [
@@ -616,35 +692,85 @@ case "$1" in
                     -e 's/%/%25/g' -e 's/ /%20/g' -e 's/:/%3A/g' \
                     -e 's|/|%2F|g' -e 's/?/%3F/g' -e 's/&/%26/g' \
                     -e 's/=/%3D/g' -e 's/+/%2B/g' -e 's/#/%23/g')
-                tmpd=$(mktemp -d /tmp/horn-vpn-dly-XXXXXX)
-                # Run delay tests in parallel
-                while IFS= read -r tag; do
-                    [ -z "$tag" ] && continue
-                    # Validate: tags use only alphanumeric, hyphens, underscores, and dots
-                    case "$tag" in
-                        *[!A-Za-z0-9._-]*) continue ;;
-                    esac
-                    (
-                        resp=$(curl -s --max-time 8 \
-                            "http://127.0.0.1:9090/proxies/${tag}/delay?url=${enc_url}&timeout=5000" \
-                            2>/dev/null)
-                        delay=$(printf '%s\n' "$resp" | jq -r '.delay // 0' 2>/dev/null || echo 0)
-                        printf '%s\t%s\n' "$tag" "${delay:-0}" > "${tmpd}/${tag}"
-                    ) &
-                done <<TAGEOF
-$(printf '%s\n' "$input" | jq -r '.tags[]? // empty')
-TAGEOF
+                tmpd=$(mktemp -d /tmp/horn-vpn-dly-XXXXXX) || \
+                    { fail_json "Cannot create a temporary directory"; exit 0; }
+
+                printf '%s\n' "$input" | \
+                    jq -r '.tags[]? | select(type == "string")' > "${tmpd}/tags" 2>/dev/null
+
+                # tag → address, straight out of what sing-box is running. Group
+                # outbounds (urltest, selector, fallback) carry no server and drop
+                # out here on their own.
+                : > "${tmpd}/servers"
+                if [ -f "$SB_CONFIG" ]; then
+                    jq -r '.outbounds[]? |
+                        select((.tag | type) == "string" and (.server | type) == "string") |
+                        "\(.tag)\t\(.server)"' "$SB_CONFIG" 2>/dev/null > "${tmpd}/servers"
+                fi
+
+                # Assign each tag a wave number: the n-th tag of an address goes
+                # into wave n/DELAY_PER_SERVER, so a wave never holds more than
+                # that many probes to one address. This is also the only place
+                # tags are validated, so a rejected tag cannot consume a slot.
+                # A tag the sing-box config does not name lands in one shared
+                # bucket rather than a bucket of its own: an unknown address is
+                # not an argument for probing it in parallel with the others.
+                # The map file is selected by name, not by the usual NR == FNR:
+                # that idiom silently treats the *second* file as the map when
+                # the first one is empty, and an absent or group-only sing-box
+                # config produces exactly that — no tag would ever be probed.
+                awk -F '\t' -v per="$DELAY_PER_SERVER" -v srvfile="${tmpd}/servers" '
+                    FILENAME == srvfile { srv[$1] = $2; next }
+                    {
+                        tag = $1
+                        if (tag == "" || tag == "." || tag == "..") next
+                        if (tag ~ /[^A-Za-z0-9._-]/) next
+                        if (tag in seen) next
+                        seen[tag] = 1
+                        s = (tag in srv) ? srv[tag] : ""
+                        n[s]++
+                        printf "%d\t%s\n", int((n[s] - 1) / per), tag
+                    }
+                ' "${tmpd}/servers" "${tmpd}/tags" | sort -n > "${tmpd}/waves"
+
+                # Waves run one after another, the tags inside a wave in
+                # parallel. `wait` is the barrier: without it a slow address
+                # would overlap into the next wave, which is exactly the
+                # concurrency this is here to prevent.
+                wave=''
+                running=0
+                tab=$(printf '\t')
+                while IFS="$tab" read -r w tag; do
+                    if [ "$w" != "$wave" ]; then
+                        if [ -n "$wave" ]; then
+                            wait
+                            sleep "$DELAY_WAVE_PAUSE"
+                        fi
+                        wave="$w"
+                        running=0
+                    fi
+                    probe_delay "$tag" "$enc_url" "$tmpd" &
+                    running=$((running + 1))
+                    if [ "$running" -ge "$DELAY_MAX_PARALLEL" ]; then
+                        wait
+                        running=0
+                    fi
+                done < "${tmpd}/waves"
                 wait
-                # Build JSON result from temp files using jq for safe encoding
+
+                # Build JSON result from temp files using jq for safe encoding.
+                # "-" becomes null: a tag that was probed and did not answer is
+                # reported as unmeasured, not as 0 ms.
                 delays_json=$(
-                    for f in "${tmpd}"/*; do
+                    for f in "${tmpd}"/r.*; do
                         [ -f "$f" ] || continue
-                        tag=$(cut -f1 < "$f")
-                        delay=$(cut -f2 < "$f")
-                        printf '%s\t%s\n' "$tag" "${delay:-0}"
-                    done | jq -Rn '[inputs | split("\t")] | map({(.[0]): (.[1] | tonumber)}) | add // {}'
+                        cat "$f"
+                    done | jq -Rn '[inputs | split("\t")] |
+                        map({(.[0]): (if .[1] == "-" then null else (.[1] | tonumber) end)}) |
+                        add // {}'
                 )
                 rm -rf "$tmpd"
+                [ -n "$delays_json" ] || delays_json='{}'
                 printf '{"delays":%s}' "$delays_json"
                 ;;
 

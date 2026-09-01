@@ -521,13 +521,16 @@ rm -rf "$conf"
 echo "── a failed run keeps the unsync flag ──"
 
 # wait_for_run <conf dir>: run_script writes the child pid to /tmp/...; poll it.
+# Whole seconds only: busybox sleep rejects "0.1", and this suite is also run on
+# the router. The stub core exits immediately, so the first poll almost always
+# returns and the sleep is never reached.
 wait_for_run() {
     i=0
-    while [ "$i" -lt 100 ]; do
+    while [ "$i" -lt 10 ]; do
         pid=$(cat /tmp/horn-vpn-manager.pid 2>/dev/null)
         [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 0
         i=$((i + 1))
-        sleep 0.1
+        sleep 1
     done
     return 1
 }
@@ -568,6 +571,191 @@ for outcome in fail ok; do
     rm -rf "$conf"
 done
 
+# ── delay probes are bounded per node address ─────────────────────────────────
+#
+# test_delays used to fork one curl per tag and wait for all of them. A provider
+# does not give each node its own address — 50 nodes behind 6 addresses is a real
+# subscription — so that fired up to 17 concurrent handshakes at one IP, the DPI
+# on the path froze it, and every node came back 0 ms while the tunnel was moving
+# traffic at line rate (GitHub issue #5).
+#
+# The stub curl below records how many probes to the same address are in flight
+# when each one starts, which is the property that broke. It derives the address
+# from the tag prefix, matching the fixture config the scheduler reads.
+echo "── test_delays bounds probes per address ──"
+
+DELAY_BIN=$(mktemp -d)
+cat > "${DELAY_BIN}/curl" <<'CURLEOF'
+#!/bin/sh
+url=
+for a in "$@"; do
+    case "$a" in http://*) url=$a ;; esac
+done
+tag=${url#*/proxies/}
+tag=${tag%%/delay*}
+srv=${tag%%-node-*}
+
+mkdir -p "${HORN_TEST_DIR}/live"
+: > "${HORN_TEST_DIR}/live/${tag}"
+printf '%s\n' "$tag" >> "${HORN_TEST_DIR}/probed"
+n=0
+for f in "${HORN_TEST_DIR}/live/${srv}-node-"*; do
+    [ -e "$f" ] && n=$((n + 1))
+done
+printf '%s %s\n' "$srv" "$n" >> "${HORN_TEST_DIR}/peaks"
+# Holds the probe open so probes started together are still in flight together.
+# One whole second because busybox sleep takes no fractions, and this suite has
+# to run on the router as well as on the dev host.
+sleep 1
+rm -f "${HORN_TEST_DIR}/live/${tag}"
+
+case "$tag" in
+    *-fail) printf '{"message":"connection failed"}' ;;
+    *) printf '{"delay":123}' ;;
+esac
+CURLEOF
+chmod +x "${DELAY_BIN}/curl"
+
+# probed_count: how many probes the stub recorded for the current run. Counted
+# with awk, not `wc -l < file`: when a broken scheduler probes nothing the file
+# is never created, and the redirect would fail into an empty string that turns
+# the comparison into a shell error instead of a failed check.
+probed_count() {
+    awk 'END { print NR }' "${DELAY_RUN}/probed" 2>/dev/null || echo 0
+}
+
+# run_delays <sing-box config path> <tags json array>: drives the real handler
+# and prints its reply. The caller sets DELAY_RUN, where the stub records what it
+# probed — this runs in a command substitution, so anything assigned here would
+# be lost with the subshell.
+run_delays() {
+    printf '{"tags":%s,"url":"https://example.invalid/generate_204"}\n' "$2" | \
+        HORN_SINGBOX_CONFIG="$1" HORN_TEST_DIR="$DELAY_RUN" \
+        PATH="${DELAY_BIN}:${PATH}" \
+        "$DISPATCH_SH" "$RPCD" call test_delays 2>/dev/null
+}
+
+SB_FIXTURE=$(mktemp)
+cat > "$SB_FIXTURE" <<'SBEOF'
+{
+  "outbounds": [
+    {"type": "vless", "tag": "a-node-1", "server": "a.example"},
+    {"type": "vless", "tag": "a-node-2", "server": "a.example"},
+    {"type": "vless", "tag": "a-node-3", "server": "a.example"},
+    {"type": "vless", "tag": "a-node-4", "server": "a.example"},
+    {"type": "vless", "tag": "a-node-fail", "server": "a.example"},
+    {"type": "hysteria2", "tag": "b-node-1", "server": "b.example"},
+    {"type": "hysteria2", "tag": "b-node-2", "server": "b.example"},
+    {"type": "urltest", "tag": "x-auto", "outbounds": ["a-node-1"]}
+  ]
+}
+SBEOF
+
+# Five tags on one address, two on a second, three the config does not name, plus
+# two the charset check must drop.
+ALL_TAGS='["a-node-1","a-node-2","a-node-3","a-node-4","a-node-fail","b-node-1","b-node-2","unk-node-1","unk-node-2","unk-node-3","bad tag!",".."]'
+DELAY_RUN=$(mktemp -d)
+reply=$(run_delays "$SB_FIXTURE" "$ALL_TAGS")
+
+checks=$((checks + 1))
+if ! printf '%s' "$reply" | jq -e '.delays' >/dev/null 2>&1; then
+    echo "FAIL: test_delays did not reply with a delays object: [$reply]"
+    fails=$((fails + 1))
+fi
+
+# The bound itself: no address ever had more than DELAY_PER_SERVER probes in
+# flight. Tags with no address in the config share one bucket, so "unk" counts too.
+checks=$((checks + 1))
+over=$(awk '$2 > 2 { print $1 " " $2 }' "${DELAY_RUN}/peaks" | sort -u)
+if [ -n "$over" ]; then
+    echo "FAIL: test_delays exceeded 2 concurrent probes per address: $over"
+    fails=$((fails + 1))
+fi
+
+# And the other direction: probes to different addresses, and the two allowed
+# probes to the same one, must still overlap. Without this a fully serialised
+# implementation would satisfy the bound above vacuously.
+checks=$((checks + 1))
+peak_a=$(awk '$1 == "a" && $2 > m { m = $2 } END { print m + 0 }' "${DELAY_RUN}/peaks")
+if [ "$peak_a" != 2 ]; then
+    echo "FAIL: test_delays never ran 2 probes to one address at once (peak $peak_a)"
+    fails=$((fails + 1))
+fi
+
+# Every valid tag is probed exactly once, including the ones the sing-box config
+# does not name — an unknown address is a reason to be careful, not to skip.
+for tag in a-node-1 a-node-2 a-node-3 a-node-4 a-node-fail b-node-1 b-node-2 \
+    unk-node-1 unk-node-2 unk-node-3
+do
+    checks=$((checks + 1))
+    n=$(awk -v t="$tag" '$0 == t { c++ } END { print c + 0 }' "${DELAY_RUN}/probed")
+    if [ "$n" != 1 ]; then
+        echo "FAIL: test_delays probed $tag $n times, want 1"
+        fails=$((fails + 1))
+    fi
+    checks=$((checks + 1))
+    if ! printf '%s' "$reply" | jq -e --arg t "$tag" '.delays | has($t)' >/dev/null 2>&1; then
+        echo "FAIL: test_delays dropped $tag from its reply"
+        fails=$((fails + 1))
+    fi
+done
+
+checks=$((checks + 1))
+if [ "$(probed_count)" -ne 10 ]; then
+    echo "FAIL: test_delays probed a tag the charset check must have dropped:"
+    cat "${DELAY_RUN}/probed"
+    fails=$((fails + 1))
+fi
+
+checks=$((checks + 1))
+got=$(printf '%s' "$reply" | jq -r '.delays["a-node-1"]')
+if [ "$got" != 123 ]; then
+    echo "FAIL: test_delays lost a measured delay: want 123, got [$got]"
+    fails=$((fails + 1))
+fi
+
+# A probe that did not come back with a number is unmeasured, not 0 ms: sing-box
+# answers the same way for a dead node and for a path that was busy, and a 0
+# buries the last real measurement in the view.
+checks=$((checks + 1))
+got=$(printf '%s' "$reply" | jq -r '.delays["a-node-fail"] | type')
+if [ "$got" != null ]; then
+    echo "FAIL: a failed probe must be reported as null, got type [$got]"
+    fails=$((fails + 1))
+fi
+rm -rf "$DELAY_RUN"
+
+# No sing-box config at all: the tag → address map is empty, which the usual
+# NR == FNR two-file awk idiom would misread as "the tags file is the map" and
+# probe nothing. Duplicate tags collapse to one probe.
+DELAY_RUN=$(mktemp -d)
+reply=$(run_delays "/nonexistent/sing-box.json" '["t-node-1","t-node-2","t-node-1"]')
+
+checks=$((checks + 1))
+if [ "$(probed_count)" -ne 2 ]; then
+    echo "FAIL: with no sing-box config, want 2 probes, got:"
+    cat "${DELAY_RUN}/probed" 2>/dev/null
+    fails=$((fails + 1))
+fi
+
+checks=$((checks + 1))
+if ! printf '%s' "$reply" | jq -e '.delays | has("t-node-1") and has("t-node-2")' >/dev/null 2>&1; then
+    echo "FAIL: with no sing-box config, tags went missing from the reply: [$reply]"
+    fails=$((fails + 1))
+fi
+rm -rf "$DELAY_RUN"
+
+# An empty tag list must not hang or produce invalid JSON.
+DELAY_RUN=$(mktemp -d)
+reply=$(run_delays "$SB_FIXTURE" '[]')
+checks=$((checks + 1))
+if [ "$(printf '%s' "$reply" | jq -c '.delays')" != '{}' ]; then
+    echo "FAIL: test_delays with no tags: want {}, got [$reply]"
+    fails=$((fails + 1))
+fi
+rm -rf "$DELAY_RUN"
+
+rm -rf "$DELAY_BIN" "$SB_FIXTURE"
 rm -rf "$DISPATCH_BIN"
 
 echo

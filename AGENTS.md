@@ -73,6 +73,7 @@ Hard rules — see [`docs/reference/luci-invariants.md`](docs/reference/luci-inv
 - **A handler that writes both the template and `config.json` must leave neither half applied on failure, and no `.bak.*` may survive either exit.**
 - sh-level checks stay structural (types, presence, XOR); schema validation is delegated to `vpn-manager check` on the merged candidate. `jq` comparisons fail closed (`"${bad:-1}"`), temp paths come from `mktemp`, errors go through `fail_json`.
 - **`run_script` / `run_routing` clear `.needs-update-*` only on exit code 0, and append the core's stderr to the log.**
+- **`test_delays` probes at most `DELAY_PER_SERVER` nodes of the same address at a time, and a probe that did not answer is `null`, not `0`.** Nodes are not one per address; a flat fan-out froze the address it was measuring and reported the whole subscription dead (GitHub issue #5). Probing nodes on *different* addresses in parallel is fine.
 
 ## Config Model
 
