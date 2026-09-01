@@ -129,6 +129,12 @@ msgstr "Current"
 msgid "Test latencies"
 msgstr "Test latencies"
 
+msgid "Testing…"
+msgstr "Testing…"
+
+msgid "Not measured"
+msgstr "Not measured"
+
 msgid "ID is required"
 msgstr "ID is required"
 

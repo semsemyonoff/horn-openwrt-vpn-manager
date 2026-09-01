@@ -129,6 +129,12 @@ msgstr "Текущий"
 msgid "Test latencies"
 msgstr "Проверить задержки"
 
+msgid "Testing…"
+msgstr "Проверяем…"
+
+msgid "Not measured"
+msgstr "Не измерено"
+
 msgid "ID is required"
 msgstr "Обязательное поле"
 
