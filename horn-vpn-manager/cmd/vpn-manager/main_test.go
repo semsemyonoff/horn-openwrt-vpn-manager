@@ -68,8 +68,7 @@ func TestCheck_RejectionIsRelayableToLuCI(t *testing.T) {
 	if err == nil {
 		t.Fatalf("check exited 0 on an invalid config, stderr:\n%s", stderr.String())
 	}
-	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) {
+	if _, ok := errors.AsType[*exec.ExitError](err); !ok {
 		t.Fatalf("running the binary failed: %v", err)
 	}
 

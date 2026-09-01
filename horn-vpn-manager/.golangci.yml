@@ -6,6 +6,7 @@ linters:
     # Too noisy / not useful for this project
     - depguard        # no dependency policy needed
     - exhaustruct     # not all struct fields need explicit init
+    - exhaustruct_v5  # same linter, renamed in golangci-lint v2.13 (v2 of the plugin)
     - ireturn         # returning interfaces is fine
     - nlreturn        # blank line style is subjective
     - varnamelen      # short names are idiomatic Go
