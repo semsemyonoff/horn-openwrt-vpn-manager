@@ -628,9 +628,14 @@ probed_count() {
 # and prints its reply. The caller sets DELAY_RUN, where the stub records what it
 # probed — this runs in a command substitution, so anything assigned here would
 # be lost with the subshell.
+# An optional third argument overrides the handler's wall-clock budget. It goes
+# through `env`, not a variable assignment prefix: the shell decides what is an
+# assignment before expanding, so a ${3:+...} prefix would be passed as an
+# argument instead of being set in the environment.
 run_delays() {
     printf '{"tags":%s,"url":"https://example.invalid/generate_204"}\n' "$2" | \
-        HORN_SINGBOX_CONFIG="$1" HORN_TEST_DIR="$DELAY_RUN" \
+        env HORN_SINGBOX_CONFIG="$1" HORN_TEST_DIR="$DELAY_RUN" \
+        ${3:+HORN_DELAY_BUDGET=$3} \
         PATH="${DELAY_BIN}:${PATH}" \
         "$DISPATCH_SH" "$RPCD" call test_delays 2>/dev/null
 }
@@ -741,6 +746,36 @@ fi
 checks=$((checks + 1))
 if ! printf '%s' "$reply" | jq -e '.delays | has("t-node-1") and has("t-node-2")' >/dev/null 2>&1; then
     echo "FAIL: with no sing-box config, tags went missing from the reply: [$reply]"
+    fails=$((fails + 1))
+fi
+rm -rf "$DELAY_RUN"
+
+# Past the wall-clock budget the run stops scheduling waves and reports what it
+# did not get to as unmeasured. rpcd kills a call at 30 seconds, and a pool whose
+# addresses are unknown — a missing or unreadable sing-box config puts every tag
+# in one bucket — needs more waves than that; returning a partial answer beats
+# losing the whole call. The stub holds each probe for a second and the budget is
+# one, so only the first wave can complete.
+DELAY_RUN=$(mktemp -d)
+reply=$(run_delays "/nonexistent/sing-box.json" \
+    '["z-node-1","z-node-2","z-node-3","z-node-4","z-node-5","z-node-6"]' 1)
+
+checks=$((checks + 1))
+probed=$(probed_count)
+if [ "$probed" -ge 6 ]; then
+    echo "FAIL: the budget did not stop the run: probed $probed of 6"
+    fails=$((fails + 1))
+fi
+
+checks=$((checks + 1))
+if [ "$(printf '%s' "$reply" | jq '.delays | length')" != 6 ]; then
+    echo "FAIL: a budget-cut run must still answer for every tag: [$reply]"
+    fails=$((fails + 1))
+fi
+
+checks=$((checks + 1))
+if [ "$(printf '%s' "$reply" | jq '[.delays[] | select(. == null)] | length')" -lt 1 ]; then
+    echo "FAIL: tags the budget cut off must be reported unmeasured: [$reply]"
     fails=$((fails + 1))
 fi
 rm -rf "$DELAY_RUN"
